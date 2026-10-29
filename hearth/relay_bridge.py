@@ -159,7 +159,6 @@ LIVE_EVERY = 0.1
 THINK_EVERY = 0.25
 CALL_AWAY_S = 20                    # how long a call waits for a phone that dropped off
 DONE_SETTLE_S = 1.5                 # a reply's notification waits this long for a newer send in its turn
-PUSH_TEST_S = 5                     # a test notification waits this long, so the phone can be locked
 PART = 150_000
 ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
 
@@ -226,6 +225,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                            "count": r["count"], "pinned": bool(r.get("pinned"))} for r in rows], "own": own_chat}
     if what == "chat":
         return chat_action(m)
+    if what == "memory":
+        return memory_view(m)
+    if what == "voice":
+        return voice_view(m)
     if what == "media":
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
@@ -628,6 +631,75 @@ def ideas() -> Dict[str, Any]:
 WINDOW_URL = os.environ.get("HEARTH_WINDOW_URL", "").rstrip("/")
 _SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None,
              "gen_stats": (True, False)}
+
+
+def _front(raw: str) -> tuple:
+    """A memory file's front matter and body."""
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n?", raw or "", re.S)
+    fm: Dict[str, str] = {}
+    if m:
+        for line in m.group(1).splitlines():
+            k, _, v = line.partition(":")
+            if _ and k.strip():
+                fm[k.strip()] = v.strip()
+    return fm, (raw[m.end():] if m else raw or "").strip()
+
+
+def voice_view(m: Dict[str, Any]) -> Dict[str, Any]:
+    """The PC's voice (Settings, Voice, the one calls and Read aloud use), and the ones it has.
+    Picked from the phone, it is saved through the window, which applies it and tells the window."""
+    from . import voice as _voice
+    from .call import voices
+    pick = str(m.get("voice") or "")
+    if pick:
+        if pick not in _voice.list_voices():
+            return {"ok": False, "error": "That voice isn't on the PC"}
+        r = _window("POST", "/api/settings", {"voice_name": pick})
+        if r.get("ok") is False:
+            return r
+    settings = _window("GET", "/api/settings")
+    return {"voice": str(settings.get("voice_name") or _voice.current_voice()), "voices": voices()}
+
+
+def memory_view(m: Dict[str, Any]) -> Dict[str, Any]:
+    """The Memory tab, for the phone: what is saved (who saved it, from which chat) and
+    where chats stand ("Going on"), with forget and done, as the window has them."""
+    from . import chat_sync, memory, memory_cards
+    action = str(m.get("action") or "")
+    if action == "forget":                     # a saved fact
+        from .tools import execute_tool
+        out = str(execute_tool("memory_forget", {"title": str(m.get("name") or "")[:200]}) or "")
+        if out.lstrip().lower().startswith(("error", "no memory found")):
+            return {"ok": False, "error": out.split(":", 1)[-1].strip() if ":" in out else out}
+        return {"ok": True}
+    if action in ("done", "drop"):             # a "Going on" card
+        r = memory_cards.act("card", str(m.get("chat") or ""), "done" if action == "done" else "forget")
+        return {"ok": bool(r.get("ok")), **({"error": r.get("error")} if r.get("error") else {})}
+    facts = []
+    titles: Dict[str, str] = {}
+    mem_dir = memory.MEM_DIR
+    for fn in sorted(os.listdir(mem_dir)) if os.path.isdir(mem_dir) else []:
+        if not fn.endswith(".md") or fn == "MEMORY.md":
+            continue
+        try:
+            with open(os.path.join(mem_dir, fn), encoding="utf-8") as f:
+                fm, body = _front(f.read(20000))
+        except OSError:
+            continue
+        desc = fm.get("description", "")
+        text = body if body and body.rstrip(".") != desc.rstrip(".") else ""
+        src = fm.get("source_chat", "")
+        if src and src not in titles:
+            titles[src] = ((chat_sync.load(src) or {}).get("title") or "") if re.fullmatch(r"[\w-]{1,80}", src) else ""
+        facts.append({"name": fm.get("name") or fn[:-3], "text": desc or text[:300], "more": text[:1500] if desc else "",
+                      "type": fm.get("type", ""), "noticed": "auto-extracted" in fm.get("tags", ""),
+                      "updated": fm.get("updated", ""), "chat": src if titles.get(src) else "",
+                      "chat_title": titles.get(src, "")})
+    facts.sort(key=lambda x: x["updated"], reverse=True)
+    cards = [{"chat": c.get("chat") or "", "goal": c.get("goal") or "", "ago": c.get("ago") or "",
+              "title": c.get("title") or "", "left": (c.get("left") or [])[:3]}
+             for c in memory_cards.everything() if c.get("status") == "open"]
+    return {"facts": facts, "cards": cards}
 
 
 def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeout: float = 30) -> Dict[str, Any]:
@@ -1182,9 +1254,6 @@ class Room:
             if m and str(m.get("type") or "").startswith("say."):
                 self.on_say(m)
                 return
-            if m and m.get("type") == "push.test":
-                asyncio.get_running_loop().call_later(PUSH_TEST_S, self._push_test)
-                return
             if m and m.get("type") == "req":
                 # Lookups run side by side, so a slow one (icons from the web)
                 # never holds up a switch the person is waiting on.
@@ -1193,17 +1262,6 @@ class Room:
                 task.add_done_callback(self.lookups.discard)
             elif m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
-
-    def _push_test(self) -> None:
-        """A sample notification, a few seconds after it was asked for so the phone can be
-        locked first. Sent even while the app is on screen (the relay skips that check)."""
-        from . import persona
-        if self.ws is None or not self.phone:
-            return
-        box = R.seal_box(self.box_key(), {"kind": "done", "title": persona.NAME,
-                                          "body": "This is how a finished reply shows here.", "c": ""})
-        asyncio.ensure_future(self.ws.send(json.dumps({"t": "push", "iv": box["iv"], "c": box["c"],
-                                                       "urgent": True, "test": True})))
 
     def on_say(self, m: Dict[str, Any]) -> None:
         """Read aloud on the phone, in the PC's own voice (Settings > Voice, as the call):
@@ -1238,7 +1296,7 @@ class Room:
         def run():
             said = speaker.speak(str(m["text"]), blocking=True)
             if said == "no_voice":
-                send({"type": "say.error", "detail": "The PC's voice isn't set up yet. Turn it on in Settings, Voice."})
+                send({"type": "say.error", "detail": "Voice isn't set up on your PC"})
             send({"type": "say.end"})
             if self.saying is speaker:
                 self.saying = None
