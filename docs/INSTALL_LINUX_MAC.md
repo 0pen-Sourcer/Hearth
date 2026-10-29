@@ -66,8 +66,8 @@ Ollama in **Settings, Chat brain**. That path is identical on every OS.
 
 ## Images and video
 
-**Models, Images & video** installs stable-diffusion.cpp the same way and lists
-the image models it finds, in `~/.hearth/image-models` or in a ComfyUI or WebUI
+**Models, My Models** installs stable-diffusion.cpp the same way and lists
+the image models it finds beside the chat ones, in `~/.hearth/image-models` or in a ComfyUI or WebUI
 models folder you add. Without a local model, images come from a cloud provider
 when you have a key for one.
 

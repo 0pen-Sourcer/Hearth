@@ -198,7 +198,7 @@ Helpers that ask for the model already loaded share it, each with a slot of its 
 
 ## Images and video on your PC
 
-Inglen can make pictures and short videos on your own graphics card. Models, Images & video installs the engine, stable-diffusion.cpp in the build for your card, and lists the image models it finds, in Inglen's own folder or read in place from a ComfyUI or WebUI models folder you add. It shows which are ready, loads one with a click, and says what a family still needs when a part is missing. Asking for an image uses a ready model on your PC first, and a video made there runs in the background and tells you when it is done. Models are recognised by their file names for now, so a checkpoint with a name all its own isn't picked up yet.
+Inglen can make pictures and short videos on your own graphics card. My Models lists image and video models beside your chat models. It installs the engine, stable-diffusion.cpp in the build for your card, and lists the image models it finds, in Inglen's own folder or read in place from a ComfyUI or WebUI models folder you add. It shows which are ready, loads one with a click, and says what a family still needs when a part is missing. Asking for an image uses a ready model on your PC first, and a video made there runs in the background and tells you when it is done. Models are recognised by their file names for now, so a checkpoint with a name all its own isn't picked up yet.
 
 With a key saved for xAI Grok, OpenAI or Google Gemini, images and videos come from the cloud too, from any brain, a local model or a coding agent included, and a video tells you when it is ready instead of waiting to be asked. Only what a tool made shows in the chat, not a picture the model was looking at.
 

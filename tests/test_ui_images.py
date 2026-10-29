@@ -1,8 +1,11 @@
-"""The Models tab's Images & video pane, in the real page.
+"""Image and video models in My Models, in the real page.
 
-Not installed: it offers the engine. Installed: the models the files on disk
-make ready, each with a Load button, the loaded one marked, the model folders,
-and every other family the engine can run with what it still needs.
+One list for every model on the PC: chat models and image or video models
+side by side, filtered by kind. Not installed: the image part offers the
+engine. Installed: the models the files on disk make ready, each with its
+kind, size and Load, Unload or Delete; the loaded one marked; what's almost
+ready and what isn't placed; the model folders and what each family needs.
+There is no separate Images tab.
 
     .\\.venv\\Scripts\\python.exe tests\\test_ui_images.py
 """
@@ -45,33 +48,40 @@ s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.clos
 srv = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 
+own = os.path.join(work, "image-models")
+STATUS = {"builtin_running": False, "external_running": False, "disk_models": [
+    {"filename": "Qwen3.5-9B-Q4_K_M.gguf", "path": os.path.join(work, "models", "Qwen3.5-9B-Q4_K_M.gguf"),
+     "source": "hearth", "size_gb": 5.6, "layers": 36},
+    # The chat scan sees an image model's .gguf too; the image list shows it instead.
+    {"filename": "z_image_turbo-Q4_K.gguf", "path": os.path.join(own, "diffusion_models", "z_image_turbo-Q4_K.gguf"),
+     "source": "hearth", "size_gb": 3.4, "not_chat": True}]}
 state = {"installed": False}
 loads: list = []
+deletes: list = []
+identifies: list = []
 OVERVIEW = {
     "installed": True, "build": "master-987-a77d362", "backend": "cuda",
-    "roots": [os.path.join(work, "image-models"), os.path.join(work, "ComfyUI", "models")],
+    "roots": [own, os.path.join(work, "ComfyUI", "models")],
     "status": {"state": "ready", "recipe": "z-image-turbo", "error": None},
     "recipes": [
         {"id": "z-image-turbo", "name": "Z-Image Turbo", "video": False, "ready": True, "missing": [], "url": "",
+         "size_gb": 6.9, "own": True, "has_model": True,
          "picks": {"diffusion_model": "diffusion_models/z_image_turbo-Q4_K.gguf", "vae": "vae/ae.safetensors"}},
         {"id": "sd-turbo", "name": "SD-Turbo", "video": False, "ready": True, "missing": [], "url": "",
-         "picks": {"model": "checkpoints/sd_turbo-f16-q8_0.gguf"}},
+         "size_gb": 2.1, "own": False, "has_model": True, "picks": {"model": "checkpoints/sd_turbo-f16-q8_0.gguf"}},
+        {"id": "wan22-ti2v", "name": "Wan 2.2 TI2V 5B", "video": True, "ready": True, "missing": [], "url": "",
+         "size_gb": 8.2, "own": True, "has_model": True,
+         "picks": {"diffusion_model": "diffusion_models/wan2.2_ti2v_5B-Q4_K.gguf"}},
         {"id": "wan21-t2v", "name": "Wan 2.1 T2V", "video": True, "ready": False, "missing": ["T5-XXL"],
-         "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B", "picks": {}},
+         "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B", "picks": {}, "has_model": False},
     ],
     "unnamed": [{"id": "checkpoints/ponyDiffusionV6XL.safetensors", "name": "ponyDiffusionV6XL.safetensors",
                  "category": "checkpoints"}],
     "unsure": [{"id": "checkpoints/odd.safetensors", "name": "odd.safetensors", "family": "Hunyuan Video", "note": ""}]}
-identifies: list = []
-
-
-def identify(route):
-    identifies.append(json.loads(route.request.post_data or "{}"))
-    route.fulfill(json={"ok": True, "recipe": "sdxl-checkpoint", "name": "SDXL", "family": "SDXL"})
 
 
 def images(route):
-    route.fulfill(json=OVERVIEW if state["installed"] else {"installed": False, "recipes": [], "roots": []})
+    route.fulfill(json=OVERVIEW if state["installed"] else {"installed": False, "recipes": [], "roots": [own]})
 
 
 def load(route):
@@ -79,13 +89,26 @@ def load(route):
     route.fulfill(json={"ok": True, "recipe": "sd-turbo"})
 
 
+def delete(route):
+    deletes.append(json.loads(route.request.post_data or "{}"))
+    route.fulfill(json={"ok": True, "freed_gb": 3.4})
+
+
+def identify(route):
+    identifies.append(json.loads(route.request.post_data or "{}"))
+    route.fulfill(json={"ok": True, "recipe": "sdxl-checkpoint", "name": "SDXL", "family": "SDXL"})
+
+
 PANE = """() => {
-  const p = document.getElementById('models-pane-images');
-  return { shown: !p.hidden, text: p.innerText,
-           ready: [...p.querySelectorAll('.model-row')].map(r => r.querySelector('.model-name')?.innerText || ''),
-           load: [...p.querySelectorAll('[data-img-load]')].map(b => b.dataset.imgLoad),
-           unload: p.querySelectorAll('[data-img-unload]').length,
-           install: !!p.querySelector('#img-install') };
+  const p = document.getElementById('models-pane-mine');
+  const vis = (el) => !!el && el.offsetParent !== null;
+  const rows = [...p.querySelectorAll('.model-row')].filter(vis);
+  return { shown: vis(p), text: p.innerText, html: p.innerHTML,
+           rows: rows.map(r => r.querySelector('.model-name')?.innerText || ''),
+           load: [...p.querySelectorAll('[data-img-load]')].filter(vis).map(b => b.dataset.imgLoad),
+           unload: [...p.querySelectorAll('[data-img-unload]')].filter(vis).length,
+           install: vis(p.querySelector('#img-install')),
+           count: document.getElementById('tab-mine-n').textContent };
 }"""
 
 with sync_playwright() as pw:
@@ -95,11 +118,13 @@ with sync_playwright() as pw:
         print(f"skipped: no browser to run the page in ({type(e).__name__})")
         srv.shutdown()
         sys.exit(0)
-    pg = browser.new_page(viewport={"width": 1280, "height": 800})
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
     pg.route("**/api/llmserver/download*", lambda r: r.abort())
+    pg.route("**/api/llmserver/status*", lambda r: r.fulfill(json=STATUS))
     pg.route("**/api/images", images)
     pg.route("**/api/images?*", images)
     pg.route("**/api/images/load", load)
+    pg.route("**/api/images/delete", delete)
     pg.route("**/api/images/identify", identify)
     errors: list = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -111,27 +136,47 @@ with sync_playwright() as pw:
             pass
     time.sleep(3)
     pg.evaluate("showView('models')")
-    pg.click(".models-tab[data-tab=images]")
-    pg.wait_for_timeout(600)
+    pg.wait_for_timeout(1200)
+    check("there is no separate Images tab or pane",
+          pg.locator(".models-tab[data-tab=images]").count() == 0 and pg.locator("#models-pane-images").count() == 0)
     a = pg.evaluate(PANE)
-    check("the pane opens from its tab", a["shown"])
-    check("without the engine it offers to install it", a["install"] and "not installed" in a["text"])
+    check("My Models opens with the chat model listed", a["shown"] and any("Qwen3.5-9B" in r for r in a["rows"]))
+    check("without the engine My Models offers to install it", a["install"] and "isn't installed" in a["text"])
 
     state["installed"] = True
-    pg.evaluate("modelsRenderImages()")
-    pg.wait_for_timeout(600)
+    pg.evaluate("modelsRenderImages(true)")
+    pg.wait_for_timeout(800)
     b = pg.evaluate(PANE)
-    check(f"ready models are listed, the loaded one marked {b['ready'][:3]}",
-          any("Z-Image Turbo" in r and "loaded" in r for r in b["ready"]) and any("SD-Turbo" in r for r in b["ready"]))
-    check("the loaded one can be unloaded, the other loaded", b["unload"] == 1 and b["load"] == ["sd-turbo"])
-    check("the folders are shown, the person's own one too", "ComfyUI" in b["text"] and "Inglen's own" in b["text"])
-    check("a family still missing a file says which", "needs T5-XXL" in b["text"].replace("\n", " ") or
-          "needs T5-XXL" in pg.evaluate("document.getElementById('models-pane-images').innerHTML"))
-    pg.screenshot(path=os.path.join(work, "images_pane.png"))
+    check(f"image and video models are in My Models with their kind {b['rows']}",
+          any("Z-Image Turbo" in r and "image" in r and "loaded" in r for r in b["rows"])
+          and any("Wan 2.2 TI2V 5B" in r and "video" in r for r in b["rows"])
+          and any("Qwen3.5-9B" in r for r in b["rows"]))
+    check("an image model's .gguf isn't listed again as a chat model",
+          not any(r.startswith("z_image_turbo-Q4_K.gguf") for r in b["rows"]))
+    check("each image model shows its size", "6.9 GB" in b["text"] and "8.2 GB" in b["text"])
+    check(f"the loaded one can be unloaded, the others loaded {b['load']}",
+          b["unload"] == 1 and b["load"] == ["sd-turbo", "wan22-ti2v"])
+    check(f"the My Models count has chat and image models ({b['count']})", b["count"] == "4")
+    flat = b["text"].replace("\n", " ")
+    check("the folders are shown, the person's own one too", "ComfyUI" in flat and "Inglen's own" in flat)
+    check("a family still missing a file says which", "needs T5-XXL" in b["html"])
+
+    pg.click("[data-mine-kind=video]")
+    pg.wait_for_timeout(300)
+    v = pg.evaluate(PANE)
+    check(f"Video shows the video models and no chat ones {v['rows']}",
+          any("Wan 2.2" in r for r in v["rows"]) and not any("Z-Image" in r or "Qwen" in r for r in v["rows"]))
+    pg.click("[data-mine-kind=chat]")
+    pg.wait_for_timeout(300)
+    c = pg.evaluate(PANE)
+    check(f"Chat shows only chat models {c['rows']}", c["rows"] == [r for r in c["rows"] if "Qwen" in r] and c["rows"])
+    pg.click("[data-mine-kind=all]")
+    pg.wait_for_timeout(300)
+    pg.screenshot(path=os.path.join(work, "my_models.png"), full_page=True)
+
     pg.click("[data-img-load=sd-turbo]")
     pg.wait_for_timeout(800)
-    check(f"Load asks for that model {loads}", loads and loads[0].get("recipe") == "sd-turbo")
-    flat = b["text"].replace("\n", " ")
+    check(f"Load asks the image engine for that model {loads}", loads and loads[0].get("recipe") == "sd-turbo")
     check("a file named for no family is listed with a way to find out what it is",
           "ponyDiffusionV6XL.safetensors" in flat and "Not placed yet" in b["text"]
           and pg.locator("[data-img-identify]").count() == 1)
@@ -140,8 +185,20 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(800)
     check(f"Find out asks the engine about that file {identifies}",
           identifies and identifies[0].get("file") == "checkpoints/ponyDiffusionV6XL.safetensors")
+
+    pg.wait_for_timeout(500)
+    pg.click(".model-row[data-row^=img-z-image] .model-name")
+    pg.wait_for_timeout(300)
+    check("only a model in Inglen's own folder can be deleted",
+          pg.locator("[data-img-del]").count() == 2 and pg.locator("[data-img-del=sd-turbo]").count() == 0)
+    pg.click("[data-img-del=z-image-turbo]")
+    pg.wait_for_timeout(300)
+    pg.get_by_role("button", name="Delete", exact=True).last.click()
+    pg.wait_for_timeout(800)
+    check(f"Delete asks the image engine to delete that model {deletes}",
+          deletes and deletes[0].get("recipe") == "z-image-turbo")
     check(f"no script errors {errors[:2]}", not errors)
-    print("screenshot:", os.path.join(work, "images_pane.png"))
+    print("screenshot:", os.path.join(work, "my_models.png"))
     browser.close()
 srv.shutdown()
 
@@ -149,4 +206,4 @@ print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
     sys.exit(1)
-print("all images pane checks passed")
+print("all My Models image checks passed")
