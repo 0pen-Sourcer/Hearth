@@ -9,7 +9,7 @@
   // The look is applied before the first paint so the window never flashes the
   // wrong colours. Settings are the record: the server writes the saved look in
   // below, since the window's own storage does not survive every restart (the
-  // port can change, and a private window forgets). Classic is the default.
+  // port can change, and a private window forgets). New installs open in Dark with Rose.
   (function () {
     var root = document.documentElement;
     var saved = /*__HEARTH_LOOK__*/{};
@@ -5692,7 +5692,7 @@
             <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Audio</label>
             <div class="ob-seg" id="ob-audio">
               <button type="button" data-audio="headphones">Headphones<small>Talk over me to cut in</small></button>
-              <button type="button" data-audio="speakers">Speakers<small>I pause listening while I talk</small></button>
+              <button type="button" data-audio="speakers">Speakers<small>I won't hear myself</small></button>
             </div>
           </div>
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
