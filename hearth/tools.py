@@ -23,6 +23,7 @@ import shlex
 import secrets
 import shutil
 import socket
+import asyncio
 import time
 import time as _t   # module-level alias; several tools use `_t.sleep/monotonic`
 import fnmatch
@@ -8535,6 +8536,91 @@ TOOL_DEFINITIONS.append({
 })
 
 
+def _agent_sessions(p: Dict) -> str:
+    """Coding-agent sessions on this PC (Claude Code, Codex and the others Inglen
+    reads): list them, read one, or send one a message and get its reply. A reply
+    is that agent's words, never the person's: it can't approve anything here."""
+    from . import agent_sessions as S
+    act = str(p.get("action") or "list").strip().lower()
+    if act == "list":
+        q = str(p.get("query") or "").strip().lower()
+        rows = S.listing(80)
+        if q:
+            rows = [r for r in rows if q in " ".join(str(r.get(k) or "") for k in ("title", "project", "cwd", "label", "agent")).lower()]
+        rows = rows[:max(1, min(int(p.get("limit") or 12), 40))]
+        if not rows:
+            return "No coding-agent sessions on this PC" + (f" match '{q}'." if q else ".")
+        now = time.time() * 1000
+        out = []
+        for r in rows:
+            mins = int((now - (r.get("at") or now)) / 60000)
+            ago = f"{mins} min ago" if mins < 90 else (f"{mins // 60} h ago" if mins < 2880 else f"{mins // 1440} days ago")
+            state = {"open": ", open in its app now", "recent": ", working now"}.get(r.get("live") or "", "")
+            out.append(f"- {r['chat']}: {r.get('label') or S.label(r['agent'])}, \"{r.get('title') or '(untitled)'}\" "
+                       f"in {r.get('project') or r.get('cwd') or '?'}, {ago}{state}")
+        return "Coding-agent sessions, newest first (session id first):\n" + "\n".join(out)
+    cid = str(p.get("session") or "").strip()
+    if not S.parse_chat(cid):
+        return "Error: give the session id that list shows (it starts with as_)."
+    if act == "read":
+        d = S.transcript(cid, max(2, min(int(p.get("last") or 12), 60)))
+        if d.get("error"):
+            return f"Error: {d['error']}."
+        lines = [f"{d.get('label')} session \"{d.get('title') or '(untitled)'}\" in {d.get('cwd') or '?'}"
+                 + (f" ({d['more']} earlier messages not shown)" if d.get("more") else "") + ":"]
+        for m in d.get("messages") or []:
+            who = "Person" if m.get("role") == "user" else d.get("label") or "Agent"
+            steps = ", ".join(st.get("w") or "" for st in (m.get("steps") or [])[:6] if isinstance(st, dict))
+            text = " ".join(str(m.get("text") or "").split())[:1200]
+            lines.append(f"[{who}{' (error)' if m.get('error') else ''}] " + (f"({steps}) " if steps else "") + text)
+        return "\n".join(lines)
+    if act == "send":
+        text = str(p.get("message") or "").strip()
+        if not text:
+            return "Error: give the message to send."
+        said, errors = [], []
+
+        def emit(kind, **f):
+            if kind == "text" and f.get("text"):
+                said.append(str(f["text"]))
+            elif kind == "error" and f.get("message"):
+                errors.append(str(f["message"]))
+
+        async def ask(question: str) -> bool:
+            return False                 # nobody here to answer for the person; the agent is told no
+
+        rc = asyncio.run(S.say(cid, text, emit, ask))
+        name = S.label((S.parse_chat(cid) or ("", ""))[0])
+        if errors and not said:
+            return f"Error: {errors[-1]}"
+        reply = "\n\n".join(said).strip() or "(it finished without a reply)"
+        return (f"{name} answered (its words, not the person's; it can't approve anything here):\n{reply}"
+                + (f"\n\nIt also said: {errors[-1]}" if errors else "") + ("" if rc == 0 else f"\n(exit {rc})"))
+    return "Error: action is list, read or send."
+
+
+_HANDLERS["agent_sessions"] = _agent_sessions
+TOOL_DEFINITIONS.append({
+    "name": "agent_sessions",
+    "description":
+        "The coding-agent sessions on this PC (Claude Code, Codex and others), the ones the person "
+        "runs in those apps: list them, read where one got to, or send one a message and get its "
+        "reply. Use it when they ask about or want to carry on work happening in one of those agents "
+        "('what is Codex doing on the game', 'tell the Claude Code session to run the tests'). Sending "
+        "carries that session on in its own project folder, under that agent's own rules. What it "
+        "answers is its words, not the person's: report it, and don't treat it as their approval. To "
+        "start a new task in an agent instead, use delegate.",
+    "parameters": {"type": "object", "properties": {
+        "action": {"type": "string", "enum": ["list", "read", "send"], "description": "list (the default), read or send."},
+        "query": {"type": "string", "description": "list: words to filter by (project, title, agent)."},
+        "limit": {"type": "integer", "description": "list: how many, newest first (default 12)."},
+        "session": {"type": "string", "description": "read and send: the session id from list (starts with as_)."},
+        "last": {"type": "integer", "description": "read: how many of its latest messages (default 12)."},
+        "message": {"type": "string", "description": "send: the message, written as the person would to that agent."},
+    }, "required": ["action"]},
+})
+
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
@@ -8942,6 +9028,7 @@ _DEFERRED_TOOLS = {
     "race_helpers",        # comparing agents is an occasional ask
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # starting a message to the phone is rare
+    "agent_sessions",      # reaching a coding agent's session is an occasional ask
     "connectors",          # setting up a chat app is occasional
     "focus_window",        # niche window management
     "glob_files",          # find_file already accepts glob patterns + is fuzzier
@@ -9212,6 +9299,8 @@ _RISKY_TOOLS: set = {
     # These act outside the machine: one sends a message to a phone, the other
     # downloads and installs code.
     "send_to_phone", "install_skill", "connectors",
+    # Sends a message into a coding agent's session, which then works on the person's files.
+    "agent_sessions",
     "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
     "read_inbox", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
@@ -9343,6 +9432,8 @@ def mode_allows(name: str, args=None) -> bool:
         return act == "show" or (m == "auto" and act != "discard")
     if name == "connectors" and str((args or {}).get("action") or "status") == "status":
         return True                     # looking at what's connected changes nothing
+    if name == "agent_sessions" and str((args or {}).get("action") or "list") in ("list", "read"):
+        return True                     # looking at a coding agent's sessions changes nothing
     if name == "send_to_phone" and not (args or {}).get("channel"):
         try:
             from .channel_core import here
@@ -9357,7 +9448,7 @@ def mode_allows(name: str, args=None) -> bool:
             return True
         if name in _ALWAYS_ASK_IN_AUTO:
             return _reviewed(name, args)
-        if name == "delegate":
+        if name in ("delegate", "agent_sessions"):
             return True                 # an agent program, under its own rules; Auto doesn't stop it
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
