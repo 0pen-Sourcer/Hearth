@@ -229,6 +229,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         return memory_view(m)
     if what == "voice":
         return voice_view(m)
+    if what == "commands":
+        # The slash commands the phone offers when "/" is typed (remote_commands answers them).
+        from . import remote_commands
+        return {"commands": remote_commands.listing("relay")}
     if what == "media":
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
