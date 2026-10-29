@@ -160,7 +160,6 @@ THINK_EVERY = 0.25
 CALL_AWAY_S = 20                    # how long a call waits for a phone that dropped off
 DONE_SETTLE_S = 1.5                 # a reply's notification waits this long for a newer send in its turn
 PUSH_TEST_S = 5                     # a test notification waits this long, so the phone can be locked
-CALL_QUIET_S = 30                   # a phone that stopped saying it's there (closed, frozen): the call ends
 PART = 150_000
 ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
 
@@ -1081,7 +1080,6 @@ class Room:
         self.call = None                      # a voice call from the phone, while one is on
         self.saying = None                    # a reply read aloud to the phone in the PC's voice
         self.call_gone_told = False
-        self.call_seen = 0.0                  # when the phone last said the call is still open there
 
     @property
     def chat(self) -> str:
@@ -1247,18 +1245,6 @@ class Room:
         # Runs on the connection's loop: anything that sends (and so waits on this loop) goes to a thread.
         kind = m.get("type")
         call = self.call
-        if kind == "call.alive":
-            # The phone's page ticks while it's open. The first tick starts the watch, so a
-            # phone that never sends them (an older app) keeps its call as before.
-            if call is not None:
-                first = not self.call_seen
-                self.call_seen = time.time()
-                if first:
-                    asyncio.get_running_loop().call_later(CALL_QUIET_S, self._call_quiet, call)
-            elif not self.call_gone_told:
-                self.call_gone_told = True        # a phone back to a call that ended here: said once
-                asyncio.ensure_future(self.deliver({"type": "call.ended", "gone": True, "id": secrets.token_hex(6)}))
-            return
         if kind == "call.up":
             if call is not None:
                 call.up(str(m.get("data") or ""), int(m.get("rate") or 16000))
@@ -1287,7 +1273,6 @@ class Room:
 
             self.call = Call(send, say, cid=cid, save=save, ref=str(m.get("ref") or "")[:40])
             self.call_gone_told = False
-            self.call_seen = 0.0
             threading.Thread(target=self.call.start, daemon=True, name="relay-call").start()
             return
         if call is None:
@@ -1303,18 +1288,6 @@ class Room:
             threading.Thread(target=call.set, args=(str(voice) if voice else None,
                                                     str(lang) if lang is not None else None),
                              daemon=True).start()
-
-    def _call_quiet(self, call) -> None:
-        """No tick from the phone for a while (the app closed, or its page was frozen): the
-        call ends here rather than stay half open, and the phone is told when it's back."""
-        if self.call is not call:
-            return
-        left = CALL_QUIET_S - (time.time() - self.call_seen)
-        if left > 0:
-            asyncio.get_running_loop().call_later(left + 0.05, self._call_quiet, call)
-            return
-        self.call, self.call_seen = None, 0.0
-        threading.Thread(target=call.end, daemon=True).start()
 
     def _call_gone(self, call) -> None:
         """The phone left mid-call and hasn't come back: the call ends here."""
