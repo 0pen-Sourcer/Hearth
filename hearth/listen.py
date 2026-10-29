@@ -32,7 +32,7 @@ import sys
 import time
 import threading
 from queue import Queue, Empty
-from typing import Optional, Callable
+from typing import List, Optional, Callable
 
 # Env-var-based suppression of huggingface_hub warnings lives in hearth/__init__.py
 # (must run before any HF import, which means before listen.py is imported).
@@ -815,16 +815,38 @@ def last_transcribe_error() -> dict:
     return {"error": _last_transcribe_error, "at": _last_transcribe_error_at}
 
 
-def _transcribe_language() -> Optional[str]:
-    """The language code to transcribe in, or None to detect it per utterance.
+def _languages() -> List[str]:
+    """The languages a voice note may be in: the one named in Settings alone;
+    else, with a voice picked in another language, that language or English,
+    whichever the model hears (a Hindi voice doesn't mean every note is Hindi:
+    English speech forced into Hindi came back as Devanagari nonsense); else any.
 
     Read on every call rather than captured at import, because the setting is
     applied by writing the environment and reloading the model in place.
     """
-    lang = spoken_language()
     if model_size().lower().endswith(".en"):
-        return "en"
-    return lang or None
+        return ["en"]
+    named = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
+    if named:
+        return [named]
+    voice = spoken_language()
+    return [voice, "en"] if voice and voice != "en" else []
+
+
+def _transcribe_language() -> Optional[str]:
+    """The language code to transcribe in, or None to detect it per utterance
+    (among _languages() when there are several)."""
+    langs = _languages()
+    return langs[0] if len(langs) == 1 else None
+
+
+def _pick_language(info, langs: List[str]) -> Optional[str]:
+    """Of the languages it may be, the one the model heard most likely; None when
+    what it detected is already one of them."""
+    if not langs or getattr(info, "language", None) in langs:
+        return None
+    probs = dict(getattr(info, "all_language_probs", None) or [])
+    return max(langs, key=lambda c: probs.get(c, 0.0))
 
 
 def transcribe(audio) -> str:
@@ -835,24 +857,32 @@ def transcribe(audio) -> str:
         return ""
     try:
         lang = _transcribe_language()
-        segments, _info = model.transcribe(
-            audio,
-            # A model whose name ends in .en holds no other language, and
-            # asking it to detect one wastes a pass to reach the same answer.
-            language=lang,
-            beam_size=1,            # fast - boost to 5 for accuracy
-            # Silero VAD (ships with faster-whisper, no extra dep) drops
-            # speech-free chunks AND tightens utterance edges - much smarter
-            # than our RMS-based pre-trim. Critical for the noisy-room case
-            # where RMS thresholds fail. Enabled with conservative params so
-            # short conversational pauses don't fragment the transcript.
-            vad_filter=True,
-            vad_parameters={
-                "min_silence_duration_ms": 400,
-                "speech_pad_ms":           250,
-            },
-            condition_on_previous_text=False,
-        )
+
+        def run(language):
+            return model.transcribe(
+                audio,
+                # A model whose name ends in .en holds no other language, and
+                # asking it to detect one wastes a pass to reach the same answer.
+                language=language,
+                beam_size=1,            # fast - boost to 5 for accuracy
+                # Silero VAD (ships with faster-whisper, no extra dep) drops
+                # speech-free chunks AND tightens utterance edges - much smarter
+                # than our RMS-based pre-trim. Critical for the noisy-room case
+                # where RMS thresholds fail. Enabled with conservative params so
+                # short conversational pauses don't fragment the transcript.
+                vad_filter=True,
+                vad_parameters={
+                    "min_silence_duration_ms": 400,
+                    "speech_pad_ms":           250,
+                },
+                condition_on_previous_text=False,
+            )
+        segments, info = run(lang)
+        # Detected as a language it can't be (a mumble read as Bengali): again in the
+        # likeliest one it may be. Segments are lazy, so nothing was decoded yet.
+        again = _pick_language(info, _languages()) if lang is None else None
+        if again:
+            segments, info = run(again)
         return " ".join(s.text.strip() for s in segments).strip()
     except Exception as e:
         # An empty string is what "you said nothing" looks like too, so a
