@@ -288,16 +288,7 @@ async def _discover(provider: str) -> None:
         _remember_models(provider, opt)
         _remember_levels(provider, new.get("configOptions") or [], str((opt or {}).get("currentValue") or ""))
     finally:
-        reader.cancel()
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        # Let its pipes close inside this loop, not after it is gone.
-        try:
-            await asyncio.wait_for(proc.wait(), 10)
-        except Exception:
-            pass
+        await _end(proc, reader)
 
 
 def hearth_call(tool: Dict[str, Any]) -> tuple:
@@ -341,6 +332,108 @@ def _text(content: List[Dict[str, Any]]) -> str:
         elif c.get("type") == "diff":
             out.append(f"changed {c.get('path', '')}")
     return "\n".join(out)
+
+
+async def _use_model(rpc: _Rpc, provider: str, sid: Any, opened: Dict[str, Any]) -> tuple:
+    """Put a new session on the model picked for this agent, if it offers one.
+    (the model option, the session's options, the model in use, whether it was switched)."""
+    opts = opened.get("configOptions") or []
+    opt = _model_option(opts, opened.get("models"))
+    _remember_models(provider, opt)
+    model_used = str((opt or {}).get("currentValue") or "")
+    want = _base.chosen_model(provider)
+    switched = False
+    if want and opt and want != model_used:
+        try:
+            if opt.get("via"):
+                await rpc.call(opt["via"], {"sessionId": sid, "modelId": want}, 30)
+            else:
+                # The answer carries every option again: the effort one
+                # comes and goes with the model.
+                got = await rpc.call("session/set_config_option",
+                                     {"sessionId": sid, "configId": opt["id"], "value": want}, 30)
+                opts = (got or {}).get("configOptions") or opts
+            model_used, switched = want, True
+        except Exception:
+            pass
+    return opt, opts, model_used, switched
+
+
+async def _end(proc, reader) -> None:
+    reader.cancel()
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    # Let its pipes close inside this loop, not after it is gone.
+    try:
+        await asyncio.wait_for(proc.wait(), 10)
+    except Exception:
+        pass
+
+
+async def once(provider: str, prompt: str) -> tuple:
+    """One prompt to an agent in an empty folder of its own, with no MCP servers
+    and every request to act refused: (its reply, why it gave none). An error
+    it only writes to its own log (out of free usage) ends the wait, by the
+    same rule as a turn."""
+    import shutil
+    import tempfile
+    cwd = tempfile.mkdtemp(prefix="hearth-once-")
+    proc = None
+    parts: List[str] = []
+    failure = ""
+    try:
+        proc = await _start(provider, cwd)
+        if proc is None:
+            return "", "not installed"
+        rpc = _Rpc(proc, jsonrpc=True)
+        reader = asyncio.ensure_future(rpc.read())
+        err_task = asyncio.ensure_future(proc.stderr.read())
+        try:
+            await _hello(rpc)
+            opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
+            sid = opened.get("sessionId")
+            await _use_model(rpc, provider, sid, opened)
+            began = heard = checked = time.time()
+            turn = asyncio.ensure_future(rpc.call("session/prompt", {"sessionId": sid,
+                                                                     "prompt": [{"type": "text", "text": prompt}]}, 86400))
+            while not (turn.done() and rpc.inbox.empty()):
+                now = time.time()
+                if now - heard >= min(20.0, _base.QUIET_S) and now - checked >= 5:
+                    checked = now
+                    failure = _base.logged_failure(provider, began, str(sid or ""))
+                    if failure:
+                        rpc.send({"method": "session/cancel", "params": {"sessionId": sid}})
+                        break
+                try:
+                    msg = await asyncio.wait_for(rpc.inbox.get(), timeout=0.4)
+                except asyncio.TimeoutError:
+                    continue
+                if msg is None:
+                    break
+                heard = time.time()
+                if "id" in msg and "method" in msg:
+                    opts = (msg.get("params") or {}).get("options") or []
+                    pick = next((o for o in opts if o.get("kind") in ("reject_once", "reject_always")), None)
+                    rpc.send({"id": msg["id"], "result": {"outcome": {"outcome": "selected", "optionId": pick["optionId"]}}
+                              if pick else {"outcome": {"outcome": "cancelled"}}})
+                    await proc.stdin.drain()
+                    continue
+                up = (msg.get("params") or {}).get("update") or {}
+                if up.get("sessionUpdate") == "agent_message_chunk":
+                    parts.append(str((up.get("content") or {}).get("text") or ""))
+            if turn.done() and turn.exception() and not failure:
+                failure = str(turn.exception())
+        except Exception as e:
+            failure = failure or f"{type(e).__name__}: {e}"
+        finally:
+            await _end(proc, reader)
+            err_task.cancel()
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
+    reply = "".join(parts).strip()
+    return reply, ("" if reply else failure or "no answer")
 
 
 async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]] = None,
@@ -414,25 +507,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             text_in = (persona + "\n\n---\n\n"
                        + (f"Earlier in this conversation:\n{earlier}\n\nNow the user says:\n" if earlier else "")
                        + prompt)
-        opts = opened.get("configOptions") or []
-        opt = _model_option(opts, opened.get("models"))
-        _remember_models(provider, opt)
-        model_used = str((opt or {}).get("currentValue") or "")
-        want = _base.chosen_model(provider)
-        switched = False
-        if want and opt and want != model_used:
-            try:
-                if opt.get("via"):
-                    await rpc.call(opt["via"], {"sessionId": sid, "modelId": want}, 30)
-                else:
-                    # The answer carries every option again: the effort one
-                    # comes and goes with the model.
-                    got = await rpc.call("session/set_config_option",
-                                         {"sessionId": sid, "configId": opt["id"], "value": want}, 30)
-                    opts = (got or {}).get("configOptions") or opts
-                model_used, switched = want, True
-            except Exception:
-                pass
+        opt, opts, model_used, switched = await _use_model(rpc, provider, sid, opened)
         if opt and not opt.get("via"):
             _remember_levels(provider, opts, model_used)
         lvl = _level_option(opts)

@@ -257,8 +257,9 @@ check(f"a one-shot runs in a folder of its own, gone after ({cwds[-1:]})",
 
 
 async def fake_once(provider, prompt):
-    return "acp:" + provider
-claude_brain._acp_once = fake_once
+    return "acp:" + provider, ""
+from hearth import acp_brain  # noqa: E402
+acp_brain.once = fake_once
 claude_brain.current = lambda: "opencode"
 check("an ACP agent answers the pass once, on its own", claude_brain.quick("pass", any_agent=True) == "acp:opencode")
 
