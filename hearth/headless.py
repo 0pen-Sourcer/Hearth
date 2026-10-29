@@ -704,13 +704,17 @@ def resolve_context_tokens(model_id: str) -> tuple:
         from urllib.parse import urlparse as _up
         _pi = getattr(_ls, "_proc_info", {}) or {}
         if _pi.get("ctx") and _pi.get("url") and LOCAL_API_BASE:
-            if _up(_pi["url"]).port == _up(LOCAL_API_BASE).port:
+            _here = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+            _b, _u = _up(LOCAL_API_BASE), _up(_pi["url"])
+            # The same port on another machine (LM Studio's 1234 on the network) isn't ours.
+            if _u.port == _b.port and (_b.hostname or "").lower() in _here:
                 return int(_pi["ctx"]), "built-in server (loaded ctx)"
     except Exception:
         pass
     # A model server on this machine says what it loaded; a cloud provider doesn't,
     # and asking the local server, the card and the disk for it cost a second a turn.
-    probed = autodetect_context(model_id) if provider_for(LOCAL_API_BASE) in ("local", "") else None
+    probed = (autodetect_context(model_id)
+              if provider_for(LOCAL_API_BASE) in ("local", "", "openrouter") else None)
     if probed:
         return probed, "endpoint probe"
     # The provider's own model list, where it says (Anthropic, OpenRouter).
