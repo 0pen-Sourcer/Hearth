@@ -252,6 +252,27 @@ async def relay_room():
     told = [f for f in delivered if f.get("type") == "call.ended"]
     check(f"and a phone still talking into it is told so, once ({len(told)})", len(told) == 1 and told[0].get("gone"))
 
+    # A phone whose page stops ticking (app closed, page frozen with the screen off) while its
+    # connection stays up: the call ends on the PC, not left half open. Owner, 2026-10-29.
+    RB.CALL_QUIET_S = 0.4
+    room.on_call({"type": "call.start", "chat": "c_call", "ref": "r2"})
+    await asyncio.sleep(0.3)
+    quiet_call = room.call
+    room.on_call({"type": "call.alive"})
+    await asyncio.sleep(0.25)
+    room.on_call({"type": "call.alive"})
+    await asyncio.sleep(0.25)
+    check("a phone that keeps ticking keeps its call", room.call is quiet_call and not quiet_call.ended)
+    await asyncio.sleep(0.6)
+    check("one that stops ticking, with its connection still up, has its call ended",
+          room.call is None and quiet_call.ended)
+    delivered.clear()
+    room.on_call({"type": "call.alive"})
+    room.on_call({"type": "call.alive"})
+    await asyncio.sleep(0.1)
+    told = [f for f in delivered if f.get("type") == "call.ended"]
+    check(f"and when it's back (muted, so no audio) it's told once ({len(told)})", len(told) == 1 and told[0].get("gone"))
+
 asyncio.run(relay_room())
 
 print()
