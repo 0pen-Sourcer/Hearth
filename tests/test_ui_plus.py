@@ -153,7 +153,7 @@ with sync_playwright() as pw:
               for k in ("call_me_reminders", "call_me_jobs", "call_me_questions", "call_me_quiet")))
     check("quiet hours 22:00 to 08:00, a question waits 3 min",
           pg.input_value("#callme-from") == "22:00" and pg.input_value("#callme-to") == "08:00" and pg.input_value("#callme-wait") == "3")
-    check("and says once what a web app's call can't do", "can't play a ringtone" in pg.inner_text("#callme"))
+    check("and no paragraph explaining what a web app can't do", "web app" not in pg.inner_text("#callme"))
     pg.locator("#callme").scroll_into_view_if_needed()
     pg.screenshot(path=os.path.join(shots, "w1_settings_off_dark.png"))
     master.click()

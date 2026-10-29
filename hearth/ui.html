@@ -5419,7 +5419,6 @@
               <div class="switch" data-key="call_me_quiet"></div>
             </div>
           </div>
-          <div class="engine-note" style="margin-top:6px">A call comes to your phone as a notification with Answer and Decline, and on the app's own screen when it is open. It buzzes, but a web app can't play a ringtone or light up a locked screen the way a phone call does; unanswered for 45 seconds, it becomes a missed call. It never calls while you are using this PC, and not again for a few minutes after one you declined or missed.</div>
         </div>
         </div><!-- /pane plus -->
 
@@ -7219,12 +7218,12 @@ function applyBrainState() {
   // Bottom-bar `model` pill.
   const stModel = $$id('st-model');
   if (stModel) {
-    // Truly nothing active (local, not loaded, no id) reads as red "no model" —
-    // not a bare "-" that looks like a value. A cloud brain always has a model id
-    // so it keeps showing that.
+    // Nothing active (local, not loaded, no id) reads as "no model" in the
+    // accent, not a bare "-" that looks like a value. A cloud brain always has
+    // a model id, so it keeps showing that.
     const noModel = !b.loaded && !b.modelId;
     stModel.textContent = noModel ? 'no model' : (b.modelName || '-');
-    stModel.style.color = noModel ? 'var(--err)' : '';
+    stModel.style.color = noModel ? 'var(--accent)' : '';
     stModel.style.fontWeight = noModel ? '600' : '';
   }
 
