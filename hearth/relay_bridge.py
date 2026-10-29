@@ -1213,17 +1213,26 @@ class Room:
 
     async def run(self) -> None:
         import websockets
-        url = f"{self.bridge.url}/room/{self.room}?role=pc&licence={self.bridge.licence}"
+        url = f"{self.bridge.url}/room/{self.room}?role=pc"
+        # The licence goes in headers, kept out of the address (and so out of logs):
+        # the key and this PC's activation of it, which the relay checks together.
+        headers = {"Authorization": f"Bearer {self.bridge.licence}",
+                   "X-Licence-Instance": self.bridge.instance}
         backoff = 1.0
         while not self.bridge.stopping:
             try:
-                async with websockets.connect(url, max_size=1 << 20, ping_interval=25) as ws:
+                async with websockets.connect(url, max_size=1 << 20, ping_interval=25,
+                                              **_header_kw(headers)) as ws:
                     self.ws, backoff = ws, 1.0
                     async for raw in ws:
                         await self.on_frame(json.loads(raw))
             except Exception as e:
                 if "402" in str(e):
                     print("[relay] the relay needs Inglen Plus for this PC; stopping.", flush=True)
+                    self.bridge.stopping = True
+                    return
+                if "429" in str(e):
+                    print("[relay] this Plus licence is in use on too many PCs; stopping.", flush=True)
                     self.bridge.stopping = True
                     return
             self.ws, self.chan, self.peer_up = None, None, False
@@ -1424,11 +1433,23 @@ class Room:
             await self.ws.send(json.dumps({"t": "paired"}))
 
 
+def _header_kw(headers: Dict[str, str]) -> Dict[str, Any]:
+    """websockets 14+ calls them additional_headers; older ones extra_headers."""
+    import inspect
+    import websockets
+    try:
+        params = inspect.signature(websockets.connect).parameters
+    except (TypeError, ValueError):
+        params = {}
+    return {"extra_headers": headers} if "extra_headers" in params else {"additional_headers": headers}
+
+
 class Bridge:
     def __init__(self):
         self.url = relay_url().replace("https://", "wss://").replace("http://", "ws://")
         from . import plus
         self.licence = (plus._read().get("key") or "")
+        self.instance = (plus._read().get("instance") or "")
         self.pc = _pc_key()
         self.stopping = False
         self.loop = asyncio.new_event_loop()
