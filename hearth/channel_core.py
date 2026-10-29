@@ -379,7 +379,12 @@ class Hub:
             self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
         else:
             self.a.send(chat, question + " Reply yes to let me, anything else to stop.")
-        ev.wait(ASK_TIMEOUT_S)
+        waited = run.get("waited")
+        if waited is not None:
+            with waited.on_person():
+                ev.wait(ASK_TIMEOUT_S)
+        else:
+            ev.wait(ASK_TIMEOUT_S)
         with self._lock:
             run["question"] = None
             ok = bool(run.get("answer"))
@@ -422,6 +427,8 @@ class Hub:
         steps_kept: List[Dict[str, Any]] = []
         so_far = {"n": 0}                   # letters of the reply written so far, for a step's place in it
         run["kept"], run["so_far"] = steps_kept, so_far
+        from .waited import Waited
+        run["waited"] = Waited()            # the time on their OK isn't part of the turn's duration
         status = {"id": None, "last": 0.0}
         err = {"cat": None, "msg": None}
         try:
@@ -436,6 +443,7 @@ class Hub:
         context: List[Any] = []
 
         def emit(kind, **kw):
+            kw = run["waited"].fix(kind, kw)
             try:                                   # the window shows a phone's reply as it is written
                 from . import live_bus
                 live_bus.publish(live_bus.turn_event(cid, self.a.name, (_TURN.ctx or {}).get("t", ""), kind, kw))

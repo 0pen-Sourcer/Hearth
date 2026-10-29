@@ -6010,8 +6010,12 @@ class JarvisCLI:
         reply = []
 
         live = self._live_out(prompt)
+        from hearth.waited import Waited
+        waited = Waited()                 # the time on their OK isn't part of the turn's duration
+        ask = waited.timing(ask)
 
         def emit(t, **f):
+            f = waited.fix(t, f)
             live(t, f)
             if t == "assistant_chunk":
                 chunk = f.get("content", "")
@@ -6095,8 +6099,11 @@ class JarvisCLI:
         failed: List[str] = []
 
         live = self._live_out(prompt)
+        from hearth.waited import Waited
+        waited = Waited()                 # the time on their OK isn't part of the turn's duration
 
         def _emit(kind, **fields):
+            fields = waited.fix(kind, fields)
             if kind == "error":
                 failed.append(str(fields.get("message") or ""))
             live(kind, fields)
@@ -6106,7 +6113,7 @@ class JarvisCLI:
             await _hl.run_once(
                 prompt, emit=_emit, model=self.current_model, think=self.think_on,
                 think_level=getattr(self, "think_level", "") or "", history=history,
-                permission_check=self._ask_permission, should_cancel=self._respond_cancel.is_set,
+                permission_check=waited.timing(self._ask_permission), should_cancel=self._respond_cancel.is_set,
                 drain_steer=self._drain_steer, voice=bool(self.voice_on),
                 chat_id=(getattr(self, "_chat", None) or {}).get("id"), prior_failure=prior)
             # The next turn hears that this one failed (headless.failure_note).

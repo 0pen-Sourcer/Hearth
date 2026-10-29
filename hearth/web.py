@@ -5209,7 +5209,11 @@ class HearthHandler(BaseHTTPRequestHandler):
         _live_turn = secrets.token_hex(5)
         live_bus.publish(live_bus.turn_event(chat_id, "window", _live_turn, "start", {"text": prompt}) or {})
 
+        from .waited import Waited
+        _waited = Waited()          # time spent on the person's OK or answer: not part of the turn's duration
+
         def emit(event_type: str, **fields: Any) -> None:
+            fields = _waited.fix(event_type, fields)
             _turn_saw(event_type, fields)
             try:                                 # the phone and other windows see it as it's written
                 ev = live_bus.turn_event(chat_id, "window", _live_turn, event_type, fields)
@@ -5233,7 +5237,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         # blocking until the user clicks an option in the modal.
         try:
             from .tools import set_ask_user_callback
-            set_ask_user_callback(_make_ask_user_bridge(emit))
+            set_ask_user_callback(_waited.timing(_make_ask_user_bridge(emit)))
         except Exception:
             pass
         # Local endpoint with NOTHING loaded: don't let run_once hit a dead
@@ -5269,7 +5273,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         try:
             asyncio.run(run_once(
                 prompt, emit=emit, think=think, think_level=think_level, model=model, history=history,
-                permission_check=_make_permission_check(emit),
+                permission_check=_waited.timing(_make_permission_check(emit)),
                 should_cancel=_CANCEL.is_set, drain_steer=_drain_steer,
                 voice=voice, chat_id=chat_id, prior_failure=str(body.get("prior_failure") or "")[:600],
             ))
