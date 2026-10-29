@@ -383,6 +383,11 @@ class Hub:
         with self._lock:
             run["question"] = None
             ok = bool(run.get("answer"))
+        # Kept with the turn's steps, so a chat opened again shows what was allowed, where.
+        kept = run.get("kept")
+        if isinstance(kept, list):
+            kept.append({"kind": "ask", "text": question, "answer": ok, "at": int(time.time() * 1000),
+                         "pos": (run.get("so_far") or {}).get("n", 0)})
         return "allow" if ok else "deny"
 
     def _turn(self, chat: str, text: str, reply_to: Any, run: Dict[str, Any], cid: str = "") -> None:
@@ -416,6 +421,7 @@ class Hub:
         # empty in the window and all sat above the reply.
         steps_kept: List[Dict[str, Any]] = []
         so_far = {"n": 0}                   # letters of the reply written so far, for a step's place in it
+        run["kept"], run["so_far"] = steps_kept, so_far
         status = {"id": None, "last": 0.0}
         err = {"cat": None, "msg": None}
         try:

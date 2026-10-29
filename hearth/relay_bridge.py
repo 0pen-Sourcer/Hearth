@@ -158,6 +158,8 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 LIVE_EVERY = 0.1
 THINK_EVERY = 0.25
 CALL_AWAY_S = 20                    # how long a call waits for a phone that dropped off
+DONE_SETTLE_S = 1.5                 # a reply's notification waits this long for a newer send in its turn
+PUSH_TEST_S = 5                     # a test notification waits this long, so the phone can be locked
 CALL_QUIET_S = 30                   # a phone that stopped saying it's there (closed, frozen): the call ends
 PART = 150_000
 ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
@@ -264,6 +266,11 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             events = [e for e in x.get("events") or [] if isinstance(e, dict)]
             steps = []
             for e in events:
+                if e.get("kind") == "ask" and role == "assistant":
+                    # A question the turn asked, answered: the folded line where it was asked.
+                    msgs.append({"role": "assistant", "ask": True, "text": str(e.get("text") or ""),
+                                 "answer": bool(e.get("answer")), "at": e.get("at") or x.get("at") or 0})
+                    continue
                 if e.get("kind") != "tool" or e.get("name") in cc.QUIET_STEPS:
                     continue
                 args = e.get("args") if isinstance(e.get("args"), dict) else {}
@@ -830,18 +837,20 @@ class AgentWatch:
         if not last or last.get("role") != "assistant":
             return None
         parts = last.get("parts") or []
-        what = r.get("title") or r.get("project") or "a session"
-        # Named for the agent only ("Codex"), with what it said: these apps change how they
-        # stop and ask, and a title like "finished" would be wrong for a turn that asks.
-        who = r.get("label") or "An agent"
+        what = " ".join(str(r.get("title") or r.get("project") or "").split())
+        what = what[:40].rstrip() + ("..." if len(what) > 40 else "")
+        # Named for the agent ("Codex") and its session, with what it said last as the body: a
+        # lock screen shows one line of body, and that line is the news. A title like "finished"
+        # would be wrong for a turn that asks, and these apps change how they stop and ask.
+        who = (r.get("label") or "An agent") + (f" · {what}" if what else "")
         if not last.get("error") and parts and "text" not in parts[-1]:
             st = (parts[-1].get("steps") or [{}])[-1]
             if st.get("tool") in agent_sessions.QUESTION_TOOLS and not st.get("out"):
-                return {"kind": "ask", "title": who, "body": f"{what}: {st.get('cmd') or 'It has a question for you.'}",
+                return {"kind": "ask", "title": who, "body": st.get("cmd") or "It has a question for you.",
                         "c": r["chat"]}
             return None                            # it ended on a step: still at work, or waiting on a tool
         text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
-        return {"kind": "done", "title": who, "body": f"{what}: {' '.join(text.split())[:200]}", "c": r["chat"]}
+        return {"kind": "done", "title": who, "body": " ".join(text.split())[:240], "c": r["chat"]}
 
 
 class Relay(cc.Adapter):
@@ -859,6 +868,8 @@ class Relay(cc.Adapter):
         self._later: Dict[str, threading.Timer] = {}
         self.asks: Dict[str, str] = {}         # chat -> the id of the question waiting there
         self._told: List[str] = []             # turns whose finish a notification has said
+        self._done_later: Dict[str, threading.Timer] = {}   # turn -> its notification, waiting on a newer send
+        self._done_lock = threading.Lock()
         self.hub: Optional[cc.Hub] = None      # the hub answering here, for what a question needs
 
     def notify(self, chat: str, obj: Dict[str, Any], urgent: bool = False) -> None:
@@ -877,11 +888,28 @@ class Relay(cc.Adapter):
             pass
 
     def finished(self, chat: str, title: str, text: str, c: str, t: str) -> None:
-        """One notification per finished reply."""
+        """One notification per turn, saying its newest words: a turn that sends more than
+        once (a file's note, then the reply) is told once, a moment after its last send.
+        High priority, so a phone asleep (Android's Doze) shows it now, not when woken."""
         if not t or t in self._told:
             return
-        self._told = (self._told + [t])[-200:]
-        self.notify(chat, {"kind": "done", "title": title, "body": " ".join(text.split())[:240], "c": c})
+        body = " ".join(text.split())[:240]
+        with self._done_lock:
+            old = self._done_later.pop(t, None)
+            if old is not None:
+                old.cancel()
+
+            def go():
+                with self._done_lock:
+                    if self._done_later.get(t) is not timer:
+                        return
+                    self._done_later.pop(t, None)
+                    self._told = (self._told + [t])[-200:]
+                self.notify(chat, {"kind": "done", "title": title, "body": body, "c": c}, urgent=True)
+            timer = threading.Timer(DONE_SETTLE_S, go)
+            timer.daemon = True
+            self._done_later[t] = timer
+        timer.start()
 
     def _push(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
         room = self.rooms.get(str(chat))
@@ -1152,6 +1180,9 @@ class Room:
             if m and str(m.get("type") or "").startswith("say."):
                 self.on_say(m)
                 return
+            if m and m.get("type") == "push.test":
+                asyncio.get_running_loop().call_later(PUSH_TEST_S, self._push_test)
+                return
             if m and m.get("type") == "req":
                 # Lookups run side by side, so a slow one (icons from the web)
                 # never holds up a switch the person is waiting on.
@@ -1160,6 +1191,17 @@ class Room:
                 task.add_done_callback(self.lookups.discard)
             elif m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
+
+    def _push_test(self) -> None:
+        """A sample notification, a few seconds after it was asked for so the phone can be
+        locked first. Sent even while the app is on screen (the relay skips that check)."""
+        from . import persona
+        if self.ws is None or not self.phone:
+            return
+        box = R.seal_box(self.box_key(), {"kind": "done", "title": persona.NAME,
+                                          "body": "This is how a finished reply shows here.", "c": ""})
+        asyncio.ensure_future(self.ws.send(json.dumps({"t": "push", "iv": box["iv"], "c": box["c"],
+                                                       "urgent": True, "test": True})))
 
     def on_say(self, m: Dict[str, Any]) -> None:
         """Read aloud on the phone, in the PC's own voice (Settings > Voice, as the call):

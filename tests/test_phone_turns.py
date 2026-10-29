@@ -116,6 +116,14 @@ ev = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "tool"] if 
 check(f"the window gets each step with what came back, how long and where it was in the reply ({ev[:1]})",
       ev and ev[0]["name"] == "take_screenshot" and "Saved the screenshot" in ev[0]["result"]
       and ev[0]["ms"] >= 40 and ev[0]["pos"] == len("Taking one now. ") and not any(k.startswith("_") for k in ev[0]))
+asked = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "ask"] if saved else []
+check(f"a question the turn asked is kept with its steps, with its answer ({asked})",
+      len(asked) == 1 and asked[0]["text"].startswith("Move shot.png") and asked[0]["answer"] is False)
+opened = RB.answer({"what": "open", "chat": cc.chat_id_for(app.name, "me")})["messages"]
+folds = [m for m in opened if m.get("ask")]
+check(f"and a chat opened again on the phone shows it answered, where it was asked ({folds})",
+      len(folds) == 1 and folds[0]["answer"] is False and "Move shot.png" in folds[0]["text"]
+      and opened.index(folds[0]) == len(opened) - 2)
 # A file sent from the phone: their message is what they wrote, with the file as an attachment.
 seen.clear()
 hub.receive("me", "me", "See", files=[SHOT])
