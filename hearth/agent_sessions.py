@@ -482,6 +482,21 @@ _REVIEW = re.compile(r">>\s*APPROVAL REQUEST START|>>\s*TRANSCRIPT DELTA START|T
                      r"|Continue the same review conversation")
 
 
+def _codex_spawn(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """A Codex subagent's thread: {parent, nickname, role}, or {} for any other session
+    (codex-rs protocol SessionSource::SubAgent(ThreadSpawn {parent_thread_id, ...}))."""
+    src = meta.get("source")
+    spawn = {}
+    if isinstance(src, dict):
+        sub = src.get("subagent") or src.get("SubAgent") or {}
+        spawn = (sub.get("thread_spawn") or sub.get("ThreadSpawn") or {}) if isinstance(sub, dict) else {}
+    parent = spawn.get("parent_thread_id") or meta.get("parent_thread_id")
+    if not parent:
+        return {}
+    return {"parent": str(parent), "nickname": str(spawn.get("agent_nickname") or meta.get("agent_nickname") or ""),
+            "role": str(spawn.get("agent_role") or spawn.get("agent_type") or meta.get("agent_role") or "")}
+
+
 def _codex_not_theirs(meta: Dict[str, Any]) -> bool:
     src = meta.get("source")
     if isinstance(src, dict) and ({"subagent", "internal"} & {k.lower() for k in src}):
@@ -508,7 +523,11 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
         at = _ms(o.get("timestamp"))
         if kind == "session_meta" or (not sid and o.get("id") and "instructions" in o):
             sid, cwd = str(p.get("id") or sid), str(p.get("cwd") or cwd)
-            if _codex_not_theirs(p):
+            spawn = _codex_spawn(p)
+            if spawn and head:
+                # A helper Codex started: not a session of the person's own, but its parent shows it.
+                return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True, "spawn": spawn}
+            if not spawn and _codex_not_theirs(p):
                 return {"id": sid, "cwd": cwd, "title": "", "messages": [], "hidden": True}
             continue
         if kind == "turn_context" and p.get("cwd"):
@@ -841,6 +860,107 @@ def _held_open(paths: List[str]) -> set:
     return held
 
 
+WORKING_S = 30          # written this recently: its agent is at work
+STEP_S = 15 * 60        # a turn ending on a step (a long command) is still at work for this long
+
+
+def working(msgs: List[Dict[str, Any]], mtime: float) -> bool:
+    """Whether the session's agent is at work on it now: written in the last WORKING_S, or
+    its last message is the person's or ends on a step (a command still running) and the
+    file was written within STEP_S."""
+    age = time.time() - (mtime or 0)
+    if age < WORKING_S:
+        return True
+    last = msgs[-1] if msgs else None
+    if not last or age > STEP_S:
+        return False
+    if last.get("role") == "user":
+        return True
+    parts = last.get("parts") or []
+    return bool(parts) and "text" not in parts[-1] and not last.get("error")
+
+
+SUB_SCAN = 400          # the newest Codex sessions looked through for a session's helpers
+
+
+def subagents(cid: str) -> List[Dict[str, Any]]:
+    """The helpers a session started, as Codex's Subagents panel lists them: newest first,
+    each with its name, whether it is at work, and its own chat id to open it."""
+    got = parse_chat(cid)
+    if not got or got[0] != "codex":
+        return []
+    sid, out = got[1], []
+    names = _codex_names()
+    for p, mt, sz in _newest(_codex_files(), SUB_SCAN):
+        h = _head("codex", p, mt, sz)
+        spawn = h.get("spawn") or {}
+        if spawn.get("parent") != sid or not h.get("id"):
+            continue
+        title = names.get(h["id"]) or " ".join(x for x in (spawn.get("nickname"), spawn.get("role")) if x) or "Helper"
+        out.append({"chat": chat_id("codex", h["id"]), "title": title, "nickname": spawn.get("nickname") or "",
+                    "role": spawn.get("role") or "", "at": int(mt * 1000), "working": time.time() - mt < WORKING_S})
+    return out
+
+
+def search(query: str, rows: List[Dict[str, Any]], budget_s: float = 3.0) -> Dict[str, str]:
+    """Sessions whose conversation mentions `query` (any case), with the words around it:
+    {chat: snippet}. Reads each file's last SEARCH_BYTES, newest first, for at most
+    budget_s seconds, so a search answers quickly on a PC with many long sessions."""
+    q = " ".join(str(query or "").split()).lower()
+    if len(q) < 2:
+        return {}
+    needle, out, t0 = q.encode("utf-8"), {}, time.time()
+    found: Dict[str, List[str]] = {}
+    for r in rows:
+        if time.time() - t0 > budget_s:
+            break
+        path = r.get("path") or ""
+        if not path and r.get("agent") in _FILES:
+            files = found.setdefault(r["agent"], _FILES[r["agent"]][0]())
+            path = next((f for f in files if r["id"] and r["id"] in os.path.basename(f)), "")
+        try:
+            with open(path, "rb") as f:
+                size = os.fstat(f.fileno()).st_size
+                f.seek(max(0, size - SEARCH_BYTES))
+                raw = f.read()
+        except OSError:
+            continue
+        low = raw.lower()
+        at = low.rfind(needle)
+        while at >= 0:
+            start, end = low.rfind(b"\n", 0, at) + 1, low.find(b"\n", at)
+            line = raw[start:end if end >= 0 else len(raw)]
+            if len(line) < BLOB_LINE:
+                try:
+                    o = json.loads(line.decode("utf-8", "replace"))
+                except ValueError:
+                    o = None
+                text = _said_in(o) if isinstance(o, dict) else ""
+                i = text.lower().find(q)
+                if i >= 0:
+                    a, b = max(0, i - 50), min(len(text), i + len(q) + 70)
+                    out[r["chat"]] = ("..." if a else "") + " ".join(text[a:b].split()) + ("..." if b < len(text) else "")
+                    break
+            at = low.rfind(needle, 0, start)
+    return out
+
+
+SEARCH_BYTES = 16 * 1024 * 1024
+
+
+def _said_in(o: Dict[str, Any]) -> str:
+    """The words of one line of a session file, the person's or the agent's, whatever the agent."""
+    p = o.get("payload") if isinstance(o.get("payload"), dict) else {}
+    if p.get("type") in ("user_message", "agent_message") and p.get("message"):
+        return _clean(str(p["message"])) or str(p["message"])
+    m = o.get("message") if isinstance(o.get("message"), dict) else {}
+    if m.get("role") in ("user", "assistant"):
+        return _clean(_text_of(m.get("content"))) or _text_of(m.get("content"))
+    if p.get("type") == "message":
+        return _text_of(p.get("content"))
+    return ""
+
+
 def live_state(agent: str, sid: str, path: str = "") -> str:
     """'open' when the session is running in its program on the PC right now, 'recent' when it was
     written in the last minute and a half (it may be), else ''."""
@@ -967,7 +1087,12 @@ def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
     if not d:
         return {"chat": cid, "error": "that session isn't on this PC any more"}
     msgs = d.get("messages") or []
+    try:
+        mtime = os.path.getmtime(d.get("path") or "") if d.get("path") else 0
+    except OSError:
+        mtime = 0
     return {"chat": cid, "title": d.get("title") or "", "source": agent, "agent": agent, "label": label(agent),
+            "working": working(msgs, mtime),
             "cwd": d.get("cwd") or "", "messages": msgs[-last:], "more": max(0, len(msgs) - last),
             **({"earlier": True} if cut else {})}
 

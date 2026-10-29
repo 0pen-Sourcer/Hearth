@@ -79,5 +79,38 @@ msgs = S.transcript(S.chat_id("codex", A), 10)["messages"]
 check(f"and the message itself shows only what they asked ({msgs[0]['text']!r})",
       msgs[0]["text"] == "Fix the van losing its reflections")
 
+rows = S.listing(20)
+hits = S.search("REFLECTIONS", rows)
+check(f"search finds the sessions that mention it, any case, with the words around it ({hits})",
+      set(hits) >= {S.chat_id("codex", A), S.chat_id("codex", B)} and "reflections" in hits[S.chat_id("codex", A)].lower())
+check("and nothing for words no session has", S.search("spreadsheet budget", rows) == {})
+from hearth import relay_bridge as RB  # noqa: E402
+got = RB.answer({"what": "agent_sessions", "query": "van"})
+check(f"the phone asks it through the relay ({sorted(got.get('hits') or {})})",
+      S.chat_id("claude-code", CL) in (got.get("hits") or {}))
+w = S.transcript(S.chat_id("codex", A), 10)
+check(f"a session written just now reads as at work ({w.get('working')})", w.get("working") is True)
+old = os.path.join(CX, f"rollout-x-{A}.jsonl")
+os.utime(old, (1, 1))
+check("and one quiet for long doesn't", S.transcript(S.chat_id("codex", A), 10).get("working") is False)
+# A Codex session's helpers, as its Subagents panel lists them.
+SUB1, SUB2 = "44444444-4444-4444-4444-444444444444", "55555555-5555-5555-5555-555555555555"
+for sub, nick in ((SUB1, "Nell"), (SUB2, "Ivo")):
+    write(os.path.join(CX, f"rollout-y-{sub}.jsonl"),
+          {"timestamp": T, "type": "session_meta", "payload": {"id": sub, "cwd": GAME, "source": {"subagent": {
+              "thread_spawn": {"parent_thread_id": B, "depth": 1, "agent_nickname": nick, "agent_role": "explorer"}}}}},
+          {"timestamp": T, "type": "event_msg", "payload": {"type": "user_message", "message": "audit continuity"}},
+          {"timestamp": T, "type": "event_msg", "payload": {"type": "agent_message", "message": "Two gaps found."}})
+with open(os.path.join(HOME, ".codex", "session_index.jsonl"), "a", encoding="utf-8") as f:
+    f.write(json.dumps({"id": SUB1, "thread_name": "Nell continuity audit", "updated_at": T}) + "\n")
+os.utime(os.path.join(CX, f"rollout-y-{SUB2}.jsonl"), (1, 1))
+subs = RB.answer({"what": "agent_subagents", "chat": S.chat_id("codex", B)})["subagents"]
+check(f"a session lists the helpers it started, newest first, by their names ({[(x['title'], x['working']) for x in subs]})",
+      [x["title"] for x in subs] == ["Nell continuity audit", "Ivo explorer"] and subs[0]["working"] and not subs[1]["working"])
+check("they aren't listed as sessions of their own", not ({SUB1, SUB2} & {r["id"] for r in S.listing(30)}))
+sub = S.transcript(subs[0]["chat"], 10)
+check(f"and one opens as a chat ({[m['text'] for m in sub.get('messages', [])]})",
+      [m["text"] for m in sub.get("messages", [])] == ["audit continuity", "Two gaps found."])
+check("another session has none", RB.answer({"what": "agent_subagents", "chat": S.chat_id("codex", A)})["subagents"] == [])
 print("\n" + ("all session title checks passed" if not FAILS else f"{len(FAILS)} failed"))
 sys.exit(1 if FAILS else 0)

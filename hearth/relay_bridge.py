@@ -235,11 +235,19 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "undo":
         from . import undo as _undo
         return _undo.undo(str(m.get("id") or ""))
+    if what == "agent_subagents":
+        # The helpers a coding agent's session started (Codex's Subagents panel).
+        from . import agent_sessions
+        return {"chat": str(m.get("chat") or ""), "subagents": agent_sessions.subagents(str(m.get("chat") or ""))}
     if what == "agent_sessions":
         # The coding agents' own sessions on this PC, newest first.
         from . import agent_sessions
         from .brand_icons import key_for
-        return {"sessions": [dict(r, brand=key_for(r["agent"])) for r in agent_sessions.listing(int(m.get("limit") or 120))]}
+        rows = agent_sessions.listing(int(m.get("limit") or 120))
+        if m.get("query"):
+            # What they searched for, inside the conversations: the sessions that mention it and where.
+            return {"hits": agent_sessions.search(str(m["query"]), rows)}
+        return {"sessions": [dict(r, brand=key_for(r["agent"])) for r in rows]}
     if what == "open":
         from .term_render import tool_words
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
@@ -773,7 +781,7 @@ class AgentWatch:
     last look, quiet for QUIET_S since, and ending on the agent's own words (a turn
     still running ends on a step, or on the person's message). Sessions that were
     already there when it started, and ones the phone is driving, are left alone."""
-    EVERY_S = 10
+    EVERY_S = 4             # a session open on the phone shows new steps within this
     QUIET_S = 20
 
     def __init__(self):
@@ -781,9 +789,10 @@ class AgentWatch:
         self.waiting: Dict[str, Dict[str, Any]] = {}  # written to, not quiet yet
         self.told: Dict[str, int] = {}
         self.moved: List[str] = []                    # sessions written to since the last look
+        self.quiet: List[str] = []                    # sessions that went quiet at this look
 
     def look(self, rows: List[Dict[str, Any]], now_ms: float, busy: set) -> List[Dict[str, Any]]:
-        self.moved = []
+        self.moved, self.quiet = [], []
         if self.seen is None:
             self.seen = {r["chat"]: r["at"] for r in rows}
             return []
@@ -802,6 +811,7 @@ class AgentWatch:
             if now_ms - r["at"] < self.QUIET_S * 1000:
                 continue
             del self.waiting[k]
+            self.quiet.append(k)
             if self.told.get(k) == r["at"]:
                 continue
             self.told[k] = r["at"]
@@ -1443,14 +1453,15 @@ class Bridge:
             for n in notes:
                 for chat in list(self.adapter.rooms):     # each paired phone
                     self.adapter.notify(chat, n)
-            # A session open on a phone shows what its agent wrote since, without reopening it.
-            for c in watch.moved:
+            # A session open on a phone shows what its agent wrote since, without reopening it,
+            # and that its agent is at work (the phone shows it working until it goes quiet).
+            for c, busy_now in [(c, True) for c in watch.moved] + [(c, False) for c in watch.quiet]:
                 if c in self.agent_runs:
                     continue
                 prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
                 try:
                     for chat in list(self.adapter.rooms):
-                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c})
+                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c, "working": busy_now})
                 finally:
                     cc._TURN.ctx = prev
 
