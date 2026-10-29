@@ -33,7 +33,7 @@ from . import env as _env
 import re
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 from . import voice as _tts
 
@@ -68,6 +68,10 @@ class _Session:
         self.on_ready = on_ready        # the model loaded and the mic is open
         self.on_error = on_error        # the recorder could not start, or died
         self.on_notice = on_notice      # something worth telling the person once
+        # For the timing log: when speech was last heard to start and stop, and what heard it.
+        self.speech_started_at = 0.0
+        self.speech_stopped_at = 0.0
+        self.stt = ""
 
     def feed(self, pcm16: bytes, rate: int = 16000) -> None:
         """Audio from far away (16-bit mono), for a fed session."""
@@ -306,6 +310,75 @@ def _stt_device() -> tuple:
     return "cpu", "int8"
 
 
+# Graphics memory a speech model takes once loaded and warm (weights in float16 plus
+# its working space), in MiB, measured on an RTX 5060 with faster-whisper.
+GPU_MIB = {"tiny": 260, "base": 360, "small": 820, "medium": 1900, "large": 3600, "turbo": 1900}
+# What the card keeps free besides: a local model's buffers grow with a long prompt,
+# and memory the driver hands out past the card spills to the PC's and stalls both.
+GPU_SPARE_MIB = 600
+
+
+def _family(size: str) -> str:
+    s = (size or "").lower().split("/")[-1].replace("faster-whisper-", "").replace("distil-", "")
+    for k in ("tiny", "base", "small", "medium", "turbo", "large"):
+        if k in s:
+            return k
+    return "small"
+
+
+def _free_vram_mib() -> Optional[int]:
+    try:
+        from .llmserver import detect_gpu_vram_free_gb
+        gb = detect_gpu_vram_free_gb()
+        return None if gb is None else int(gb * 1024)
+    except Exception:
+        return None
+
+
+def caption_model(size: str) -> str:
+    """The model that writes the live caption while they talk: the smallest of the
+    same kind. It only shows what is being heard; the sentence that is sent is
+    written by the chosen model. A second copy of a big model on the card for the
+    caption doubled its memory and ran ten times a second beside a local LLM."""
+    return "tiny.en" if (size or "").lower().endswith(".en") else "tiny"
+
+
+def stt_plan() -> Dict[str, str]:
+    """What listens and where: {model, device, compute, why}. The graphics card when
+    it was chosen and has room for the model beside what is already loaded. Short of
+    room, the processor with a model it writes a sentence out with in under a second.
+
+    Measured on an RTX 5060 8 GB with a 9B local model loaded (about 350 MiB left):
+    the speech models on the card wrote a sentence in 0.1-0.5 s but cut the local
+    model from 20-30 to 4-5 words a second while they ran, and loading one took up to
+    a minute. On the processor small took 7 s a sentence, base 1.7 s, base.en 0.8 s,
+    tiny 0.7 s, tiny.en 0.45 s, and the local model kept its speed."""
+    size = _model_size()
+    device, compute = _stt_device()
+    if device != "cuda":
+        return {"model": size, "device": device, "compute": compute, "why": "chosen" if
+                (_env.get("STT_DEVICE") or "cpu").lower() != "cuda" else "no usable graphics card"}
+    free = _free_vram_mib()
+    need = GPU_MIB.get(_family(size), 900) + GPU_MIB["tiny"] + GPU_SPARE_MIB
+    if free is None or free >= need:
+        return {"model": size, "device": "cuda", "compute": compute, "why": "chosen"}
+    return {"model": cpu_model(size), "device": "cpu", "compute": "int8",
+            "why": f"graphics card had {free} MiB free, {need} needed"}
+
+
+def cpu_model(size: str) -> str:
+    """The model for the processor in place of one meant for the card: English only,
+    base.en (0.8 s a sentence, and much surer than tiny); any language, tiny (0.7 s;
+    base takes 1.7 s). A smaller one chosen already is kept."""
+    english = size.lower().endswith(".en") or _language() == "en"
+    fam = _family(size)
+    if fam == "tiny":
+        return size
+    if english:
+        return "base.en"
+    return "tiny"
+
+
 _model_bytes: dict = {}
 
 
@@ -444,8 +517,9 @@ def _build_recorder(sess: Optional[_Session] = None):
 
     from RealtimeSTT import AudioToTextRecorder
 
-    model = _model_size()
-    lang = _language()
+    plan = stt_plan()
+    model = plan["model"]
+    lang = "en" if model.lower().endswith(".en") else _language()
     sp = sess.speaker if sess is not None else _tts.DEFAULT
     here = sess is None or sess.here
 
@@ -488,6 +562,8 @@ def _build_recorder(sess: Optional[_Session] = None):
         # guard timer to stop TTS on your first word.
         global _rec_started_at
         _rec_started_at = time.time()
+        if sess is not None:
+            sess.speech_started_at = _rec_started_at
         if _muted or not sp.is_speaking():
             return
         if _half_duplex() and here:
@@ -519,6 +595,8 @@ def _build_recorder(sess: Optional[_Session] = None):
         # a spurious turn. A real barge (guard already fired) keeps the grace open
         # for the rest of the interrupting sentence, still being finalized.
         global _barge_timer, _barge_grace_until
+        if sess is not None:
+            sess.speech_stopped_at = time.time()
         pending = _barge_timer is not None
         if pending:
             try: _barge_timer.cancel()
@@ -538,9 +616,12 @@ def _build_recorder(sess: Optional[_Session] = None):
             try: _tts.set_voice_state("listening")
             except Exception: pass
 
-    device, compute = _stt_device()
+    device, compute = plan["device"], plan["compute"]
     if device == "cuda":
         _let_recorder_use_gpu()
+    print(f"[hearth.realtime_voice] listening with {model} on {device} ({plan['why']})", flush=True)
+    if sess is not None:
+        sess.stt = f"{model} {device}"
     kwargs = dict(
         model=model,
         language=lang,
@@ -565,7 +646,7 @@ def _build_recorder(sess: Optional[_Session] = None):
         # instant. Don't go lower; the model runs out of audio to chew.
         enable_realtime_transcription=True,
         realtime_processing_pause=0.1,
-        realtime_model_type=model,
+        realtime_model_type=caption_model(model),
         on_realtime_transcription_update=_on_realtime_update,
         # Barge-in hooks. on_recording_start fires at REAL speech onset (the
         # instant the recorder hears your voice and starts capturing), which is

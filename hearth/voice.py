@@ -892,6 +892,16 @@ def _clean_for_tts(text: str) -> str:
             return " "
         return inner
     s = _re.sub(r"`([^`\n]+)`", _inline_code, s)
+    # Tables: the rule under the header goes, each row is read as its cells in
+    # turn, and a pipe left in a piece cut mid-row is a pause.
+    s = _re.sub(r"^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(\|[ \t]*:?-{2,}:?[ \t]*)*\|?[ \t]*$", "", s, flags=_re.M)
+    s = _re.sub(r"^[ \t]*\|(.*?)\|?[ \t]*$",
+                lambda m: ", ".join(c.strip() for c in m.group(1).split("|") if c.strip()) + ".", s, flags=_re.M)
+    s = _re.sub(r"[ \t]*\|[ \t]*", ", ", s)
+    s = _re.sub(r"^[ \t]*([-*_])([ \t]*\1){2,}[ \t]*$", "", s, flags=_re.M)      # horizontal rules
+    s = _re.sub(r"-{3,}", " ", s)
+    s = _re.sub(r"^[ \t]*[•●▪◦][ \t]*", "", s, flags=_re.M)
+    s = _re.sub(r"[ \t]*[→⇒➜][ \t]*", ", ", s)
     # Headings: `### Foo` → `Foo`
     s = _re.sub(r"^\s{0,3}#{1,6}\s+", "", s, flags=_re.M)
     # Block quotes
@@ -924,6 +934,10 @@ def _clean_for_tts(text: str) -> str:
     # Collapse repeated newlines
     s = _re.sub(r"\n{2,}", ". ", s)
     s = _re.sub(r"\s{2,}", " ", s)
+    # What the steps above leave around a mark they took out: "word ." and "..".
+    s = _re.sub(r"[ \t]+([.,!?;:])", r"\1", s)
+    s = _re.sub(r"(?<![.!?])([.!?])\.(?!\.)", r"\1", s)
+    s = _re.sub(r"^[.,;:\s]+", "", s)
     return s.strip()
 
 

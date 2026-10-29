@@ -179,9 +179,11 @@ check("a spoken no still answers it", web._window_said("No.") == "answered" and 
 web._WIN_ASK.update(id="perm_1", tap=False)
 check("a spoken yes answers one Auto would let run", web._window_said("go ahead") == "answered" and q.get_nowait() == "allow")
 web._WIN_ASK.update(id="perm_1", tap=False)
-check("a sentence that isn't an answer goes to the page as a message, the question still open",
-      web._window_said("no, use the other folder") == "ran" and q.empty()
-      and {"type": "call.say", "text": "no, use the other folder"} in sent)
+said = web._window_said("no, use the other folder")
+ans = q.get_nowait() if not q.empty() else None
+check("a sentence that isn't an answer goes to the brain as what they said, never as a no",
+      said == "aside" and isinstance(ans, dict) and ans.get("decision") == "aside"
+      and ans.get("reason") == "no, use the other folder")
 web._permission_queues.pop("perm_1", None)
 web._WIN_ASK.clear()
 web._WIN_CALL = None
