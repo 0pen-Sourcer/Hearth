@@ -5388,6 +5388,39 @@
           only passes it along.
         </p>
         <div id="plus-body"><div class="models-empty">Checking…</div></div>
+        <div id="callme" hidden>
+          <h4 style="margin:22px 0 8px;font-size:13px">Calls from <span data-agent-name>JARVIS</span></h4>
+          <div class="field">
+            <div class="label"><div class="name">Let <span data-agent-name>JARVIS</span> call me</div>
+              <div class="hint">On your paired phone, when something below happens. Off until you turn it on: each call runs <span data-agent-name>JARVIS</span> like a chat does.</div></div>
+            <div class="switch" data-key="call_me"></div>
+          </div>
+          <div id="callme-more">
+            <div class="field">
+              <div class="label"><div class="name">A reminder comes due</div>
+                <div class="hint">It says the reminder when you answer.</div></div>
+              <div class="switch" data-key="call_me_reminders"></div>
+            </div>
+            <div class="field">
+              <div class="label"><div class="name">Work finishes or needs you</div>
+                <div class="hint">A command running in the background, a helper, or a coding agent on this PC.</div></div>
+              <div class="switch" data-key="call_me_jobs"></div>
+            </div>
+            <div class="field">
+              <div class="label"><div class="name">A question waits for you</div>
+                <div class="hint">When <span data-agent-name>JARVIS</span> has asked to go ahead and nobody has answered for
+                  <select id="callme-wait" style="min-width:0;padding:2px 6px;margin:0 2px;background:var(--bg-2);color:var(--fg);border:1px solid var(--border);border-radius:6px;font:inherit"></select>. You can answer it in the call.</div></div>
+              <div class="switch" data-key="call_me_questions"></div>
+            </div>
+            <div class="field">
+              <div class="label"><div class="name">Quiet hours</div>
+                <div class="hint">No calls from <input type="time" id="callme-from" style="min-width:0;padding:2px 6px;background:var(--bg-2);color:var(--fg);border:1px solid var(--border);border-radius:6px;font:inherit">
+                  to <input type="time" id="callme-to" style="min-width:0;padding:2px 6px;background:var(--bg-2);color:var(--fg);border:1px solid var(--border);border-radius:6px;font:inherit">.</div></div>
+              <div class="switch" data-key="call_me_quiet"></div>
+            </div>
+          </div>
+          <div class="engine-note" style="margin-top:6px">A call comes to your phone as a notification with Answer and Decline, and on the app's own screen when it is open. It buzzes, but a web app can't play a ringtone or light up a locked screen the way a phone call does; unanswered for 45 seconds, it becomes a missed call. It never calls while you are using this PC, and not again for a few minutes after one you declined or missed.</div>
+        </div>
         </div><!-- /pane plus -->
 
         <div class="settings-pane" data-st="about" hidden>
@@ -18351,6 +18384,8 @@ async function renderPlus() {
     }
   }
   box.innerHTML = html;
+  const callme = $('callme');
+  if (callme) { callme.hidden = !s.plus; renderCallMe(); }
   const on = $('plus-on');
   if (on) on.onclick = async () => {
     on.disabled = true; on.textContent = 'Checking the key…';
@@ -18397,6 +18432,27 @@ async function renderPlus() {
   }
 }
 let _plusQR = null;
+
+// Calls from the agent (Settings, Plus): the switches save themselves; the wait
+// and the quiet hours are saved here, and the reasons fade while calls are off.
+function renderCallMe() {
+  const s = STATE.settings || {};
+  const wait = $('callme-wait'), from = $('callme-from'), to = $('callme-to'), more = $('callme-more');
+  if (!wait) return;
+  const now = Number(s.call_me_wait_min) || 3;
+  wait.innerHTML = [1, 2, 3, 5, 10, 15].map(m => `<option value="${m}"${m === now ? ' selected' : ''}>${m} min</option>`).join('');
+  from.value = s.call_me_quiet_from || '22:00';
+  to.value = s.call_me_quiet_to || '08:00';
+  more.style.opacity = s.call_me ? '' : '.45';
+  more.style.pointerEvents = s.call_me ? '' : 'none';
+  if (wait.dataset.wired) return;
+  wait.dataset.wired = '1';
+  wait.onchange = () => saveSetting('call_me_wait_min', Number(wait.value));
+  for (const [el, key] of [[from, 'call_me_quiet_from'], [to, 'call_me_quiet_to']]) {
+    el.onchange = () => { if (/^\d\d:\d\d$/.test(el.value)) saveSetting(key, el.value); };
+  }
+  document.querySelector('#callme .switch[data-key="call_me"]').addEventListener('click', () => setTimeout(renderCallMe, 0));
+}
 
 // Who asked to talk on a chat app (a pairing code), and who is let in.
 async function renderConnectorPeople() {

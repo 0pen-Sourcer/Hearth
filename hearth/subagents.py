@@ -135,6 +135,8 @@ def _default_completion_cb(agent_id: str, result: Dict[str, Any]) -> None:
     }
     with _NOTIF_LOCK:
         _PENDING_NOTIFICATIONS.append(notif)
+    _call_about(f"{persona or 'a helper'}{' (' + label + ')' if label else ''} "
+                f"{'finished' if ok else 'failed'}: {(text or '').strip()[:120]}", key="helper:" + agent_id)
     # Best-effort OS toast — never raise into the background thread.
     try:
         from . import tools as _t
@@ -211,7 +213,19 @@ def enqueue_notification(*, source: str, name: str, status: str,
                     and _n.get("result_text") == notif["result_text"]):
                 return _n
         _PENDING_NOTIFICATIONS.append(notif)
+    if source != "reminder":                    # a reminder calls for itself
+        _call_about(summary or f"{name or source} {'finished' if status == 'completed' else 'failed'}",
+                    key=f"{source}:{name}:{(result_text or '')[:60]}")
     return notif
+
+
+def _call_about(why: str, key: str = "") -> None:
+    """Background work that ended: a call to the phone, when they allowed calls for it."""
+    try:
+        from . import call_me
+        call_me.request("job", why, key=key)
+    except Exception:
+        pass
 
 
 def list_subagent_activity(limit: int = 50) -> List[Dict[str, Any]]:

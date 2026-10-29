@@ -377,7 +377,12 @@ class Hub:
             self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
         else:
             self.a.send(chat, question + " Reply yes to let me, anything else to stop.")
-        ev.wait(ASK_TIMEOUT_S)
+        try:
+            from .call_me import ask_wait
+            wait_s = ask_wait(ASK_TIMEOUT_S)     # long enough to be called about it and answer in the call
+        except Exception:
+            wait_s = ASK_TIMEOUT_S
+        ev.wait(wait_s)
         with self._lock:
             run["question"] = None
             ok = bool(run.get("answer"))
@@ -407,6 +412,14 @@ class Hub:
         history = chat_sync.from_chat(saved.get("messages") or [])[-16:]
         prior_failure = chat_sync.last_failure(saved.get("messages") or [])
         primer = bridge_status.channel_primer(self.a.label)
+        note = getattr(self.a, "call_note", None)
+        if callable(note):
+            try:
+                said = note(chat, cid)
+            except Exception:
+                said = ""
+            if said:
+                primer = dict(primer, content=primer["content"] + " " + said)
         parts: List[str] = []
         tools_used: List[Any] = []
         # Each step as the window keeps its own: what came back, how long, and where in

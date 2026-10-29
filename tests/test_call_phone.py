@@ -252,6 +252,26 @@ async def relay_room():
     told = [f for f in delivered if f.get("type") == "call.ended"]
     check(f"and a phone still talking into it is told so, once ({len(told)})", len(told) == 1 and told[0].get("gone"))
 
+    # The heartbeat: a phone that is there keeps the call, one gone quiet ends it.
+    RB.CALL_QUIET_S = 0.8
+    room.peer_up, room.chan = True, object()
+    room.on_call({"type": "call.start", "chat": "c_call", "ref": "r2"})
+    await asyncio.sleep(0.3)
+    beat = room.call
+    for _ in range(6):                                 # muted: no mic frames, only the heartbeat
+        room.on_call({"type": "call.alive"})
+        await asyncio.sleep(0.3)
+    check("a phone that keeps its heartbeat keeps the call, muted or not", room.call is beat and not beat.ended)
+    sent_out.clear()
+    await asyncio.sleep(2.2)
+    check("a phone gone quiet (frozen, or closed without a word) ends the call on the PC", room.call is None and beat.ended)
+    check("and the phone, if it comes back, hears that the PC ended it",
+          any(f.get("type") == "call.ended" and f.get("by") == "pc" and f.get("ref") == "r2" for f in sent_out))
+    delivered.clear()
+    room.on_call({"type": "call.alive"})
+    await asyncio.sleep(0.1)
+    check("a heartbeat into a call that ended is told so", any(f.get("type") == "call.ended" and f.get("gone") for f in delivered))
+
 asyncio.run(relay_room())
 
 print()

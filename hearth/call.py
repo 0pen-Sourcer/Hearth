@@ -56,7 +56,8 @@ class Call:
     """One call: a fed voice session, a speaker of its own, and the chat it talks in."""
 
     def __init__(self, send: Callable[[Dict[str, Any]], None], say: Callable[[str], Any], cid: str = "",
-                 save: Optional[Callable[[Dict[str, Any]], Any]] = None, ref: str = ""):
+                 save: Optional[Callable[[Dict[str, Any]], Any]] = None, ref: str = "",
+                 opener: Optional[Dict[str, Any]] = None, post: Optional[Callable[[str], Any]] = None):
         self.send = send              # a frame to the phone
         self.say = say                # a sentence heard from the phone, into the chat as a message
         self.save = save              # a setting changed in the call, kept where the window keeps it
@@ -70,6 +71,10 @@ class Call:
         self.ended = False
         self.ask_id = ""              # the last approval asked in the call
         self.heard_n = 0              # sentences heard so far: a later one makes an earlier wait moot
+        self.opener = opener          # a call it made itself: what it says first ({say, ask, question, tap})
+        self.post = post              # a line it says on its own, kept in the call's chat
+        self.leaving = False          # it said goodbye: the call ends once that has been heard
+        self.ready = False
         self._lock = threading.Lock()
 
     # ---------------------------------------------------------------- the voice out
@@ -101,14 +106,28 @@ class Call:
         self.lease = lease
         return True
 
-    def end(self) -> None:
+    def end(self, by: str = "") -> None:
+        """The call ends. `by` is "pc" when this side hung up, so the phone can say so."""
         if self.ended:
             return
         self.ended = True
         self.speaker.stop()
         if self.lease is not None:
             _rv.stop_continuous(self.lease)
-        self.send({"type": "call.ended", "seconds": int(time.time() - self.started), **({"ref": self.ref} if self.ref else {})})
+        self.send({"type": "call.ended", "seconds": int(time.time() - self.started),
+                   **({"ref": self.ref} if self.ref else {}), **({"by": by} if by else {})})
+
+    def hang_up(self) -> None:
+        """The agent ended the call (end_session): once its goodbye has been heard, it hangs up."""
+        if self.ended or self.leaving:
+            return
+        self.leaving = True
+
+        def later():
+            time.sleep(30)                      # the reply that should follow never came
+            if not self.ended:
+                self.end(by="pc")
+        threading.Thread(target=later, daemon=True, name="call-hang-up").start()
 
     # ---------------------------------------------------------------- settings
     def voice_info(self) -> Dict[str, Any]:
@@ -150,7 +169,27 @@ class Call:
             pass
 
     def _ready(self) -> None:
+        first, self.ready = not self.ready, True
+        if first and self.opener:
+            self._open()
+            return
         self.send({"type": "call.state", "state": "listening"})
+
+    def _open(self) -> None:
+        """A call it made: say why first, and ask the question it called about."""
+        o = self.opener or {}
+        say = str(o.get("say") or "").strip()
+        if say:
+            if self.post is not None:
+                try:
+                    self.post(say)
+                except Exception:
+                    pass
+            self._speak(say)
+        if o.get("ask"):
+            self.ask(str(o.get("question") or ""), tap=bool(o.get("tap")), aid=str(o["ask"]))
+        else:
+            self._settle()
 
     def _error(self, why: str) -> None:
         self.send({"type": "call.error", "detail": str(why)})
@@ -244,7 +283,11 @@ class Call:
             while not self.ended and idle < 2:
                 idle = 0 if self.speaker.busy() else idle + 1
                 time.sleep(0.1)
-            if not self.ended and n == self.heard_n:
+            if self.ended:
+                return
+            if self.leaving:
+                self.end(by="pc")
+            elif n == self.heard_n:
                 self.send({"type": "call.state", "state": "listening"})
         threading.Thread(target=wait, daemon=True, name="call-settle").start()
 

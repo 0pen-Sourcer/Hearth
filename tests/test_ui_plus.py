@@ -33,6 +33,18 @@ def check(label, cond):
         FAILS.append(label)
 
 
+def wait_for(cond, secs=5.0):
+    end = time.time() + secs
+    while time.time() < end:
+        try:
+            if cond():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.1)
+    return False
+
+
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
@@ -127,6 +139,42 @@ with sync_playwright() as pw:
     pg.wait_for_selector("[data-plus-forget]", timeout=10000)
     check("Yes, confirm pairs the phone under its name", [p["name"] for p in RB.phones()] == ["Pixel"]
           and "Pixel" in pg.inner_text("#plus-body"))
+
+    # ------------------------------------------------ calls from the agent
+    shots = os.environ.get("CALL_SHOTS") or home
+    pg.wait_for_selector("#callme:not([hidden])", timeout=10000)
+    check("with Plus, Calls from the agent is there", "Let JARVIS call me" in pg.inner_text("#callme"))
+    master = pg.locator('#callme .switch[data-key="call_me"]')
+    check("off until it is turned on", "on" not in (master.get_attribute("class") or "")
+          and web._load_settings()["call_me"] is False)
+    check("with its reasons faded while off", pg.evaluate("getComputedStyle(document.getElementById('callme-more')).opacity") == "0.45")
+    check("the reasons start switched on, for when calls are",
+          all("on" in (pg.get_attribute(f'#callme .switch[data-key="{k}"]', "class") or "")
+              for k in ("call_me_reminders", "call_me_jobs", "call_me_questions", "call_me_quiet")))
+    check("quiet hours 22:00 to 08:00, a question waits 3 min",
+          pg.input_value("#callme-from") == "22:00" and pg.input_value("#callme-to") == "08:00" and pg.input_value("#callme-wait") == "3")
+    check("and says once what a web app's call can't do", "can't play a ringtone" in pg.inner_text("#callme"))
+    pg.locator("#callme").scroll_into_view_if_needed()
+    pg.screenshot(path=os.path.join(shots, "w1_settings_off_dark.png"))
+    master.click()
+    check("turned on, it is kept", wait_for(lambda: web._load_settings()["call_me"] is True))
+    check("and the reasons come up", pg.evaluate("getComputedStyle(document.getElementById('callme-more')).opacity") == "1")
+    pg.select_option("#callme-wait", "5")
+    check("the wait is kept", wait_for(lambda: web._load_settings()["call_me_wait_min"] == 5))
+    pg.fill("#callme-from", "23:30")
+    pg.dispatch_event("#callme-from", "change")
+    check("and the quiet hours", wait_for(lambda: web._load_settings()["call_me_quiet_from"] == "23:30"))
+    pg.click('#callme .switch[data-key="call_me_jobs"]')
+    check("a reason switched off is kept", wait_for(lambda: web._load_settings()["call_me_jobs"] is False))
+    from hearth import call_me as CM  # noqa: E402
+    check("and the rules read what the window saved", CM.rules()["call_me"] and CM.rules()["call_me_wait_min"] == 5
+          and not CM.may_call("job")[0])
+    pg.locator("#callme").scroll_into_view_if_needed()
+    pg.screenshot(path=os.path.join(shots, "w2_settings_on_dark.png"))
+    pg.evaluate("document.documentElement.dataset.theme = 'light'")
+    time.sleep(0.4)
+    pg.screenshot(path=os.path.join(shots, "w3_settings_on_light.png"))
+    pg.evaluate("document.documentElement.dataset.theme = 'dark'")
 
     pg.click("[data-plus-forget]")
     pg.wait_for_function("!document.querySelector('[data-plus-forget]')", timeout=10000)
