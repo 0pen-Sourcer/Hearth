@@ -707,36 +707,19 @@ LMSTUDIO_SYNC_PATH = os.path.expanduser(
 # ---- ANSI palette ---------------------------------------------------------
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
-# The brand gradient follows the look saved in the window (Classic's violet, or
-# the accent), deep to light, so the terminal and the window agree.
-_GRADS = {
-    "classic": (55, 56, 92, 99, 141, 183), "violet": (55, 56, 92, 99, 141, 183),
-    "rose": (125, 161, 168, 175, 211, 218), "sage": (65, 71, 107, 108, 114, 151),
-    "ocean": (24, 25, 31, 67, 74, 110), "ember": (166, 172, 173, 209, 215, 223),
-    "mono": (241, 243, 245, 247, 250, 253),
-}
+# One palette for the terminal, in the shades of the window's look.
+from hearth.term_render import GRAD  # noqa: E402
 
-
-def _look_grad():
-    try:
-        from hearth.look_icon import saved
-        theme, accent = saved()
-        return _GRADS.get("classic" if theme == "classic" else accent, _GRADS["rose"])
-    except Exception:
-        return _GRADS["rose"]
-
-
-GRAD = [f"\033[38;5;{n}m" for n in _look_grad()]
 C_BRAND = GRAD[3]
 C_USER = "\033[1;97m"
 BOLD_ON = "\033[1m"
-C_BOT = "\033[38;5;223m"     # warm off-white
-C_TOOL = "\033[38;5;179m"
-C_OK = "\033[38;5;114m"
+C_BOT = "\033[38;5;253m"     # the reply's words: plain light grey
+C_TOOL = GRAD[4]
+C_OK = GRAD[4]
 C_DIM = "\033[38;5;240m"
-C_FRAME = "\033[38;5;138m"
+C_FRAME = GRAD[1]
 C_ERR = "\033[1;31m"
-C_WARN = "\033[38;5;215m"
+C_WARN = GRAD[5]
 C_ACCENT = C_BRAND
 _BOLD = "\033[1m"
 C_ADD = "\033[38;5;114m"   # green — added line
@@ -1696,7 +1679,7 @@ class JarvisCLI:
         ws = WORKSPACE.replace(home, "~") if WORKSPACE.lower().startswith(home.lower()) else WORKSPACE
         beside = [
             f"{C_BOLD}inglen{C_RESET} {C_DIM}{HEARTH_VERSION} · {_ed_label}{C_RESET}",
-            f"{C_BOT}{_AGENT_NAME}{C_RESET}{C_DIM} · {self._model_label()} · {ws}{C_RESET}",
+            f"{C_BOLD}{GRAD[4]}{_AGENT_NAME}{C_RESET}{C_DIM} · {self._model_label()}{C_DIM} · {ws}{C_RESET}",
         ]
         for i, ln in enumerate(art):
             color = GRAD[3 + i % 3]
@@ -4444,7 +4427,7 @@ class JarvisCLI:
             pass
         m = self.current_model or ""
         if not m or m == "local-model":
-            return f"{C_ERR}no model{C_RESET}"   # red + explicit — nothing's loaded, don't imply it is
+            return f"{C_BOLD}{C_WARN}no model{C_RESET}"
         if ("\\" in m or "/" in m) and m.lower().endswith(".gguf"):
             return os.path.basename(m)
         return m

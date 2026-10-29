@@ -18,11 +18,46 @@ RESET = ESC + "0m"
 DIM = ESC + "2m"
 ITAL = ESC + "3m"
 BOLD = ESC + "1m"
-ACCENT = ESC + "38;5;214m"
-OK = ESC + "38;5;114m"
+# Six shades of the look saved in the window (Classic's violet, or the accent),
+# deep to light: the terminal and the window wear the same colour. Only errors
+# and diff lines keep their own red and green.
+GRADS = {
+    "classic": (55, 56, 92, 99, 141, 183), "violet": (55, 56, 92, 99, 141, 183),
+    "rose": (125, 161, 168, 175, 211, 218), "sage": (65, 71, 107, 108, 114, 151),
+    "ocean": (24, 25, 31, 67, 74, 110), "ember": (166, 172, 173, 209, 215, 223),
+    "mono": (241, 243, 245, 247, 250, 253),
+}
+
+
+def look_grad() -> tuple:
+    try:
+        from .look_icon import saved
+        theme, accent = saved()
+        return GRADS.get("classic" if theme == "classic" else accent, GRADS["rose"])
+    except Exception:
+        return GRADS["rose"]
+
+
+def xterm_hex(n: int) -> str:
+    """An xterm-256 colour as #rrggbb, for styles that take hex."""
+    if n >= 232:
+        v = 8 + (n - 232) * 10
+        return f"#{v:02x}{v:02x}{v:02x}"
+    if n >= 16:
+        n -= 16
+        steps = (0, 95, 135, 175, 215, 255)
+        return "#" + "".join(f"{steps[c]:02x}" for c in (n // 36, n // 6 % 6, n % 6))
+    base = ("000000", "800000", "008000", "808000", "000080", "800080", "008080", "c0c0c0",
+            "808080", "ff0000", "00ff00", "ffff00", "0000ff", "ff00ff", "00ffff", "ffffff")
+    return "#" + base[n]
+
+
+GRAD = tuple(f"{ESC}38;5;{n}m" for n in look_grad())
+ACCENT = GRAD[3]
+OK = GRAD[4]
+WARN = GRAD[5]
+CODE = GRAD[5]
 ERR = ESC + "38;5;203m"
-WARN = ESC + "38;5;179m"
-CODE = ESC + "38;5;151m"
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 

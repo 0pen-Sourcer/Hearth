@@ -14,8 +14,10 @@ try:
 except Exception:
     HAVE_PT = False
 
+from .term_render import look_grad, xterm_hex  # noqa: E402
+
 STYLE = Style.from_dict({
-    "selected-option": "fg:#ffaf00 bold",
+    "selected-option": f"fg:{xterm_hex(look_grad()[4])} bold",
     "number": "fg:#808080",
     "bottom-toolbar": "noreverse fg:#808080",
 }) if HAVE_PT else None
