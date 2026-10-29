@@ -119,6 +119,7 @@ asking = [f for f in sent if f.get("state") == "asking"]
 check("an approval reaches the call screen with its words, its id and that it needs a tap",
       asking and asking[0].get("tap") is True and asking[0].get("ask") == "a1" and "delete old.log" in asking[0]["words"])
 check("and is said aloud, with the ask for a tap", wait_for(lambda: any(C.TAP_LINE in c for _, c in read_by)))
+wait_for(lambda: states(sent)[-1:] == ["listening"], 15)   # the yes comes once it has finished saying so
 sent.clear(); read_by.clear()
 hear("yes please")
 check("a spoken yes to it asks for the tap again, on screen",
