@@ -17219,7 +17219,7 @@ async function vsetDraw() {
     const now = winCall.A.loop.el.sinkId || 'default';
     html += outs.map(d => `<button class="opt" data-out="${esc(d.deviceId)}"><span class="lbl">${esc(d.label)}</span>${d.deviceId === now ? _VTICK : ''}</button>`).join('');
   } else {
-    html += `<div class="meta">${esc(_agentName())} speaks through this PC's default speakers or headphones. Change them in Windows sound settings.</div>`;
+    html += `<div class="meta">Plays through this PC's default speakers or headphones.</div>`;
   }
   if (winCall && winCall.A && !winCall.A.aec)
     html += "<div class=\"meta\">The echo can't be cancelled here, so use headphones: on speakers it may hear itself.</div>";
