@@ -161,6 +161,54 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or "mcp"
 
 
+# Words in an MCP package name that say it is an MCP server, not which service.
+_PKG_FILLER = {"mcp", "server", "servers", "modelcontextprotocol", "model", "context",
+               "protocol", "remote", "official", "community", "stdio", "sse", "hq"}
+
+
+def _base_domain(host: str) -> str:
+    """mcp.linear.app -> linear.app; api.example.co.uk -> example.co.uk."""
+    labels = [p for p in (host or "").lower().split(".") if p]
+    if labels and labels[0] == "www":
+        labels = labels[1:]
+    if len(labels) >= 3 and len(labels[-1]) == 2 and len(labels[-2]) <= 3:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:]) if len(labels) >= 2 else ""
+
+
+def server_site(spec: Dict[str, Any]) -> Tuple[str, str]:
+    """(site, kind) for a server's icon. A URL server is its host. A package
+    names its service ("@modelcontextprotocol/server-github" -> github.com)
+    when the server is given credentials, which is what marks it as a hosted
+    service rather than a local helper. kind is "folder" for a file server."""
+    spec = spec or {}
+    texts = [str(spec.get(k) or "") for k in ("url", "serverUrl", "command")]
+    texts += [str(a) for a in (spec.get("args") or [])]
+    for t in texts:
+        m = re.match(r"https?://([^/:?#]+)", t.strip(), re.I)
+        if m:
+            return _base_domain(m.group(1)), ""
+    name = ""
+    for t in texts[3:] + texts[2:3]:
+        t = t.strip()
+        if not t or t.startswith("-") or not re.search(r"mcp|server-|^@", t, re.I):
+            continue
+        t = re.sub(r"(?<=.)@[^/\\]*$", "", t)               # version pin
+        t = re.sub(r"\.(?:js|mjs|cjs|ts|py|exe|cmd)$", "", t, flags=re.I)
+        parts = re.split(r"[/\\]", t.lstrip("@"))
+        words = [w for w in re.split(r"[-_.:]+", parts[-1].lower()) if w and w not in _PKG_FILLER]
+        if not words and len(parts) > 1:
+            words = [w for w in re.split(r"[-_.]+", parts[-2].lower()) if w and w not in _PKG_FILLER]
+        if words:
+            name = re.sub(r"hq$", "", words[0])
+            break
+    if re.fullmatch(r"files?|filesystem|fs", name):
+        return "", "folder"
+    if name and re.fullmatch(r"[a-z0-9]+", name) and (spec.get("env") or spec.get("headers")):
+        return f"{name}.com", ""
+    return "", ""
+
+
 # ---------------------------------------------------------------------------
 # Asyncio side — runs on the dedicated _LOOP thread
 # ---------------------------------------------------------------------------
@@ -185,9 +233,12 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
             safe = f"{base}_{n}"
             print(f"[hearth.mcp] '{name}' sanitises to '{base}', already taken by "
                   f"'{_BRIDGES[base].get('raw_name')}'; using '{safe}'", flush=True)
+        site, kind = server_site(spec)
         _BRIDGES[safe] = {
             "name": safe,
             "raw_name": name,
+            "site": site,
+            "kind": kind,
             "state": "starting",
             "tools": [],
             "spawn_started_ts": time.time(),
@@ -400,6 +451,8 @@ def list_bridges() -> List[Dict[str, Any]]:
             out.append({
                 "name": safe,
                 "raw_name": b.get("raw_name", safe),
+                "site": b.get("site", ""),
+                "kind": b.get("kind", ""),
                 "state": b.get("state", "unknown"),
                 "transport": "stdio",
                 "tools": [{"name": t["name"], "description": t["description"]}

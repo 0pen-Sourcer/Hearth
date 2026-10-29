@@ -215,10 +215,10 @@ The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the wi
 - **Chat brain**: what JARVIS thinks with, as cards grouped by where it runs.
 - **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
 - **Behavior**: the agent's name, reasoning, house rules, saving memories on its own, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
-- **Appearance**: Classic, Light, Dark or System, Simple or Advanced, the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
+- **Appearance**: Classic, Light, Dark or System, how much detail chats show (Simple or Full), the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
 - **Connectors**: Telegram, Discord, WhatsApp, who is let in, and email.
 - **Plus**: Inglen Plus, a paid add-on with a phone app that reaches this PC from anywhere; pairing a phone happens here.
-- **Built-in server** and **MCP servers** (in the Advanced view): the engine's settings and other tools' servers.
+- **Built-in server** and **MCP servers**: the engine's settings and other tools' servers.
 - **About**: version, updates, repair, start at login, and the tour.
 
 Everything saves as you change it, with no restart.
