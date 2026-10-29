@@ -82,6 +82,7 @@ srv.shutdown()
 subagents.spawn_subagent, xa.spawn = real_sub, real_xa
 real_which, real_mode = xa._which, tools.approval_mode
 xa._which = lambda names: sys.executable if names == ["kimi"] else real_which(names)
+getattr(xa, "forget_found", lambda: None)()   # what was found before the stand-in is forgotten
 tools.approval_mode = lambda: "ask"
 r = xa.spawn("kimi", "hello", cwd=tempfile.mkdtemp())
 check("Kimi Code is refused when Hearth asks before acting", not r.get("ok") and "Auto" in (r.get("error") or ""))

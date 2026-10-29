@@ -211,8 +211,8 @@ def _is_the_program(path: str) -> bool:
     return _ANSWERS[key]
 
 
-# Where each agent was found, kept half a minute: every turn's instructions name
-# the installed agents, and looking all of them up on PATH took over a second.
+# The installed agents, kept half a minute: every turn's instructions name them,
+# and looking all of them up on PATH took over a second. Starting one looks again.
 _FOUND: Dict[str, Any] = {}
 
 
@@ -224,17 +224,6 @@ def forget_found() -> None:
 def find(aid: str) -> Optional[str]:
     """Where an agent's CLI is: on PATH, or where its installer or desktop app
     keeps it. With more than one, the first that answers as the program."""
-    import time as _t
-    key = (aid, os.environ.get("PATH") or "")
-    hit = _FOUND.get(aid)
-    if hit and hit[0] == key and _t.time() - hit[1] < 30:
-        return hit[2]
-    path = _find(aid)
-    _FOUND[aid] = (key, _t.time(), path)
-    return path
-
-
-def _find(aid: str) -> Optional[str]:
     spec = AGENTS.get(aid) or {}
     hits = _which_all(spec.get("exe") or [])
     if not hits:
@@ -305,10 +294,18 @@ def _note_refused(aid: str, why: str) -> None:
 
 def available() -> List[Dict[str, Any]]:
     """The agent CLIs installed on this machine."""
+    import time as _t
+    key = os.environ.get("PATH") or ""
+    hit = _FOUND.get("available")
+    if hit and hit[0] == key and _t.time() - hit[1] < 30:
+        paths = hit[2]
+    else:
+        paths = {aid: find(aid) for aid in AGENTS}
+        _FOUND["available"] = (key, _t.time(), paths)
     turned_away = refused()
     out = []
     for aid, spec in AGENTS.items():
-        path = find(aid)
+        path = paths.get(aid)
         if path:
             out.append({"id": aid, "label": spec["label"], "maker": spec.get("maker", ""), "path": path,
                         "tested": aid in VERIFIED, "billing": spec.get("billing", ""),

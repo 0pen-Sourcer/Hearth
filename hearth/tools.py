@@ -8667,6 +8667,7 @@ _DRYRUN_GUARDED = {
     "race_helpers",                      # starts agent programs and runs a command
     "forge_generate", "forge_shutdown",  # drive an external image server
     "load_model",                        # starts the engine and fills the graphics card
+    "agent_sessions",                    # sends a message into a coding agent's session
 }
 
 
@@ -9629,6 +9630,7 @@ _TOOL_CATEGORY = {
     # Sub-agents
     "spawn_subagent": "Sub-agents", "list_subagent_personas": "Sub-agents",
     "get_subagent_result": "Sub-agents", "launch_team": "Sub-agents", "delegate": "Sub-agents",
+    "agent_sessions": "Sub-agents",
     "tell_subagent": "Sub-agents",
     "helper_changes": "Sub-agents",
     "message_helper": "Sub-agents",
