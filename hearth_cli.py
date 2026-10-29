@@ -1338,8 +1338,8 @@ class JarvisCLI:
             model, cid = getattr(self, "current_model", ""), ch["id"]
 
             def _name():
-                from hearth import headless as _hl
-                chat_sync.retitle(cid, chat_sync.title_for(opening, lambda p: _hl.one_shot(p, model)))
+                from hearth import headless as _hl, memory_pass as _mp
+                chat_sync.retitle(cid, chat_sync.title_for(opening, lambda p: _mp.ask_once(p) or _hl.one_shot(p, model)))
             threading.Thread(target=_name, daemon=True).start()
         ch["sent"] = len(self.messages)
         self._chat_keep()

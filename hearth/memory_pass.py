@@ -83,6 +83,19 @@ def choose_llm(model: str = "") -> Tuple[Callable[[str, str], str], str]:
     return _complete(base, key, model or os.environ.get("LOCAL_MODEL") or ""), "cloud"
 
 
+def ask_once(prompt: str, timeout: float = 30) -> str:
+    """A short answer (a chat's title) from the same model the pass uses, on every
+    brain kind, within `timeout`. Empty when nothing answers in time."""
+    try:
+        from . import claude_brain
+        if not _local_route() and claude_brain.active():
+            return claude_brain.quick(prompt, timeout=timeout, any_agent=True) or ""
+        llm, _where = choose_llm()
+        return llm("", prompt) or ""
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------- the pass
 def _messages_for(chat_id: str, snapshot: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """The chat as kept on disk (clean of what was put in front of messages),

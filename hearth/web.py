@@ -1912,6 +1912,14 @@ def one_shot(prompt: str, max_tokens: int = 512, timeout: float = 20) -> str:
     return _ask(prompt, model_id, base=LOCAL_API_BASE, key=api_key, max_tokens=max_tokens, timeout=timeout)
 
 
+def title_ask(prompt: str) -> str:
+    """A chat's title, from the model the memory pass would use: one loaded on
+    this PC first (free), else the brain's own one-shot, on every brain kind
+    (protocol agents included: one short request per chat)."""
+    from .memory_pass import ask_once
+    return ask_once(prompt) or one_shot(prompt, timeout=20)
+
+
 _IDEAS_FILE = os.path.join(LOGS_DIR, "reminder_ideas.json")
 _IDEAS_LOCK = threading.Lock()
 
@@ -5780,7 +5788,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(400, {"error": "empty text"})
 
         from . import chat_sync
-        return self._send_json(200, {"title": chat_sync.title_for(first, lambda p: one_shot(p, timeout=20))})
+        return self._send_json(200, {"title": chat_sync.title_for(first, title_ask)})
 
     def _download_logs(self) -> None:
         log_path = os.path.join(LOGS_DIR, "activity.jsonl")

@@ -602,8 +602,8 @@ class Hub:
 
 
 def _ask_brain(prompt: str) -> str:
-    from .web import one_shot
-    return one_shot(prompt, timeout=20)
+    from .web import title_ask
+    return title_ask(prompt)
 
 
 def name_chat(cid: str, text: str, reply: str, ask: Optional[Callable[[str], str]] = None) -> None:
