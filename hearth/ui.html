@@ -2842,6 +2842,8 @@
   #view-reminders { overflow-y: auto; }
   .rm-page { max-width: 760px; margin: 0 auto; padding: 18px 20px 40px; }
   .rm-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .files-places { padding: 12px 20px 0; margin-bottom: 4px; flex-wrap: wrap; }
+  .file-meta .file-in { color: var(--fg-faint); }
   .rm-n { color: var(--fg-faint); margin-left: 5px; }
   .convo .convo-new { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-left: 6px; }
   .convo:hover .convo-new { display: none; }
@@ -4445,6 +4447,7 @@
         <label class="files-hidden-toggle" title="Folders and files starting with a dot or two underscores belong to apps"><input type="checkbox" id="files-show-hidden"> Show hidden</label>
         <button class="btn-mini" id="btn-files-reveal" title="Open this folder in your file explorer" style="margin-left:8px">Open folder</button>
       </div>
+      <div class="rm-tabs files-places" id="files-places"></div>
       <div class="list-pane files-pane" id="file-list"></div>
     </section>
 
@@ -10314,7 +10317,7 @@ function showView(name) {
   if (name === 'memory') refreshMemory();
   if (name === 'reminders') refreshReminders();
   if (name === 'skills') refreshSkills();
-  if (name === 'files') refreshFiles(STATE.filePath || '');
+  if (name === 'files') openFiles();
   if (name === 'logs') { refreshLogs(); startLogsAutoRefresh(); }
   else { stopLogsAutoRefresh(); }
   if (name === 'models') refreshModelsView();
@@ -13351,10 +13354,48 @@ document.querySelectorAll('.mem-view-btn').forEach(btn => {
 // ============================================================
 // FILES view
 // ============================================================
-async function refreshFiles(path = '') {
+// The places the Files tab opens on: Recent (what Inglen touched), the person's
+// own folders, and Inglen's folder. It opens on Recent when there is any.
+const FILE_PLACES = { list: null };
+async function openFiles() {
+  if (!FILE_PLACES.list) {
+    try { FILE_PLACES.list = (await api('/api/files/places')).places || []; } catch { FILE_PLACES.list = []; }
+    renderPlaces();
+  }
+  if (STATE.filePlace) return refreshFiles(STATE.filePath || '', STATE.filePlace);
+  let recent = [];
+  try { recent = (await api('/api/files/recent')).entries || []; } catch {}
+  const first = recent.length ? 'recent'
+    : (FILE_PLACES.list.find(p => p.id === 'documents') || FILE_PLACES.list.find(p => p.id !== 'recent') || {}).id || 'inglen';
+  return refreshFiles('', first);
+}
+function renderPlaces() {
+  const box = $('files-places');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const p of FILE_PLACES.list || []) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lg-chip' + (p.id === STATE.filePlace ? ' on' : '');
+    b.dataset.place = p.id;
+    b.textContent = p.label;
+    b.addEventListener('click', () => refreshFiles('', p.id));
+    box.append(b);
+  }
+}
+async function refreshFiles(path = '', place = STATE.filePlace || 'inglen') {
   STATE.filePath = path;
+  STATE.filePlace = place;
+  renderPlaces();
   try {
-    const r = await api('/api/files?path=' + encodeURIComponent(path));
+    if (place === 'recent') {
+      const r = await api('/api/files/recent');
+      STATE.filePathAbs = '';
+      $('file-crumb').innerHTML = '';          // the chip above says where this is
+      renderFiles(r.entries || []);
+      return;
+    }
+    const r = await api('/api/files?place=' + encodeURIComponent(place) + '&path=' + encodeURIComponent(path));
     if (r.error) { toast('Files', r.error, 'err'); return; }
     STATE.filePathAbs = r.abs || '';   // absolute path of the folder we're in (r.path is relative)
     renderCrumb(r.path);
@@ -13381,7 +13422,8 @@ function renderCrumb(path) {
   const segs = (path || '').split(/[\\/]/).filter(Boolean);
   const c = $('file-crumb');
   c.innerHTML = '';
-  const root = document.createElement('span'); root.className = 'seg'; root.textContent = 'Workspace';
+  const here = (FILE_PLACES.list || []).find(p => p.id === STATE.filePlace);
+  const root = document.createElement('span'); root.className = 'seg'; root.textContent = here ? here.label : 'Inglen';
   root.addEventListener('click', () => refreshFiles(''));
   c.append(root);
   let cur = '';
@@ -13404,8 +13446,10 @@ function renderFiles(entries) {
   const hidden = entries.filter(f => /^(\.|__)/.test(f.name)).length;
   if (!showHidden) entries = entries.filter(f => !/^(\.|__)/.test(f.name));
   $('files-sub').textContent = `${entries.length} item${entries.length === 1 ? '' : 's'}` + (hidden && !showHidden ? ` · ${hidden} hidden` : '');
+  const reveal = $('btn-files-reveal');
+  if (reveal) reveal.hidden = !STATE.filePathAbs;
   if (!entries.length) {
-    list.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">empty</div>`;
+    list.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">${STATE.filePlace === 'recent' ? 'Nothing yet' : 'Empty'}</div>`;
     return;
   }
   for (const f of entries) {
@@ -13416,14 +13460,17 @@ function renderFiles(entries) {
       <span class="file-icn">${ic}</span>
       <div class="body">
         <div class="name">${esc(f.name)}</div>
-        <div class="file-meta">${f.is_dir ? 'folder' : fmtBytes(f.size)} · ${fmtRel(f.mtime)}</div>
+        <div class="file-meta">${f.is_dir ? 'folder' : fmtBytes(f.size)} · ${fmtRel(f.mtime)}${f.folder ? ` <span class="file-in">· ${esc(f.folder.split(/[\\/]/).filter(Boolean).pop() || f.folder)}</span>` : ''}</div>
       </div>
       <div class="row-actions"></div>
     `;
     if (f.is_dir) {
-      div.addEventListener('click', () => refreshFiles((STATE.filePath ? STATE.filePath + '/' : '') + f.name));
+      div.addEventListener('click', () => refreshFiles((STATE.filePath ? STATE.filePath + '/' : '') + f.name, STATE.filePlace));
     } else {
-      const fullPath = (STATE.filePath ? STATE.filePath + '/' : '') + f.name;
+      // Every place but Inglen's folder is outside the workspace, so files go by their whole path.
+      const abs = STATE.filePathAbs || '';
+      const fullPath = f.path || (abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + f.name
+                                      : (STATE.filePath ? STATE.filePath + '/' : '') + f.name);
       const actions = div.querySelector('.row-actions');
       const openBtn = document.createElement('button');
       openBtn.className = 'file-open-btn';
@@ -13529,9 +13576,10 @@ async function fileOpenMenu(anchor, path) {
     else if (b.dataset.fo === 'copy') navigator.clipboard.writeText(path).then(() => toast('Path copied', '', 'ok', 1500));
     else if (b.dataset.fo === 'attach') {
       const name = path.split(/[\\/]/).pop();
-      // The model is given the whole path, not one from the workspace down.
+      // The model is given the whole path (the Files tab names every file by it).
       const abs = STATE.filePathAbs || '';
-      const full = abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + name : path;
+      const full = /^([A-Za-z]:[\\/]|\/)/.test(path) ? path
+        : abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + name : path;
       if (!_pendingAttachments.some(x => x.path === full)) {
         _pendingAttachments.push({ name, path: full, isImage: IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()) });
         _renderAttachTray();
