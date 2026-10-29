@@ -593,7 +593,9 @@ def installer_asset(tag: str = "") -> dict:
         is_lite_asset = "-lite-" in n.lower()
         if is_lite_asset == lite:
             return {"name": n, "url": a.get("browser_download_url"),
-                    "size": int(a.get("size") or 0), "tag": rel.get("tag_name")}
+                    "size": int(a.get("size") or 0), "tag": rel.get("tag_name"),
+                    # GitHub's own hash of the file it holds ("sha256:..."), when it gives one.
+                    "digest": str(a.get("digest") or "")}
     return {"error": f"no {edition.label()} installer in the latest release"}
 
 
@@ -618,7 +620,14 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
         dest_dir = Path(os.path.expanduser("~"))
     dest = dest_dir / asset["name"]
     if dest.exists() and dest.stat().st_size == asset["size"]:
-        return {"ok": True, "path": str(dest), "already": True}
+        bad = _digest_mismatch(str(dest), asset.get("digest", ""))
+        if not bad:
+            _VERIFIED.add(os.path.abspath(str(dest)))
+            return {"ok": True, "path": str(dest), "already": True}
+        try:
+            dest.unlink()
+        except OSError:
+            pass
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         _download_with_resume(asset["url"], dest, tmp, on_progress,
@@ -629,7 +638,34 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
                 "error": "download cancelled (progress kept, it will resume)"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    bad = _digest_mismatch(str(dest), asset.get("digest", ""))
+    if bad:
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        return {"ok": False, "error": bad}
+    _VERIFIED.add(os.path.abspath(str(dest)))
     return {"ok": True, "path": str(dest), "tag": asset.get("tag")}
+
+
+# Installers this run downloaded and checked; launch_installer runs no other file.
+_VERIFIED: set = set()
+
+
+def _digest_mismatch(path: str, digest: str) -> str:
+    """'' when the file matches the hash GitHub gives for it (or none is given), else why not."""
+    algo, _, want = (digest or "").partition(":")
+    if algo.lower() != "sha256" or not want:
+        return ""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    if h.hexdigest().lower() == want.strip().lower():
+        return ""
+    return "the downloaded installer doesn't match the release, so it wasn't kept; try again"
 
 
 def launch_installer(path: str, restart: bool = True) -> dict:
@@ -647,6 +683,8 @@ def launch_installer(path: str, restart: bool = True) -> dict:
     import time as _t
     if not path or not os.path.isfile(path):
         return {"ok": False, "error": "installer not found (download it first)"}
+    if os.path.abspath(path) not in _VERIFIED:
+        return {"ok": False, "error": "only an installer Inglen downloaded and checked runs from here"}
 
     def _handoff():
         try:
