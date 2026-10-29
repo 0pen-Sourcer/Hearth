@@ -1179,7 +1179,7 @@ with sync_playwright() as pw:
       document.querySelector('[data-rm="upcoming"]').click(); await new Promise(r => setTimeout(r, 50));
       await new Promise(r => setTimeout(r, 50));
       const none = $('rm-ideas').querySelectorAll('[data-rmask]').length;
-      const learn = ($('rm-ideas').querySelector('.rm-learn') || {}).textContent || '';
+      const learn = $('rm-ideas').textContent || '';
       ideas = [{ title: 'Exam form', ask: 'Remind me tomorrow at 10am to finish the exam form' }];
       RM_IDEAS.list = null; RM_IDEAS.asked = 0;
       await refreshReminders(); await new Promise(r => setTimeout(r, 50));
@@ -1192,8 +1192,8 @@ with sync_playwright() as pw:
           and "Repeats daily" in rem["up"][1] and rem["fits"])
     check(f"done ones have their own list; ideas are the server's, made from what was talked about, none when it has none {rem['examples']}",
           rem["done"] == 1 and rem["none"] == 0 and rem["examples"] == ["Remind me tomorrow at 10am to finish the exam form"])
-    check(f"with no ideas yet, the page says they come as JARVIS learns how you work {rem['learn']!r}",
-          "learns how you work" in rem["learn"])
+    check(f"with no ideas yet, the section stays empty instead of explaining itself {rem['learn']!r}",
+          rem["learn"] == "")
     # The next turn's history had each reply's text only, so the model decided it
     # had never run the tools it ran.
     hist = pg.evaluate("""() => historyOf([
