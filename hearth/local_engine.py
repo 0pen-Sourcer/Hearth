@@ -12,9 +12,9 @@ LEGACY_PORT = 1234          # the engine's port before it had its own (LM Studio
 
 
 def builtin_port() -> int:
-    from . import env as _env
+    from . import env as envmod
     try:
-        port = int(_env.get("BUILTIN_PORT", "") or 0)
+        port = int(envmod.get("BUILTIN_PORT", "") or 0)
     except ValueError:
         port = 0
     return port if 1024 <= port <= 65535 and port != LEGACY_PORT else DEFAULT_PORT
@@ -22,9 +22,9 @@ def builtin_port() -> int:
 
 def helper_port() -> int:
     """The second model (for helpers) runs beside it, on the next port."""
-    from . import env as _env
+    from . import env as envmod
     try:
-        port = int(_env.get("HELPER_PORT", "") or 0)
+        port = int(envmod.get("HELPER_PORT", "") or 0)
     except ValueError:
         port = 0
     return port if 1024 <= port <= 65535 and port != LEGACY_PORT + 1 else builtin_port() + 1
