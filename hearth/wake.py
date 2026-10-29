@@ -2,13 +2,14 @@
 user says a configured phrase (the configured wake word).
 
 Resource budget: low.
-  - Energy-gated: only does whisper inference when mic input crosses a
-    voice-activity threshold (so it sleeps through silence at ~0% CPU).
-  - When voice IS detected, records up to 3 seconds, transcribes with the
-    same faster-whisper instance used by listen.py, fuzzy-matches against
-    the wake phrases.
-  - Reuses the loaded whisper model — no extra VRAM, ~5% CPU spikes when
-    audio is detected.
+  - Energy-gated against the room's own level, so silence, a fan or a hum cost
+    nothing but reading the mic (~0% CPU).
+  - A run of sound up to a few seconds long is checked with a small
+    faster-whisper model, the first words of its first seconds only. A long run
+    (a TV, music) is checked once, then left alone until a real break.
+  - The model is loaded when there is something to check and let go after
+    WAKE_IDLE_UNLOAD_S of mic audio with nothing to check; while voice mode has
+    dictation's model loaded, that one is used and nothing more is held.
 
 Public API:
     from hearth.wake import WakeListener
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import os
 from . import env as _env
+import sys
 import threading
 import time
 from typing import Callable, List, Optional
@@ -44,6 +46,18 @@ PREROLL_S = 0.3           # kept from before the onset: a soft first consonant
 MAX_UTTERANCE_S = 4.0     # a wake word opens a sentence; the rest is not needed
 MIN_UTTERANCE_S = 0.3
 COOLDOWN_S = 4.0          # don't fire twice in this window after a wake
+FLOOR_RISE = 0.02         # how fast the room's own level is followed upward, per block
+FLOOR_FALL = 0.2          # and downward
+BUSY_TAIL_S = 2.0         # the break a long run of sound (a TV, music) needs before the next check
+FLOOR_TIMES = 2.5         # a block this far over the room's level counts as sound
+# The wake check has a small model of its own, loaded when there is something to
+# check and let go after a quiet while. It used the model picked for dictation,
+# loaded at start and held for as long as Inglen ran (base.en: ~300 MB; large: GBs).
+# base.en: tiny.en, half the cost per check, missed one name in twelve in the C36 measurement.
+WAKE_MODEL = _env.get("WAKE_MODEL", "base.en")
+IDLE_UNLOAD_S = float(_env.get("WAKE_IDLE_UNLOAD_S", "600"))
+CHECK_S = 3.0             # of an utterance, what the check listens to
+CHECK_TOKENS = 10         # and how many words' worth it writes down
 
 DEFAULT_WAKE_PHRASES = [
     "jarvis", "hey jarvis", "hi jarvis", "yo jarvis",
@@ -140,6 +154,66 @@ def _matches_wake(transcript: str, phrases: List[str]) -> Optional[str]:
     return None
 
 
+# ----- The wake check's model -----
+
+_OWN = None               # the small model this module loaded, when it has one
+_USED = 0.0
+_MODEL_LOCK = threading.Lock()
+
+
+def _download_root() -> str:
+    from . import listen as _ll
+    return os.path.join(_ll.VOICES_DIR, "whisper")
+
+
+def _fetch_model() -> None:
+    """Put the small model on disk ahead of time (not in memory), so the first
+    wake isn't kept waiting on a download."""
+    try:
+        from faster_whisper.utils import download_model  # type: ignore
+        os.makedirs(_download_root(), exist_ok=True)
+        download_model(WAKE_MODEL, cache_dir=_download_root())
+    except Exception:
+        pass
+
+
+def _model(now: float = 0.0):
+    """The model to check an utterance with: dictation's, when voice is in use and
+    has it loaded already (nothing more held), else this module's small one,
+    loaded now and let go after IDLE_UNLOAD_S without anything to check. `now`
+    is the listener's clock: seconds of mic audio heard."""
+    global _OWN, _USED
+    _USED = now
+    from . import listen as _ll
+    shared = getattr(_ll, "_model", None)
+    if shared is not None:
+        return shared
+    with _MODEL_LOCK:
+        if _OWN is None:
+            try:
+                from faster_whisper import WhisperModel  # type: ignore
+                _OWN = WhisperModel(WAKE_MODEL, device="cpu", compute_type="int8",
+                                    download_root=_download_root())
+            except Exception:
+                return None
+        return _OWN
+
+
+def _release_if_idle(now: float) -> None:
+    global _OWN
+    if _OWN is not None and now - _USED > IDLE_UNLOAD_S:
+        with _MODEL_LOCK:
+            _OWN = None
+        import gc
+        gc.collect()
+        if sys.platform.startswith("linux"):
+            try:                                      # hand the freed memory back to the system
+                import ctypes
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:
+                pass
+
+
 class _Segmenter:
     """Cuts the stream of mic blocks into utterances for the wake check.
 
@@ -160,11 +234,32 @@ class _Segmenter:
         self.buf: list = []
         self.in_voice = False
         self.quiet_s = 0.0
+        self.floor = 0.0          # the room's own level: a fan, a hum
+        self.busy = False         # a long run of sound already checked once: wait for a pause
 
     def feed(self, block):
-        """Take one block (1-D float array); return an utterance when one ends."""
+        """Take one block (1-D float array); return an utterance when one ends.
+
+        "Loud" is over the fixed threshold and over the room's own level, which
+        drops at once to a quieter block and creeps up slowly, so a fan or a hum
+        stops counting as speech (it used to hold an utterance open forever, and
+        the wake word went deaf). A run of sound longer than MAX_UTTERANCE_S (a TV,
+        music) is checked once, from its start, then left alone until a pause."""
         import numpy as np
-        loud = float(np.sqrt(np.mean(block * block))) > self.threshold
+        rms = float(np.sqrt(np.mean(block * block)))
+        # The room's level moves only outside a normal utterance: on quiet blocks
+        # between them, and while a long run of sound (a TV, a fan) is waited out. It
+        # falls faster than it rises, but not at once, so the short gaps between
+        # a TV's words don't reset it.
+        loud = rms > max(self.threshold, self.floor * FLOOR_TIMES)
+        if self.busy or (not self.in_voice and not loud):
+            step = FLOOR_FALL if rms < self.floor else FLOOR_RISE
+            self.floor = rms if self.floor == 0.0 else self.floor + (rms - self.floor) * step
+        if self.busy:
+            self.quiet_s = 0.0 if loud else self.quiet_s + self.block_s
+            if self.quiet_s >= BUSY_TAIL_S:
+                self.busy, self.quiet_s = False, 0.0
+            return None
         if not self.in_voice:
             if loud:
                 self.in_voice = True
@@ -176,6 +271,12 @@ class _Segmenter:
         self.quiet_s = 0.0 if loud else self.quiet_s + self.block_s
         if len(self.buf) * self.block_s < MAX_UTTERANCE_S:
             self.buf.append(block.copy())
+        elif self.quiet_s < SILENCE_TAIL_S:
+            # Still going past the longest a wake sentence needs: check its start once.
+            audio = np.concatenate(self.buf)
+            self.buf, self.in_voice, self.busy = [], False, True
+            self.preroll.clear()
+            return audio
         if self.quiet_s < SILENCE_TAIL_S:
             return None
         audio = np.concatenate(self.buf)
@@ -196,22 +297,22 @@ class WakeListener:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._last_wake_ts = 0.0
+        self._heard_s = 0.0       # seconds of mic audio read: the clock the model is let go by
 
     def is_active(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> bool:
         """Start the listener. Returns False if deps missing."""
+        # Only that the pieces are there: nothing is loaded until there is
+        # something to check (see _model).
+        import importlib.util
         try:
-            import sounddevice as _sd  # noqa
-            import numpy as _np         # noqa
-            from . import listen as _ll
-            if not _ll.is_available():
+            if not all(importlib.util.find_spec(m) for m in ("sounddevice", "numpy", "faster_whisper")):
                 return False
-            # Warm the model so first detection is fast
-            _ll._try_load_model()
-        except Exception:
+        except (ImportError, ValueError):
             return False
+        threading.Thread(target=_fetch_model, daemon=True, name="hearth-wake-fetch").start()
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="hearth-wake")
         self._thread.start()
@@ -332,6 +433,8 @@ class WakeListener:
                     stream = None
                     _ll.wake_released.set()
                     continue
+                self._heard_s += BLOCK_S
+                _release_if_idle(self._heard_s)
                 audio = seg.feed(block[:, 0])
                 if audio is not None and time.time() - self._last_wake_ts > COOLDOWN_S:
                     self._maybe_wake(audio)
@@ -340,15 +443,16 @@ class WakeListener:
             _ll.wake_released.set()
 
     def _maybe_wake(self, audio) -> None:
-        from . import listen as _ll
-        model = _ll._try_load_model()
+        model = _model(self._heard_s)
         if model is None:
             return
         try:
+            # The name opens what is said to it: the first words of the first
+            # seconds are all the check needs, so it stops there (a TV's long
+            # sentences cost a full transcription each before).
             segments, _info = model.transcribe(
-                audio, language="en", beam_size=1, vad_filter=False,
-                # Be conservative — wake words are short, no need for long ctx
-                without_timestamps=True,
+                audio[:int(self.sample_rate * CHECK_S)], language="en", beam_size=1, vad_filter=False,
+                without_timestamps=True, condition_on_previous_text=False, max_new_tokens=CHECK_TOKENS,
             )
             text = " ".join(s.text.strip() for s in segments).strip()
         except Exception:

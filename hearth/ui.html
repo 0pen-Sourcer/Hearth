@@ -812,6 +812,19 @@
     color: var(--fg-dim);
     animation: emptyFade .5s ease both;
   }
+  /* Ready: the mark and its line in the middle, the suggestions down by the box. */
+  .chat-body .empty::before { content: ''; flex: 1; }
+  /* As wide as the composer row under it (the chat pads 40px a side, the row 20px), so the rows line up with it. */
+  .chat-body .empty .empty-offers { flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
+    gap: 2px; align-self: stretch; margin: 0 -20px; }
+  .chat-body .empty .empty-sub:empty { display: none; }
+  .empty-offer { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0;
+    border-radius: 10px; background: transparent; color: var(--fg-dim); font: inherit; font-size: 13.5px;
+    text-align: left; cursor: pointer; }
+  .empty-offer:hover { background: var(--bg-2); color: var(--fg); }
+  .empty-offer .eo-ico { width: 16px; height: 16px; flex: none; color: var(--fg-faint); display: grid; place-items: center; }
+  .empty-offer .eo-ico svg { width: 15px; height: 15px; }
+  .empty-offer .eo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes emptyFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   /* The mark is the Nook: a bracket with a dot at home in it, drawn in three
      states. No model: a faint bracket and the dot as an empty ring, breathing
@@ -860,7 +873,7 @@
     .empty.idle-nomodel .empty-mark .hm-dot { opacity: .55; }
     .empty.booting .empty-mark:not(.has-pct) .hm-trace { stroke-dasharray: 100 300; stroke-dashoffset: 0; }
   }
-  .empty-title { color: var(--fg); font-size: 16px; font-weight: 500; }
+  .empty-title { color: var(--fg); font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
   .empty-sub { font-size: 13px; max-width: 480px; text-align: center; color: var(--fg-dim); }
   .examples {
     display: grid; grid-template-columns: repeat(2, 1fr);
@@ -2871,6 +2884,8 @@
   #view-reminders { overflow-y: auto; }
   .rm-page { max-width: 760px; margin: 0 auto; padding: 18px 20px 40px; }
   .rm-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .files-places { padding: 12px 20px 0; margin-bottom: 4px; flex-wrap: wrap; }
+  .file-meta .file-in { color: var(--fg-faint); }
   .rm-n { color: var(--fg-faint); margin-left: 5px; }
   .convo .convo-new { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-left: 6px; }
   .convo:hover .convo-new { display: none; }
@@ -4501,6 +4516,7 @@
         <label class="files-hidden-toggle" title="Folders and files starting with a dot or two underscores belong to apps"><input type="checkbox" id="files-show-hidden"> Show hidden</label>
         <button class="btn-mini" id="btn-files-reveal" title="Open this folder in your file explorer" style="margin-left:8px">Open folder</button>
       </div>
+      <div class="rm-tabs files-places" id="files-places"></div>
       <div class="list-pane files-pane" id="file-list"></div>
     </section>
 
@@ -5085,7 +5101,7 @@
             <button type="button" class="ap-mode" data-mode="light"><span class="ap-prev ap-prev-light"><i></i><i></i></span><b>Light</b><small>Bright, for daytime</small></button>
             <button type="button" class="ap-mode" data-mode="dark"><span class="ap-prev ap-prev-dark"><i></i><i></i></span><b>Dark</b><small>Low glare, warm greys</small></button>
             <button type="button" class="ap-mode" data-mode="system"><span class="ap-prev ap-prev-sys"><i></i><i></i></span><b>System</b><small>Follows your Windows setting</small></button>
-            <button type="button" class="ap-mode" data-mode="classic"><span class="ap-prev ap-prev-classic"><i></i><i></i></span><b>Classic</b><small>The original violet look, the default</small></button>
+            <button type="button" class="ap-mode" data-mode="classic"><span class="ap-prev ap-prev-classic"><i></i><i></i></span><b>Classic</b><small>The original violet look</small></button>
           </div>
         </div>
         <div class="ap-block">
@@ -6378,7 +6394,7 @@ async function showUndo() {
     `<div class="undo-row"><div><b>${esc(c.what)}</b><small>${esc(ago(c.at))} · ${esc(c.where)}</small></div>`
     + (c.can ? `<button class="btn-mini" data-undo="${esc(c.id)}">Undo</button>` : '<small>too big to keep</small>') + '</div>').join('') + '</div>'
     : '<p>Nothing to put back. Files the agent writes, changes, moves or deletes show here for a week.</p>';
-  showModal('Recent changes', body, [{ label: 'Close' }]);
+  showModal('Recent changes', trustedHTML(body), [{ label: 'Close' }]);
   document.querySelectorAll('#modal-body [data-undo]').forEach(b => b.onclick = async () => {
     b.disabled = true;
     const r = await api('/api/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6388,15 +6404,17 @@ async function showUndo() {
   });
 }
 
+// Markup the page wrote itself, for showModal and askConfirm.
+function trustedHTML(html) { return { __html: String(html) }; }
 function showModal(title, body, actions = []) {
   $('modal-title').textContent = title;
-  // Treat body as HTML iff it contains <tags>; plain strings still go in as
-  // textContent so /help and friends keep their literal formatting.
-  const looksLikeHTML = typeof body === 'string' && /<[a-z][\s\S]*>/i.test(body);
-  if (looksLikeHTML) {
-    $('modal-body').innerHTML = body;
+  // HTML only when the page built it (trustedHTML, with esc() on anything it
+  // didn't write). Any plain string is text: a chat title, a skill's lines or a
+  // model's name that holds a tag is shown as it is, never run.
+  if (body && typeof body === 'object' && typeof body.__html === 'string') {
+    $('modal-body').innerHTML = body.__html;
   } else {
-    $('modal-body').textContent = body;
+    $('modal-body').textContent = body == null ? '' : String(body);
   }
   $('modal-actions').innerHTML = '';
   for (const a of actions) {
@@ -6482,7 +6500,7 @@ function showRepairPlanModal(plan) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
-    showModal('Repair Inglen', html, [
+    showModal('Repair Inglen', trustedHTML(html), [
       { label: 'Cancel', onclick: () => { finish(false); } },
       { label: broken.length ? 'Restore these' : 'Re-apply anyway',
         kind: 'primary', onclick: () => { finish(true); } },
@@ -6501,8 +6519,8 @@ async function showMcpJsonModal() {
         const r = await api('/api/mcp/config');
         const current = (r && r.json) ? r.json : JSON.stringify({ mcpServers: {} }, null, 2);
         showModal('Edit mcp.json',
-          `<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
-          `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`,
+          trustedHTML(`<textarea id="mcp-json-input" style="width:100%;min-height:340px;padding:12px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:12px;resize:vertical;">${esc(current)}</textarea>` +
+          `<div id="mcp-json-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>`),
           [
             { label: 'Cancel' },
             { label: 'Save', primary: true, onclick: async () => {
@@ -6633,7 +6651,7 @@ async function showMcpServersModal() {
     + '<div id="mcp-form-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>'
     + '</div>';
 
-  showModal('Tool servers', html, [
+  showModal('Tool servers', trustedHTML(html), [
     { label: 'Edit as JSON', onclick: () => { setTimeout(showMcpJsonModal, 60); } },
     { label: 'Close' },
     { label: 'Add server', kind: 'primary', onclick: async () => {
@@ -6697,7 +6715,7 @@ async function showPermsModal() {
       <div><b>${m.name}</b><small>${m.what}</small></div></div>`).join('')}</div>
     <div style="font-weight:600;font-size:13px;margin:10px 0 2px;color:var(--fg)">Always allowed</div>${allowed}
     <div style="font-weight:600;font-size:13px;margin:14px 0 2px;color:var(--fg)">Always denied</div>${denied}`;
-  showModal('Tool permissions', html, [
+  showModal('Tool permissions', trustedHTML(html), [
     { label: 'Clear all', kind: 'danger', onclick: async () => { await post({}); toast('Permissions cleared', '', 'ok'); } },
     { label: 'Close' },
   ]);
@@ -7907,7 +7925,9 @@ function replayAssistant(msgDiv, m, body) {
     } else if (ev.kind === 'auto_review') {
       appendPart(makeReviewNote(ev.words, ev.verdict), msgDiv);
     } else if (ev.kind === 'error') {
-      appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
+      const m = makeMeta(ev.text || 'error', 'err');
+      if (ev.switch && ev.switch.provider) m.appendChild(planSwitchButton(ev.switch));
+      appendPart(m, msgDiv);
     }
   }
   flushThink();
@@ -7943,8 +7963,9 @@ function _computeEmptyState() {
   const cls = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
   let title, sub;
   if (ready) {
-    title = 'Inglen is ready.';
-    sub = 'AI agents that use your computer and work together, while you watch and steer.';
+    // One quiet line, in the name the assistant goes by here.
+    title = `What can ${esc(_agentName())} do for you?`;
+    sub = '';
   } else if (busy) {
     title = 'Getting Inglen ready…';
     sub = 'Starting up and finding your models. Just a moment.';
@@ -8001,8 +8022,40 @@ function emptyState() {
     <div class="empty-mark${_markPct == null ? '' : ' has-pct'}"><span class="hm-h"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><path class="hm-trace" d="M16 40V22a6 6 0 0 1 6-6h18" pathLength="100" stroke="currentColor" stroke-width="6" stroke-linecap="round"${_markPctAttr()}/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg></div>
     <div class="empty-title">${st.title}</div>
     <div class="empty-sub">${st.sub}</div>
+    <div class="empty-offers" aria-label="Suggestions"></div>
   `;
+  drawOffers(wrap);
   return wrap;
+}
+
+// Under the empty chat, by the box: at most three rows, one line each, the chats
+// still going on first and then the reminder ideas (hearth/offers.py). Only
+// once something can think; nothing while it gets ready.
+const _OFFER_ICO = {
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
+  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+};
+let _offerRows = null, _offerAt = 0;
+async function drawOffers(wrap) {
+  const box = wrap && wrap.querySelector('.empty-offers');
+  if (!box) return;
+  if (wrap.className !== 'empty') { box.innerHTML = ''; return; }
+  if (!_offerRows || Date.now() - _offerAt > 60000) {
+    try { _offerRows = ((await api('/api/new-chat/offers')) || {}).rows || []; _offerAt = Date.now(); }
+    catch { _offerRows = _offerRows || []; }
+  }
+  if (!box.isConnected || wrap.className !== 'empty') return;
+  box.innerHTML = _offerRows.slice(0, 3).map((r, i) =>
+    `<button type="button" class="empty-offer" data-i="${i}"><span class="eo-ico">${_OFFER_ICO[r.kind] || _OFFER_ICO.idea}</span>`
+    + `<span class="eo-text">${esc(r.text || '')}</span></button>`).join('');
+  box.querySelectorAll('.empty-offer').forEach(b => b.onclick = () => {
+    const r = _offerRows[+b.dataset.i];
+    if (!r) return;
+    if (r.kind === 'chat' && r.chat) { _openChatById(r.chat); return; }
+    input.value = r.ask || r.text || '';
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+  });
 }
 
 // Track which subagent agent_ids we've already announced in-chat so the
@@ -9447,7 +9500,7 @@ async function agentSetup(id, done) {
       ${note ? `<p class="as-note">${esc(note)}</p>` : ''}</div>`;
   };
   const stop = () => { clearInterval(timer); timer = 0; };
-  showModal(`Set up ${label}`, '<div class="as-steps"></div>', [{ label: 'Close', onclick: () => { stop(); } , closes: true }]);
+  showModal(`Set up ${label}`, trustedHTML('<div class="as-steps"></div>'), [{ label: 'Close', onclick: () => { stop(); } , closes: true }]);
   $('modal-body').onclick = async (e) => {
     const b = e.target.closest('button[data-do]');
     if (!b || busy) return;
@@ -9523,7 +9576,8 @@ async function _mpRowsOf(key) {
     const chosen = (STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo.model : info.model) || '';
     return info.models.map(m => ({
       v: `agent::${id}::${m.id}`, t: m.label, cur: inUse && chosen === m.id,
-      s: [m.id ? '' : (m.model || ''), _fmtCtx(m.ctx), m.about && m.id ? m.about : ''].filter(Boolean).join(' · '),
+      s: [m.refused ? `Not on your ${m.refused} plan` : '', m.id ? '' : (m.model || ''), _fmtCtx(m.ctx),
+          m.about && m.id ? m.about : ''].filter(Boolean).join(' · '),
       from: `${AGENT_BRAINS[id]} · your ${AGENT_PLANS[id] || AGENT_BRAINS[id]} plan`,
       ico: `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>` }));
   }
@@ -9878,6 +9932,24 @@ function agentBrainOn(id) {
   brainToast(name, `On your ${AGENT_PLANS[id] || name} plan. Helpers use your local model when one is loaded.`);
   applyBrainState();
   refreshModels();
+}
+// An agent's model wasn't on the person's plan: one tap back to its own default.
+function planSwitchButton(sw) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn-mini'; b.textContent = sw.label || 'Use Default';
+  b.style.cssText = 'display:block;margin-top:8px';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ provider: sw.provider, model: sw.model || '' }) });
+      // The agent is the brain already; only its model changed, and the button says so.
+      loadAgentInfo(sw.provider);
+      applyBrainState();
+      b.textContent = (sw.label || 'Use Default').replace(/^Use /, 'Now on ');
+    } catch (e) { b.disabled = false; toast("Couldn't switch", e.message, 'err'); }
+  });
+  return b;
 }
 // The one message a brain switch ends with, whatever the brain.
 function brainToast(name, detail, kind = 'ok') {
@@ -10501,7 +10573,7 @@ function showView(name) {
   if (name === 'memory') refreshMemory();
   if (name === 'reminders') refreshReminders();
   if (name === 'skills') refreshSkills();
-  if (name === 'files') refreshFiles(STATE.filePath || '');
+  if (name === 'files') openFiles();
   if (name === 'logs') { refreshLogs(); startLogsAutoRefresh(); }
   else { stopLogsAutoRefresh(); }
   if (name === 'models') refreshModelsView();
@@ -12276,8 +12348,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
         b.addEventListener('click', () => mpOpen());
         _err.appendChild(b);
       }
+      if (ev.category === 'plan' && ev.switch && ev.switch.provider) _err.appendChild(planSwitchButton(ev.switch));
       chatBody.appendChild(_err);
-      assistantMsg.events.push({ kind: 'error', text: ev.message, pos: assistantMsg.content.length });
+      assistantMsg.events.push(Object.assign({ kind: 'error', text: ev.message, pos: assistantMsg.content.length },
+        ev.category === 'plan' && ev.switch ? { switch: ev.switch } : {}));
       // ALSO toast so the user can't miss it. The chat inline meta is small
       // and the user reported "no responses" when an auth failure was
       // actually being rendered in red - they just didn't see it because
@@ -12288,7 +12362,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
           ev.category === 'unreachable' ? 'Endpoint unreachable' :
             ev.category === 'rate_limit' ? 'Rate limited' :
               ev.category === 'quota' ? 'Out of usage' :
-                "The model didn't answer",
+                ev.category === 'plan' ? 'Not on your plan' :
+                  "The model didn't answer",
         ev.message || 'unknown',
         'err', 8000
       );
@@ -12905,7 +12980,7 @@ if (_chatInputEl) {
   });
 }
 function showPasted(a) {
-  showModal(a.name, `<pre class="paste-view">${esc(a.text || '')}</pre>`, [{ label: 'Close' }]);
+  showModal(a.name, trustedHTML(`<pre class="paste-view">${esc(a.text || '')}</pre>`), [{ label: 'Close' }]);
 }
 
 // Drag-and-drop into the chat input or its surrounding row.
@@ -13106,7 +13181,7 @@ function renderMem(filter) {
       if (e.target.closest('.row-actions')) return;
       try {
         const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
-        showModal(m.name, memFactHTML(r.body), [
+        showModal(m.name, trustedHTML(memFactHTML(r.body)), [
           { label: 'Close' },
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
@@ -13242,7 +13317,7 @@ function renderMemTree(filter) {
         leaf.addEventListener('click', async () => {
           try {
             const r = await api(`/api/memory/${encodeURIComponent(m.name)}`);
-            showModal(m.name, memFactHTML(r.body), [
+            showModal(m.name, trustedHTML(memFactHTML(r.body)), [
           { label: 'Close' },
           { label: 'Delete', kind: 'danger', onclick: async () => {
             try {
@@ -13450,7 +13525,7 @@ function renderMemGraph(filter) {
   nodeSel.on('click', async (event, d) => {
     try {
       const r = await api(`/api/memory/${encodeURIComponent(d.id)}`);
-      showModal(d.name, memFactHTML(r.body), [
+      showModal(d.name, trustedHTML(memFactHTML(r.body)), [
         { label: 'Close' },
         { label: 'Delete', kind: 'danger', onclick: async () => {
           try {
@@ -13542,10 +13617,48 @@ document.querySelectorAll('.mem-view-btn').forEach(btn => {
 // ============================================================
 // FILES view
 // ============================================================
-async function refreshFiles(path = '') {
+// The places the Files tab opens on: Recent (what Inglen touched), the person's
+// own folders, and Inglen's folder. It opens on Recent when there is any.
+const FILE_PLACES = { list: null };
+async function openFiles() {
+  if (!FILE_PLACES.list) {
+    try { FILE_PLACES.list = (await api('/api/files/places')).places || []; } catch { FILE_PLACES.list = []; }
+    renderPlaces();
+  }
+  if (STATE.filePlace) return refreshFiles(STATE.filePath || '', STATE.filePlace);
+  let recent = [];
+  try { recent = (await api('/api/files/recent')).entries || []; } catch {}
+  const first = recent.length ? 'recent'
+    : (FILE_PLACES.list.find(p => p.id === 'documents') || FILE_PLACES.list.find(p => p.id !== 'recent') || {}).id || 'inglen';
+  return refreshFiles('', first);
+}
+function renderPlaces() {
+  const box = $('files-places');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const p of FILE_PLACES.list || []) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lg-chip' + (p.id === STATE.filePlace ? ' on' : '');
+    b.dataset.place = p.id;
+    b.textContent = p.label;
+    b.addEventListener('click', () => refreshFiles('', p.id));
+    box.append(b);
+  }
+}
+async function refreshFiles(path = '', place = STATE.filePlace || 'inglen') {
   STATE.filePath = path;
+  STATE.filePlace = place;
+  renderPlaces();
   try {
-    const r = await api('/api/files?path=' + encodeURIComponent(path));
+    if (place === 'recent') {
+      const r = await api('/api/files/recent');
+      STATE.filePathAbs = '';
+      $('file-crumb').innerHTML = '';          // the chip above says where this is
+      renderFiles(r.entries || []);
+      return;
+    }
+    const r = await api('/api/files?place=' + encodeURIComponent(place) + '&path=' + encodeURIComponent(path));
     if (r.error) { toast('Files', r.error, 'err'); return; }
     STATE.filePathAbs = r.abs || '';   // absolute path of the folder we're in (r.path is relative)
     renderCrumb(r.path);
@@ -13572,7 +13685,8 @@ function renderCrumb(path) {
   const segs = (path || '').split(/[\\/]/).filter(Boolean);
   const c = $('file-crumb');
   c.innerHTML = '';
-  const root = document.createElement('span'); root.className = 'seg'; root.textContent = 'Workspace';
+  const here = (FILE_PLACES.list || []).find(p => p.id === STATE.filePlace);
+  const root = document.createElement('span'); root.className = 'seg'; root.textContent = here ? here.label : 'Inglen';
   root.addEventListener('click', () => refreshFiles(''));
   c.append(root);
   let cur = '';
@@ -13595,8 +13709,10 @@ function renderFiles(entries) {
   const hidden = entries.filter(f => /^(\.|__)/.test(f.name)).length;
   if (!showHidden) entries = entries.filter(f => !/^(\.|__)/.test(f.name));
   $('files-sub').textContent = `${entries.length} item${entries.length === 1 ? '' : 's'}` + (hidden && !showHidden ? ` · ${hidden} hidden` : '');
+  const reveal = $('btn-files-reveal');
+  if (reveal) reveal.hidden = !STATE.filePathAbs;
   if (!entries.length) {
-    list.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">empty</div>`;
+    list.innerHTML = `<div style="color:var(--fg-faint);padding:24px;text-align:center">${STATE.filePlace === 'recent' ? 'Nothing yet' : 'Empty'}</div>`;
     return;
   }
   for (const f of entries) {
@@ -13607,14 +13723,17 @@ function renderFiles(entries) {
       <span class="file-icn">${ic}</span>
       <div class="body">
         <div class="name">${esc(f.name)}</div>
-        <div class="file-meta">${f.is_dir ? 'folder' : fmtBytes(f.size)} · ${fmtRel(f.mtime)}</div>
+        <div class="file-meta">${f.is_dir ? 'folder' : fmtBytes(f.size)} · ${fmtRel(f.mtime)}${f.folder ? ` <span class="file-in">· ${esc(f.folder.split(/[\\/]/).filter(Boolean).pop() || f.folder)}</span>` : ''}</div>
       </div>
       <div class="row-actions"></div>
     `;
     if (f.is_dir) {
-      div.addEventListener('click', () => refreshFiles((STATE.filePath ? STATE.filePath + '/' : '') + f.name));
+      div.addEventListener('click', () => refreshFiles((STATE.filePath ? STATE.filePath + '/' : '') + f.name, STATE.filePlace));
     } else {
-      const fullPath = (STATE.filePath ? STATE.filePath + '/' : '') + f.name;
+      // Every place but Inglen's folder is outside the workspace, so files go by their whole path.
+      const abs = STATE.filePathAbs || '';
+      const fullPath = f.path || (abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + f.name
+                                      : (STATE.filePath ? STATE.filePath + '/' : '') + f.name);
       const actions = div.querySelector('.row-actions');
       const openBtn = document.createElement('button');
       openBtn.className = 'file-open-btn';
@@ -13720,9 +13839,10 @@ async function fileOpenMenu(anchor, path) {
     else if (b.dataset.fo === 'copy') navigator.clipboard.writeText(path).then(() => toast('Path copied', '', 'ok', 1500));
     else if (b.dataset.fo === 'attach') {
       const name = path.split(/[\\/]/).pop();
-      // The model is given the whole path, not one from the workspace down.
+      // The model is given the whole path (the Files tab names every file by it).
       const abs = STATE.filePathAbs || '';
-      const full = abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + name : path;
+      const full = /^([A-Za-z]:[\\/]|\/)/.test(path) ? path
+        : abs ? abs.replace(/[\\/]+$/, '') + (abs.includes('\\') ? '\\' : '/') + name : path;
       if (!_pendingAttachments.some(x => x.path === full)) {
         _pendingAttachments.push({ name, path: full, isImage: IMAGE_EXTS.has((name.split('.').pop() || '').toLowerCase()) });
         _renderAttachTray();
@@ -13750,14 +13870,14 @@ async function filePreview(name, path) {
   const openIn = { label: 'Open in its app', onclick: () => api('/api/file/open', { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).catch(e => toast("Couldn't open it", e.message, 'err')) };
   if (ext === 'html' || ext === 'htm' || ext === 'pdf' || ext === 'svg') {
-    showModal(name, `<iframe class="file-frame" sandbox src="${esc(url)}" title="${esc(name)}"></iframe>`,
+    showModal(name, trustedHTML(`<iframe class="file-frame" sandbox src="${esc(url)}" title="${esc(name)}"></iframe>`),
               [openIn, { label: 'Close' }]);
     return;
   }
   try {
     const r = await api(`/api/file?path=${encodeURIComponent(path)}&op=read`);
     const office = /^(pptx?|docx?|xlsx?|odt|odp|ods)$/.test(ext);
-    showModal(name, `<pre class="file-text">${esc(r.content || '')}</pre>`, office ? [openIn, { label: 'Close' }] : [{ label: 'Close' }]);
+    showModal(name, trustedHTML(`<pre class="file-text">${esc(r.content || '')}</pre>`), office ? [openIn, { label: 'Close' }] : [{ label: 'Close' }]);
   } catch (er) { toast('Read', er.message, 'err'); }
 }
 function fileIcon(f) {
@@ -13927,8 +14047,9 @@ function _refreshEmptyIfShown() {
         dot.animate([{ opacity: was }, { opacity: now }], { duration: 600, easing: 'cubic-bezier(.3, 0, .2, 1)' });
       const t = existing.querySelector('.empty-title');
       const s = existing.querySelector('.empty-sub');
-      if (t) t.textContent = st.title;
+      if (t) t.innerHTML = st.title;
       if (s) s.innerHTML = st.sub;
+      drawOffers(existing);
     }
     return;
   }
@@ -14005,8 +14126,8 @@ async function openTaskTranscript(agentId) {
     const who = story && story.by === 'you' ? 'you' : ((story && story.by) || _agentName());
     const prompt = (story && story.prompt) || start.prompt || '';
     showModal([a.name || start.name, a.persona || start.persona].filter((v, i, l) => v && l.indexOf(v) === i).join(' \u00b7 ') || 'Every step',
-      `<div class="tx-wrap">${a.runtime || a.updated ? `<div class="tx-sub">${esc([teamWhat(a), a.updated ? teamAgo(a.updated) : ''].filter(Boolean).join(' \u00b7 '))}</div>` : ''}`
-      + (prompt ? `<b>Asked by ${esc(who)}</b><p>${esc(prompt)}</p>` : '') + `<div class="chat-body tx-chat"></div></div>`,
+      trustedHTML(`<div class="tx-wrap">${a.runtime || a.updated ? `<div class="tx-sub">${esc([teamWhat(a), a.updated ? teamAgo(a.updated) : ''].filter(Boolean).join(' \u00b7 '))}</div>` : ''}`
+      + (prompt ? `<b>Asked by ${esc(who)}</b><p>${esc(prompt)}</p>` : '') + `<div class="chat-body tx-chat"></div></div>`),
       [{ label: 'Close', primary: true }]);
     const box = document.querySelector('#modal-body .tx-chat');
     const m = helperAsMessage(recs);
@@ -14093,13 +14214,13 @@ function _rmEdit(id) {
   const reps = RM_REPEATS.includes(it.recurring_text || '') ? RM_REPEATS : RM_REPEATS.concat([it.recurring_text]);
   const opt = r => `<option value="${esc(r)}"${(it.recurring_text || '') === r ? ' selected' : ''}>${r ? esc(r.charAt(0).toUpperCase() + r.slice(1)) : 'Once'}</option>`;
   const until = it.until_iso ? it.until_iso.slice(0, 10) : '';
-  showModal('Change this reminder', `<div class="nh-wrap rm-edit">
+  showModal('Change this reminder', trustedHTML(`<div class="nh-wrap rm-edit">
       <label>What<textarea id="rme-what" rows="3">${esc(it.what || '')}</textarea></label>
       <label>${it.recurring_seconds ? 'Next time' : 'When'}<input id="rme-when" type="datetime-local" value="${local}"></label>
       <label>Repeats<select id="rme-rep">${reps.map(opt).join('')}</select></label>
       <label class="rme-ends"${it.recurring_text ? '' : ' hidden'}>Ends
         <span><select id="rme-ends"><option value=""${until ? '' : ' selected'}>Never</option><option value="on"${until ? ' selected' : ''}>On a day</option></select>
-        <input id="rme-until" type="date" value="${until}"${until ? '' : ' hidden'}></span></label></div>`, [
+        <input id="rme-until" type="date" value="${until}"${until ? '' : ' hidden'}></span></label></div>`), [
     { label: 'Close' },
     { label: it.paused ? 'Resume' : 'Pause', closes: true, onclick: () =>
         _rmAct('/api/reminders/pause', id, it.paused ? 'Resumed' : 'Paused', { paused: !it.paused }) },
@@ -14314,9 +14435,9 @@ document.addEventListener('click', async e => {
     // instructions JARVIS follows are there to read, folded.
     const files = ['scripts', 'references', 'assets'].filter(k => (s[k] || []).length)
       .map(k => `<span>${esc(k[0].toUpperCase() + k.slice(1))}: ${esc(s[k].join(', '))}</span>`).join('');
-    showModal(s.name, `<div class="mem-fact"><div class="mf-text">${esc(s.description || '')}</div>`
+    showModal(s.name, trustedHTML(`<div class="mem-fact"><div class="mf-text">${esc(s.description || '')}</div>`
       + `<div class="mf-meta"><span>${s.source === 'user' ? 'Added by you' : 'Comes with Inglen'}${s.version ? ' · v' + esc(s.version) : ''}</span>${files}<span>${esc(s.folder || '')}</span></div>`
-      + `<details class="sk-body"><summary>What ${_agentName()} reads when it uses this</summary><pre>${esc(s.body || '')}</pre></details></div>`,
+      + `<details class="sk-body"><summary>What ${_agentName()} reads when it uses this</summary><pre>${esc(s.body || '')}</pre></details></div>`),
       [{ label: 'Close' }]);
   }
 });
@@ -15723,7 +15844,7 @@ async function refreshSettings() {
         } }
       }, null, 2);
       showModal('Use Inglen from other apps',
-        `<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
+        trustedHTML(`<div style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">` +
         `Paste this into the other app's mcp.json.</div>` +
         `<pre style="background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow:auto;max-height:360px">${esc(snippet)}</pre>` +
         `<div style="color:var(--fg-dim);font-size:11px;margin-top:8px;line-height:1.5">` +
@@ -15732,7 +15853,7 @@ async function refreshSettings() {
         `<code>JARVIS_AUTO_APPROVE: "1"</code> trusts that session to run them, and to edit ` +
         `files outside the default workspace. Set it to <code>"0"</code> to keep writes and ` +
         `destructive commands blocked. To allow edits in specific folders only (without full ` +
-        `trust), add <code>"JARVIS_EXTRA_WORKSPACES": "E:\\\\Projects;D:\\\\Work"</code> to env instead.</div>`,
+        `trust), add <code>"JARVIS_EXTRA_WORKSPACES": "E:\\\\Projects;D:\\\\Work"</code> to env instead.</div>`),
         [{ label: 'Close', primary: true }]);
     };
     // Live bridge status - pulled when the MCP pane is opened. Polled
@@ -15910,7 +16031,7 @@ async function refreshSettings() {
           const title = apply ? `Migrated from ${source}` : `Dry-run: ${source}`;
           const log = (r && r.log) || '(no output)';
           showModal(title,
-            `<pre style="background:var(--bg-0);padding:12px;border-radius:8px;font-family:var(--mono);font-size:11px;color:var(--fg-dim);max-height:400px;overflow:auto;white-space:pre-wrap">${esc(log)}</pre>`,
+            trustedHTML(`<pre style="background:var(--bg-0);padding:12px;border-radius:8px;font-family:var(--mono);font-size:11px;color:var(--fg-dim);max-height:400px;overflow:auto;white-space:pre-wrap">${esc(log)}</pre>`),
             [{ label: 'Close', primary: true }]);
           if (apply) refreshMem?.();  // memory list refresh if defined
         } catch (e) {
@@ -15924,8 +16045,8 @@ async function refreshSettings() {
       migrateDryBtn.onclick = () => runMigrate(false);
       migrateApplyBtn.onclick = () => {
         showModal('Run import?',
-          `This will read from <b>${migrateSource.value}</b> and save what it finds into Inglen's memory. ` +
-          `Existing memories with the same slug update in place (no dupes). API keys are never copied.`,
+          trustedHTML(`This will read from <b>${esc(migrateSource.value)}</b> and save what it finds into Inglen's memory. ` +
+          `Existing memories with the same slug update in place (no dupes). API keys are never copied.`),
           [
             { label: 'Cancel' },
             { label: 'Import now', primary: true, onclick: () => runMigrate(true) },
@@ -16719,11 +16840,11 @@ async function enterVoiceMode() {
       }
     };
     showModal('Quick voice tip',
-      '<div style="line-height:1.55">If Inglen never picks up your voice, it is almost always the '
+      trustedHTML('<div style="line-height:1.55">If Inglen never picks up your voice, it is almost always the '
       + '<b>mic device</b>. The system default is often not the mic you are actually using.'
       + '<br><br>Pick the right one in <b>Settings &rarr; Voice &rarr; Microphone</b>.'
       + '<label style="display:flex;align-items:center;gap:8px;margin-top:16px;font-size:13px;color:var(--fg-dim);cursor:pointer">'
-      + '<input type="checkbox" id="mic-hint-hide" style="width:15px;height:15px"> Don\'t show this again</label></div>',
+      + '<input type="checkbox" id="mic-hint-hide" style="width:15px;height:15px"> Don\'t show this again</label></div>'),
       [
         { label: 'Open Voice settings', kind: 'primary', onclick: () => {
             _dismiss();
@@ -18160,8 +18281,8 @@ async function modelsAddVision(path, ask = true) {
   if (!ask) return go();
   const model = path.split(/[\\/]/).pop();
   showModal('Add vision to ' + model.replace(/\.gguf$/i, '') + '?',
-    `<div class="mem-fact"><div class="mf-text"><p>This downloads <b>${esc(v.file)}</b>${v.size_gb ? ` (${v.size_gb} GB)` : ''}, the vision part its makers publish in <b>${esc(v.repo)}</b> on Hugging Face.</p>`
-    + `<p>It's saved next to the model, in ${esc(v.folder)}, as ${esc(v.save_as)}. Once it's there, load the model again and it can see images.</p></div></div>`,
+    trustedHTML(`<div class="mem-fact"><div class="mf-text"><p>This downloads <b>${esc(v.file)}</b>${v.size_gb ? ` (${v.size_gb} GB)` : ''}, the vision part its makers publish in <b>${esc(v.repo)}</b> on Hugging Face.</p>`
+    + `<p>It's saved next to the model, in ${esc(v.folder)}, as ${esc(v.save_as)}. Once it's there, load the model again and it can see images.</p></div></div>`),
     [{ label: 'Cancel' }, { label: 'Download', kind: 'primary', closes: true, onclick: go }]);
 }
 document.addEventListener('click', e => {
@@ -18544,11 +18665,11 @@ async function refreshRuntimeBar() {
 }
 function engineAddDialog() {
   showModal('Add an engine',
-    '<div style="line-height:1.55">Some models are made for a build of llama.cpp other than the official one, and their page says which. ' +
+    trustedHTML('<div style="line-height:1.55">Some models are made for a build of llama.cpp other than the official one, and their page says which. ' +
     "Paste that build's GitHub page and Inglen downloads its version for this computer and card, or give a folder with " +
     "<code>llama-server</code> in it. Inglen uses it only for models the official build can't read, and remembers which one each model needs.</div>" +
     '<input id="engine-add-src" type="text" placeholder="github.com/owner/llama.cpp or a folder" ' +
-    'style="width:100%;margin-top:12px;box-sizing:border-box">',
+    'style="width:100%;margin-top:12px;box-sizing:border-box">'),
     [ { label: 'Cancel' },
       { label: 'Add', kind: 'primary', busyLabel: 'Adding\u2026', onclick: async () => {
         const v = ($('engine-add-src')?.value || '').trim();
@@ -18644,8 +18765,8 @@ async function runtimeInstall(tag, repo) {
 }
 $('btn-runtime-update')?.addEventListener('click', () => {
   showModal('Download the inference engine?',
-    'Inglen downloads the official <b>llama.cpp</b> runtime (~800 MB) so the built-in server runs on your GPU. Its own copy, no LM Studio needed.<br><br>' +
-    '<b>Heads-up:</b> some antivirus (AVG, Avast, Defender) may flag it as <code>IDP.generic</code>, a <b>known false positive</b> for open-source AI runtimes (llama.cpp, koboldcpp, ollama all trip it) because the binary is unsigned. If it gets quarantined, restore it + add an exclusion for <code>~/.hearth/llamacpp</code>. Inglen falls back to a signed copy if you have LM Studio.',
+    trustedHTML('Inglen downloads the official <b>llama.cpp</b> runtime (~800 MB) so the built-in server runs on your GPU. Its own copy, no LM Studio needed.<br><br>' +
+    '<b>Heads-up:</b> some antivirus (AVG, Avast, Defender) may flag it as <code>IDP.generic</code>, a <b>known false positive</b> for open-source AI runtimes (llama.cpp, koboldcpp, ollama all trip it) because the binary is unsigned. If it gets quarantined, restore it + add an exclusion for <code>~/.hearth/llamacpp</code>. Inglen falls back to a signed copy if you have LM Studio.'),
     [ { label: 'Cancel' }, { label: 'Download', onclick: runtimeInstall } ]);
 });
 
@@ -19138,10 +19259,10 @@ async function imagesInstall() {
 
 function imagesFolderDialog() {
   showModal('Add a models folder',
-    '<div style="line-height:1.55">A folder of image or video models you already have, such as a ComfyUI or ' +
+    trustedHTML('<div style="line-height:1.55">A folder of image or video models you already have, such as a ComfyUI or ' +
     'Stable Diffusion WebUI <code>models</code> folder. Inglen reads it where it is; nothing is copied.</div>' +
     '<input id="img-folder-src" type="text" placeholder="the folder\'s path" ' +
-    'style="width:100%;margin-top:12px;box-sizing:border-box">',
+    'style="width:100%;margin-top:12px;box-sizing:border-box">'),
     [ { label: 'Cancel' },
       { label: 'Add', kind: 'primary', busyLabel: 'Adding…', onclick: async () => {
         const v = ($('img-folder-src')?.value || '').trim();
@@ -19866,7 +19987,7 @@ function modelsShowStartFailure(r, fname, origBody) {
     });
   }
   actions.push({ label: 'Close', primary: true });
-  showModal('Could not start ' + fname, bodyHtml, actions);
+  showModal('Could not start ' + fname, trustedHTML(bodyHtml), actions);
 }
 
 function modelsToggleRow(row) {
@@ -22551,7 +22672,7 @@ $('tm-new').addEventListener('click', async () => {
       <input class="nh-folder" id="nh-folder" placeholder="${esc(c.workspace || 'the workspace')}">
     </div></div>`;
   let pick = null;
-  showModal('New helper', html, [
+  showModal('New helper', trustedHTML(html), [
     { label: 'Cancel' },
     { label: 'Start', kind: 'primary', busyLabel: 'Starting…', onclick: async () => {
       const task = $('nh-task').value.trim();

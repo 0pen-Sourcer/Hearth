@@ -499,8 +499,12 @@ function roomSync(list) {
     && Date.now() / 1000 - (a.updated || 0) > ROOM_STAY / 1000;
   const want = list.filter(a => ['working', 'done', 'failed', 'stopped'].includes(a.status)
     && !ROOM.gone.has(a.id) && !old(a)).slice(0, ROOM.desks.length * Math.max(1, ROOM.rooms.length));
-  want.push({ id: '__main', role: 'main', persona: 'main', name: ROOM_HOST.name() || 'Inglen',
-              status: 'working', runtime: ROOM_HOST.mainRuntime() });
+  // With the PC away (the phone, from the room it kept), the room is quiet: the
+  // assistant asleep in its chair if its look can sleep, not there if it can't.
+  const away = typeof ROOM_HOST.away === 'function' && ROOM_HOST.away();
+  if (!away || roomHas(roomSkin({ role: 'main' }), 'sleep'))
+    want.push({ id: '__main', role: 'main', persona: 'main', name: ROOM_HOST.name() || 'Inglen',
+                status: 'working', runtime: ROOM_HOST.mainRuntime() });
   const ids = new Set(want.map(a => a.id));
   for (const [id, p] of ROOM.people) if (!ids.has(id) && !p.leaving) { p.leaving = true; p.path = roomRoute(p.pos, ROOM.spots.door); }
   for (const a0 of want) {

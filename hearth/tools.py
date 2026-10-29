@@ -467,6 +467,11 @@ def _resolve_write(p: str) -> str:
 
     def _grant(path: str) -> str:
         parent = path if os.path.isdir(path) else os.path.dirname(path) or path
+        # A yes to one file at the top of a drive or of the home folder is a yes
+        # to that file, not to everything under it.
+        top = os.path.realpath(parent)
+        if top == os.path.dirname(top) or top == os.path.realpath(os.path.expanduser("~")):
+            parent = path
         if parent and parent not in EXTRA_WORKSPACES:
             EXTRA_WORKSPACES.append(parent)
         return path

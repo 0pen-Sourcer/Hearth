@@ -1998,12 +1998,17 @@ def _save_settings_locked(d: Dict) -> Dict:
     return cur
 
 
-def _list_files(rel_path: str = "") -> Dict:
-    """List files in workspace/<rel_path>. Safe — never escapes workspace."""
+def _list_files(rel_path: str = "", place: str = "inglen") -> Dict:
+    """List a folder inside one of the Files tab's places (the workspace by
+    default). Never leaves that place's folder."""
+    from . import places as _places
+    root = _places.root_for(place or "inglen")
+    if not root:
+        return {"error": "that place isn't on this PC"}
     rel = (rel_path or "").strip().strip("/").strip("\\")
-    base = os.path.normpath(os.path.join(WORKSPACE, rel))
+    base = os.path.normpath(os.path.join(root, rel))
     from .tools import path_within
-    if not path_within(base, WORKSPACE):
+    if not path_within(os.path.realpath(base), os.path.realpath(root)):
         return {"error": "path escapes workspace"}
     if not os.path.isdir(base):
         return {"error": f"not a directory: {rel}"}
@@ -2021,7 +2026,7 @@ def _list_files(rel_path: str = "") -> Dict:
             "mtime": st.st_mtime,
         })
     out.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
-    return {"path": rel, "abs": base, "entries": out}
+    return {"path": rel, "abs": base, "root": root, "place": place or "inglen", "entries": out}
 
 
 def _tail_log(n: int = 100) -> List[Dict]:
@@ -2521,6 +2526,15 @@ class HearthHandler(BaseHTTPRequestHandler):
         else's page. No Origin at all is a non-browser client (the CLI, a
         bridge, a script) and is left alone. "null" is a sandboxed frame or a
         file page, and neither has any business with this API."""
+        # A browser marks every request with where it came from. An <img>, a
+        # <script> or a form GET from another site carries no Origin, so it got
+        # past the check below and could set off a GET that does something (or
+        # tell, by whether it loaded, that a file exists). Another site may open
+        # the window's own page by a link, nothing else.
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site in ("cross-site", "same-site"):
+            nav = (self.headers.get("Sec-Fetch-Mode") or "").strip().lower() == "navigate"
+            return nav and self.command == "GET" and urllib.parse.urlparse(self.path).path == "/"
         origin = (self.headers.get("Origin") or "").strip().lower()
         if not origin:
             return True
@@ -2789,6 +2803,9 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/crash/pending":
             from . import crashlog as _cl
             return self._send_json(200, {"crashed": _cl.pending() is not None})
+        if path == "/api/new-chat/offers":
+            from . import offers as _offers
+            return self._send_json(200, {"rows": _offers.rows()})
         if path == "/api/reminders/ideas":
             try:
                 return self._send_json(200, {"ideas": reminder_ideas(self._query().get("fresh") == "1")})
@@ -2904,7 +2921,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_memory_one(name)
         if path == "/api/files":
             q = self._query()
-            return self._send_json(200, _list_files(q.get("path", "")))
+            return self._send_json(200, _list_files(q.get("path", ""), q.get("place", "inglen")))
+        if path == "/api/files/places":
+            from . import places as _places
+            return self._send_json(200, {"places": _places.listing()})
+        if path == "/api/files/recent":
+            from . import places as _places
+            return self._send_json(200, {"entries": _places.touched()})
         if path == "/api/file":
             return self._send_file_op()
         if path == "/file":
@@ -6238,7 +6261,10 @@ def _workspace_file(path: str):
         real = os.path.realpath(path if os.path.isabs(path) else os.path.join(WORKSPACE, path))
     except Exception:
         return "", "bad path"
-    roots = [os.path.realpath(WORKSPACE)] + [os.path.realpath(p) for p in list_extra_workspaces()]
+    from . import places as _places
+    roots = [os.path.realpath(WORKSPACE)] + [os.path.realpath(p) for p in list_extra_workspaces()] \
+        + [os.path.realpath(p) for p in _places.roots().values()] \
+        + [os.path.realpath(t["path"]) for t in _places.touched(200)]
     if not any(real.lower().startswith(r.lower() + os.sep) or real.lower() == r.lower() for r in roots):
         return "", "outside"
     if not os.path.isfile(real):
