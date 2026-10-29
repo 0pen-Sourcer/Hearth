@@ -1,6 +1,6 @@
 # Inglen user guide
 
-For when you've just installed Inglen and want to know what it does and where things are.
+For when you've just installed Inglen and want to know what it does and where things are. The assistant inside it is called JARVIS unless you give it another name (Settings, Behavior, Agent name); this guide uses the default.
 
 ---
 
@@ -10,7 +10,7 @@ For when you've just installed Inglen and want to know what it does and where th
 2. **Pick a brain.** Setup finds what you already have: an agent like Claude Code or Codex, a model file on your disk, or a running LM Studio or Ollama. Pick one, or download a model from the Models tab later, or paste a cloud key.
 3. **Talk to it.** Type, or press the mic and speak.
 
-Setup also asks your name, how JARVIS should talk, headphones or speakers, how much may run without asking, and the look. It ends with a short tour, which you can take again from Settings, About.
+Setup is eight short steps. Besides the brain it asks the language you speak and the voice, headphones or speakers, your name and how JARVIS should talk, how much may run without asking, the look and how much detail chats show, and offers to bring over what ChatGPT or Claude knows about you. It ends with a six-stop tour of the window, which you can take again from Settings, About.
 
 Running from source instead? See "Install from source" in the [README](../README.md).
 
@@ -22,6 +22,8 @@ Running from source instead? See "Install from source" in the [README](../README
 2. **Sidebar.** New chat and your chats, each with when it was last used (a chat started in the terminal has a prompt mark, a reminder's chat a clock), then Team, Memory, Reminders, Skills, Files, Logs, Models and Settings.
 3. **Sticker.** The model menu button shows the brain in use and its loading progress, and a local model kept for helpers if you turned that on.
 4. **Chat bar.** Think sets how hard the model reasons, the mic talks instead of typing, + attaches a file, and the switch beside Send sets what runs without asking (Ask, Auto-edit or Auto).
+5. **The mark on an empty chat.** In every look but Classic it shows the model's state, with an empty ring when none is loaded, a line running along it while one loads, and a filled dot when it's ready.
+6. **Tray icon.** Opens your pinned and recent chats, a new chat or voice mode, and turns on listening for JARVIS's name.
 
 ---
 
@@ -60,7 +62,8 @@ Press the mic in the top bar. The window turns into a dot grid that listens and 
 - **Interrupting.** Talk over a reply and it stops on your first word, then answers what you said instead. This works on speakers too: the window cancels the echo of its own voice the way a video call does, so it doesn't hear itself. The first few seconds on speakers it is still learning the room.
 - **Approvals.** A step that needs your OK is asked out loud, with Allow and Deny under it. Saying "yes" is enough for what Auto mode would run anyway; deleting, moving, sending and the like take a click on Allow, and it says so.
 - **The desktop HUD.** When Inglen isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
-- **Wake word.** Right-click the tray icon and turn on **Wake word**. Saying "Jarvis" opens voice mode.
+- **The microphone.** Voice mode uses the mic picked in Settings, Voice. Windows' microphone privacy setting decides whether apps may use it; if it's blocking the mic, voice mode says so and has a button that opens that setting.
+- **Wake word.** Right-click the tray icon and turn on **Listen for "Jarvis"** (it follows the agent's name). Saying the name opens voice mode.
 - Voices, speed, the mic and the listening model are in Settings, Voice.
 - **In the terminal**, `/listen` uses the PC's own mic and speakers, with no echo cancelling: there, use headphones, or turn on Speakers mode in Settings, Voice, which stops listening while it talks (start with its name, "Jarvis, stop", to cut in).
 
@@ -73,6 +76,10 @@ A switch beside the send box decides what runs without asking:
 - **Ask** checks before anything acts on your machine.
 - **Auto-edit** lets file edits inside the workspace through.
 - **Auto** runs routine work on its own, and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs.
+
+In Auto, a reviewer reads your own messages in the chat and lets a step through without asking when you clearly asked for exactly that step ("delete the old log"). It never reads the brain's words or what a tool brought back. A model is used as the reviewer only once it has passed a check, which runs on its own the first time Auto meets it; Settings, Behavior, Auto's reviewer shows the result and turns it off. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask.
+
+**Undo.** Before a file is written, edited, deleted or moved, Inglen keeps a copy of what was there. Type `/undo` in the window for a list of recent changes to put back; in the terminal `/undo` lists them and `/undo <n>` puts one back. Because of that, Auto deletes or moves things Inglen made itself in the past week without asking.
 
 When something needs your OK, a strip above the chat box asks: **Yes (once)**, **No**, **Always** or **Never** for that tool, or type what to do instead. Writes stay inside the workspace (`~/Jarvis`) unless you allow another folder. In the terminal, `/mode` sets the switch and `/perms` shows saved answers (`/perms forget <tool>`, `/perms reset`).
 
@@ -112,7 +119,16 @@ When it's time you get a Windows notification, and JARVIS says it in a chat of i
 
 ## Your phone
 
-Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, with voice notes, photos and files going both ways. Set it up in **Settings, Connectors**, or ask JARVIS to connect it. Someone new who messages your bot gets a short code, and nothing runs for them until you approve it in Connectors or with `/pair`. A step that would ask for your OK on the PC asks in the chat, and each phone conversation shows in the window's chat list. Full steps in [PHONE.md](PHONE.md); writing your own connector is in [CONNECTORS.md](CONNECTORS.md).
+Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, with voice notes, photos and files going both ways. Set it up in **Settings, Connectors**, or ask JARVIS to connect it. Someone new who messages your bot gets a short code, and nothing runs for them until you approve it in Connectors or with `/pair`. A step that would ask for your OK on the PC asks in the chat, and each phone conversation shows in the window's chat list with a title the brain gives it. Full steps in [PHONE.md](PHONE.md); writing your own connector is in [CONNECTORS.md](CONNECTORS.md).
+
+### Inglen Plus
+
+Plus is a paid add-on with a phone app of its own, no bot needed. In **Settings, Plus**, paste the licence key from your receipt, press **Pair a phone**, scan the code with the phone's camera, and check that both screens show the same six numbers. The phone then reaches this PC from anywhere through an end-to-end encrypted relay.
+
+- **On the phone.** Your chats, the window's included, with each reply's steps as they happen; Allow and Deny for risky steps; the brain and the approval mode; files and pictures from the PC; the Team room; recent file changes with Undo; and the sessions of Claude Code, Codex and other coding agents on the PC, which you can read and carry on. Changes on the phone show in the window at once, and the other way round.
+- **Notifications.** A question waiting (with Allow and Deny right on it), a finished reply, and a coding agent finishing on the PC.
+- **Calls.** Press the call button and talk. Both sides' words show as they're said, the timer starts when the PC is listening, and a soft tone says it's ready. Put the app away and the call carries on, with Mute and End in the notification. A spoken yes is enough for what Auto would run; anything riskier asks for a tap. The call's settings change the voice and the language, and turn the tones off. If the phone goes quiet, the PC ends the call.
+- **JARVIS calls you.** Off until you turn on **Let JARVIS call me** under Plus. Then pick the reasons (a reminder coming due, background work that finished or needs you, a question waiting for a few minutes), how long a question waits, and quiet hours (10 pm to 8 am to start with). It never calls while you're using the PC, and waits a while after a call you declined or missed. An unanswered call shows as missed.
 
 ---
 
@@ -203,6 +219,7 @@ The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the wi
 /about           version and stats
 /update          get a newer version
 /repair          restore damaged files
+/undo            put back a file change
 /phone           reach me from your phone
 /pair            let someone in with their code
 /exit            quit
@@ -214,14 +231,15 @@ The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the wi
 
 - **Chat brain**: what JARVIS thinks with, as cards grouped by where it runs.
 - **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
-- **Behavior**: the agent's name, reasoning, house rules, saving memories on its own, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
-- **Appearance**: Classic, Light, Dark or System, how much detail chats show (Simple or Full), the accent, the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
+- **Behavior**: the agent's name, reasoning, house rules, Auto's reviewer, saving memories on its own, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
+- **Appearance**: Classic, Light, Dark or System, the accent, **Detail in chats** (Simple folds a reply's steps into one line you can open; Full shows each as its own card, with every counter in the status bar), the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
 - **Connectors**: Telegram, Discord, WhatsApp, who is let in, and email.
-- **Plus**: Inglen Plus, a paid add-on with a phone app that reaches this PC from anywhere; pairing a phone happens here.
-- **Built-in server** and **MCP servers**: the engine's settings and other tools' servers.
+- **Plus**: the licence, pairing a phone, the phones you've paired, and whether JARVIS may call you.
+- **Built-in server**: the engine's settings.
+- **MCP servers**: servers whose tools Inglen uses, each with its service's icon and a status dot (a failed one says why in a sentence; click it for the full error), and the config for using Inglen's tools from other apps.
 - **About**: version, updates, repair, start at login, and the tour.
 
-Everything saves as you change it, with no restart.
+Every page shows the same whichever detail you picked. Rows only an expert needs, like reviewing every command Auto runs, reasoning effort, tool permissions or the server's port, are in a closed **Advanced** section at the foot of their page. Everything saves as you change it, with no restart.
 
 ---
 

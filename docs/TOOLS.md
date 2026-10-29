@@ -1,8 +1,8 @@
 # Tools
 
-Inglen gives the model **111 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Inglen gives the model **112 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
 
-To keep the prompt small, **36** core tools load with their full description and **75** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **76** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -14,16 +14,16 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `create_directory` † | Create a directory inside the workspace |
 | `delete_path` | Delete a file or directory inside the workspace |
 | `edit_file` | Edit a file by replacing exact text: each edit swaps old_text for new_text |
-| `extract_archive_file` † | Pull ONE file out of an archive into the workspace, without unpacking the whole thing |
+| `extract_archive_file` † | Pull one file out of an archive into the workspace, without unpacking the whole thing |
 | `find_file` | Find files or folders by name (a substring or a glob) across the workspace, Desktop, Documents, Downloads, Pictures, Videos, Music, ~/Code, ~/Projects, the wor… |
 | `glob_files` † | Find files by glob pattern |
 | `grep_search` | Regex search across files |
-| `list_archive` † | List contents of a .zip/.jar/.whl/.apk/.tar/.tar.gz/.tar.bz2/.tar.xz archive WITHOUT extracting it |
+| `list_archive` † | List contents of a .zip/.jar/.whl/.apk/.tar/.tar.gz/.tar.bz2/.tar.xz archive without extracting it |
 | `list_directory` | List a directory |
-| `locate_path` † | Smart locator: find a folder or app by name without globbing the whole disk |
+| `locate_path` † | Find a folder or an app by name without searching the whole disk: the top of every drive, the usual places (Documents, Downloads, Desktop, Program Files, AppDa… |
 | `move_path` | Move or rename inside the workspace |
 | `read_file` | Read a file |
-| `read_pdf_large` † | Map-reduce summarize a VERY large PDF (hundreds of pages) that won't fit any single context |
+| `read_pdf_large` † | Summarize a very large PDF (hundreds of pages) that won't fit in one context: it is read in page windows, each summarized by a small model call, then combined… |
 | `summarize_file` † | Summarise a long document instead of reading all of it |
 | `write_file` | Create a new file in the workspace |
 
@@ -32,22 +32,22 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | Tool | What it does |
 |---|---|
 | `browse` | Drive a real, visible Chromium window: navigate, get the page text and a numbered list of links and buttons, then act with browse_click and browse_type |
-| `browse_click` † | Click a link or button on the CURRENT browser page by its visible text (use the exact text from the CLICKABLE list that browse returned) |
-| `browse_close` † | Close the browser session |
+| `browse_click` † | Click a link or button on the current browser page by its visible text (use the exact text from the clickable list that browse returned) |
+| `browse_close` † | Close the browser session, only once the person is done with it |
 | `browse_key` † | Press a keyboard key/shortcut on the current browser page, for media controls and shortcuts that aren't clickable buttons |
 | `browse_scroll` † | Smooth-scroll the current browser page so you can see more content |
 | `browse_type` † | Type into a field on the current browser page (a search box, login field, etc.) |
 | `list_browsers` † | List installed browsers detected on this machine |
-| `open_in_browser` | Open a URL in a SPECIFIC browser (and optional profile), the user SEES it in their own browser, and it stays open |
+| `open_in_browser` | Open a link in a browser the person names, optionally in a given profile, where they see it and it stays open |
 | `open_url` | Open a URL in the user's default browser for them to use |
 | `web_fetch` | Fetch a page's readable text for you to read; the user sees nothing |
-| `web_search` | Free DuckDuckGo HTML search |
+| `web_search` | Search the web (DuckDuckGo) and get the top results: titles, snippets and links |
 
 ## Desktop control
 
 | Tool | What it does |
 |---|---|
-| `arrange_windows` † | Lay windows out on screen in ONE call: position and size several windows at named regions |
+| `arrange_windows` † | Lay windows out on screen in one call: position and size several windows at named regions |
 | `capture_active_window` † | Screenshot only the focused window, or a named one with window_title; tighter than screenshot for vision |
 | `computer_click` † | Click the mouse |
 | `computer_drag` † | Drag-and-drop: press at (x1,y1), move to (x2,y2) while held, release |
@@ -60,8 +60,8 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `desktop_snapshot` | List a window's controls (buttons, fields, menu and list items, checkboxes) with numbers and positions, read from the accessibility tree, including inside Chro… |
 | `desktop_type` | Write text into a UI element from the last desktop_snapshot (by idx or name) |
 | `execute_actions` | Run several desktop steps in one call, in order, stopping at the first failure |
-| `focus_window` † | Bring an ALREADY-OPEN window to the front / focus it, by a substring of its title (e.g |
-| `list_windows` † | List EVERY open window (title, state, foreground/minimized/open, and owning app) |
+| `focus_window` † | Bring an already-open window to the front / focus it, by a substring of its title (e.g |
+| `list_windows` † | List every open window: its title, whether it is in front, minimized or open, and the app it belongs to |
 | `manage_window` † | Minimize, maximize, restore, or close a window by a substring of its title |
 | `smart_click` | Click something you located in a captured image: pass the pixel (x, y) at the target's centre, in that image's own coordinates |
 | `wait_for_element` | Block until a named control appears in a window, then report its idx |
@@ -74,9 +74,9 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `clipboard_write` † | Write text to the clipboard |
 | `disk_usage` † | Find the biggest folders and files under a path |
 | `get_time` † | Current local datetime, weekday, timezone offset |
-| `learn_environment` † | Re-scan this machine (GPU/VRAM, RAM, installed models, top-level drive map) and refresh it into long-term memory |
+| `learn_environment` † | This machine as it is now: GPU/VRAM, RAM, OS and the models the local server has |
 | `list_installed_apps` † | Installed applications (Windows registry uninstall keys) |
-| `list_models` † | List the LLM models available on the connected server (LM Studio / Ollama / cloud) by querying its API |
+| `list_models` † | List the models the connected server or provider offers (LM Studio, Ollama, a cloud provider), from its API |
 | `list_processes` † | List running processes (top by memory) |
 | `load_model` † | Load a model file from this PC on Inglen's built-in engine |
 | `network_info` † | Local IP address, hostname, network adapters, wifi |
@@ -102,12 +102,13 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
+| `agent_sessions` † | The coding-agent sessions on this PC (Claude Code, Codex and others), the ones the person runs in those apps: list them, read where one got to, or send one a m… |
 | `delegate` | Hand one task to another AI agent CLI installed on this PC (Claude Code, Codex, Antigravity, Gemini CLI and others) and move on |
 | `get_subagent_result` † | Poll a background subagent for its result |
 | `helper_changes` † | See or act on what a finished helper changed on disk |
-| `launch_team` † | Spawn a TEAM of sub-agents that work in parallel and open a live terminal pane for each so the user can WATCH them build side by side (Windows Terminal panes /… |
+| `launch_team` † | Spawn a team of sub-agents that work in parallel and open a live terminal pane for each so the user can watch them build side by side (Windows Terminal panes /… |
 | `list_subagent_personas` † | List the personas available for spawn_subagent |
-| `message_helper` † | For a helper: ask or tell another helper that is working at the same time, by name, or the assistant that sent you (to: 'JARVIS') |
+| `message_helper` † | For a helper: ask or tell another helper that is working at the same time, by name, or the assistant that sent you (to: 'main') |
 | `race_helpers` † | Give one coding task to two or more agent programs at once (say codex and claude-code), each on its own copy of a git repository, to compare their work |
 | `spawn_subagent` | Start a scoped sub-agent (see list_subagent_personas for personas) |
 | `tell_subagent` † | Give a helper that is still working a message: a correction, an extra detail, a change of direction |
@@ -130,9 +131,9 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `cancel_reminder` † | Cancel a scheduled reminder by id |
 | `connectors` † | The chat apps people reach this PC from: Telegram, Discord, WhatsApp |
 | `list_reminders` | List all upcoming (un-fired) reminders |
-| `notify` † | Pop a desktop notification (Windows toast) RIGHT NOW |
+| `notify` † | Show a desktop notification now |
 | `pause_reminder` † | Pause a reminder so it stops firing without deleting it, or resume it (paused=false) |
-| `send_to_phone` † | Send a message FROM this PC TO the user's phone, on a chat app they connected (Telegram, or Discord as a DM) |
+| `send_to_phone` † | Send a message or a file (a screenshot, a photo, a PDF) from this PC to the user's phone |
 | `set_reminder` | Schedule a desktop notification, optionally running a tool at the same moment (action_tool with action_args) |
 | `snooze_reminder` † | Push a reminder's due time forward by N minutes (default 10) |
 
@@ -154,10 +155,10 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
-| `create_plugin` † | Write a NEW local tool (plugin) for yourself when no existing tool fits a capability the user needs, then use it immediately and forever after |
-| `create_skill` † | Author a NEW user skill saved to ~/Jarvis/skills/<name>/ |
+| `create_plugin` † | Write a new tool for yourself when none of the existing tools can do something the person needs, then use it, now and later |
+| `create_skill` † | Save a workflow as a skill, in the workspace's skills folder |
 | `delete_plugin` † | Delete an installed plugin by name (removes its file + unregisters the tool) |
-| `install_skill` † | Install a shareable skill from a GitHub repo or a local folder into ~/Jarvis/skills/ |
+| `install_skill` † | Install a skill someone shares, from GitHub or a folder on this PC, into the workspace's skills folder |
 | `list_plugins` † | List the self-authored/installed plugins in ~/Jarvis/plugins/ (name, status, description) |
 | `list_skills` † | List available skills, bundled and installed |
 | `load_skill` | Load a skill's full instructions and its bundled files before following it |
@@ -178,7 +179,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
-| `ask_user` † | Ask the user a multi-choice question when you genuinely need a decision before continuing, picking between two valid approaches, clarifying an ambiguous file/f… |
+| `ask_user` † | Ask the person to choose between options before going on: two valid approaches, which of several matches to act on, an ambiguous file or folder |
 | `end_session` † | Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.) |
 | `worklog` † | Your scratch pad for a long task: note findings as you go and read them back instead of re-reading the sources |
 

@@ -69,7 +69,7 @@ Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Code
 
 ### Voice
 
-Press the mic and talk. Speech-to-text (faster-whisper) and text-to-speech (Kokoro) both run on your machine, on the graphics card when there is one. Talk over a reply and it stops on your first word and answers what you said instead. It works best on a headset; speaker setups are still being sharpened.
+Press the mic and talk. Speech-to-text (faster-whisper) and text-to-speech (Kokoro) both run on your machine, on the graphics card when there is one. Talk over a reply and it stops on your first word and answers what you said instead. The window cancels the echo of its own voice the way a video call does, so this works on speakers as well as a headset. A step that needs your OK is asked out loud; a spoken yes is enough for what Auto mode would run anyway, and anything riskier waits for a click.
 
 ### Memory and skills
 
@@ -77,11 +77,11 @@ Every fact JARVIS learns is a small markdown file in your workspace that you can
 
 ### Everywhere else
 
-The terminal app (`inglen.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
+The terminal app (`inglen.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). Inglen Plus, a paid add-on, adds a phone app that reaches your PC from anywhere through an end-to-end encrypted relay, with your chats and every step, approvals from the notification, files from the PC, the Team room, your coding agents' sessions, and voice calls with JARVIS. If you allow it, JARVIS can call you about a reminder, finished work or a question it is waiting on, never in your quiet hours or while you are at the PC. It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
 
 ### Safety
 
-A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
+A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs, unless a reviewer that reads only your own words finds you asked for exactly that step. Shutting down, disks, accounts, security settings and hidden commands always ask. File changes are copied first, so `/undo` puts one back. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
 
 ---
 
@@ -105,7 +105,7 @@ OpenClaw and Hermes are agents that go wide, across many messaging channels. Ope
 
 **Can it replace ChatGPT?** For talking, looking things up and working on your own files and apps, on a good brain, yes. On a small local model it is quicker to set up than it is clever, so pick the brain to match the job.
 
-**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. There is no telemetry. Inglen also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
+**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. With Plus on, the phone app's messages pass through the Plus relay sealed with keys only your PC and phone hold, so the relay can't read them, and the licence key is checked with the payment provider ([SECURITY.md](SECURITY.md) has the details). There is no telemetry. Inglen also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
 
 **Why "Inglen"?** An ingle is the fire in a hearth, the warm center of the house. JARVIS lives there. It was called Hearth before, and an update from Hearth keeps your settings, memory and chats.
 
@@ -246,7 +246,7 @@ Good first pull requests are macOS and Linux versions of the Windows-only tools 
 
 ## Privacy
 
-Inglen runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline. The [MIT license](LICENSE) is the whole agreement.
+Inglen runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop, except the Plus relay if you choose Plus, which only carries messages it can't read. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline. The [MIT license](LICENSE) is the whole agreement.
 
 ## Support
 
