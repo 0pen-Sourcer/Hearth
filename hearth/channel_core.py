@@ -585,17 +585,49 @@ class Hub:
             # Kept as the window keeps its own errors (an error event, no reply), so the window
             # shows it in red there too and it isn't fed back to the model as something said.
             events.append({"kind": "error", "text": final, "pos": 0})
-        chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
+        stand_in = " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}"
+        chat_sync.post(cid, stand_in, self.a.name, [
             {"role": "user", "content": text, "via": self.a.name, "at": now,
              **({"displayContent": run.get("shown") or "", "attachments": attachments(run["files"])}
                 if run.get("files") else {})},
             {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
              **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
+        if not failed:
+            name_chat(cid, text, final)
         with self._lock:
             self._busy.pop(run.get("key", chat), None)
         _TURN.ctx = None
         return None
+
+
+def _ask_brain(prompt: str) -> str:
+    from .web import one_shot
+    return one_shot(prompt, timeout=20)
+
+
+def name_chat(cid: str, text: str, reply: str, ask: Optional[Callable[[str], str]] = None) -> None:
+    """A chat still under its stand-in title (its opening words) is named by the
+    brain in the background, the way the window and the terminal name theirs.
+    An opening that is only a greeting leaves it for the next turn."""
+    from . import chat_sync
+    d = chat_sync.load(cid) or {}
+    msgs = d.get("messages") or []
+    users = [m for m in msgs if m.get("role") == "user"]
+    if not users or len(users) > 3:
+        return
+    title = d.get("title") or ""
+    if title not in (" ".join((users[0].get("content") or "").split())[:60], chat_sync._title(msgs)) \
+            and not title.endswith(": " + (users[0].get("content") or "")[:50]):
+        return                                   # named already, by the brain or by hand
+    opening = "\n".join(" ".join((m.get("content") or "").split()) for m in users) + "\n" + (reply or "")[:300]
+
+    def run():
+        try:
+            chat_sync.retitle(cid, chat_sync.title_for(opening, ask or _ask_brain), was=title)
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True, name="chat-title").start()
 
 
 # ---------------------------------------------------------------- sending first

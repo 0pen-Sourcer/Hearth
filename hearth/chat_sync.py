@@ -203,12 +203,13 @@ def title_for(text: str, ask) -> str:
     return got or fallback(text)
 
 
-def retitle(cid: str, title: str) -> None:
-    """Give a chat its proper title, unless someone renamed it meanwhile."""
+def retitle(cid: str, title: str, was: Optional[str] = None) -> None:
+    """Give a chat its proper title, unless someone renamed it meanwhile.
+    `was` is the stand-in title it was made with, when not the terminal's."""
     d = load(cid)
     if not d or not title:
         return
-    if d.get("title") and d.get("title") != _title(d.get("messages") or []):
+    if d.get("title") and d.get("title") not in (_title(d.get("messages") or []), was):
         return
     d["title"] = title
     atomic_write_json(_path(cid), d, indent=2, ensure_ascii=False)

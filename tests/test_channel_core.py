@@ -102,6 +102,15 @@ async def model(prompt, *, emit, history=None, chat_id=None, permission_check=No
     return 0
 
 headless.run_once = model
+titles_asked: list = []
+
+
+def fake_titler(prompt):
+    titles_asked.append(prompt)
+    return "Testing the stand-in" if "and again" in prompt else "NONE"
+
+
+cc._ask_brain = fake_titler
 app.sent.clear()
 check("a known sender's message runs", hub.receive("111", "111", "hi there") == "ran")
 wait_idle(hub)
@@ -115,6 +124,18 @@ hub.receive("111", "111", "and again")
 wait_idle(hub)
 check("the next turn carries the conversation on",
       any("hi there" in str(m.get("content")) for m in asked["history"]) and asked["chat_id"] == "telegram_111")
+end = time.time() + 5
+while (chat_sync.load("telegram_111") or {}).get("title") != "Testing the stand-in" and time.time() < end:
+    time.sleep(0.05)
+got_title = (chat_sync.load("telegram_111") or {}).get("title")
+check(f"a greeting alone leaves the chat unnamed, and the next turn names it, by the brain ({got_title!r})",
+      len(titles_asked) == 2 and got_title == "Testing the stand-in")
+chat_sync.retitle("telegram_111", "My own name", was="Testing the stand-in")
+n = len(titles_asked)
+cc.name_chat("telegram_111", "more", "ok", ask=fake_titler)
+time.sleep(0.3)
+check("a chat already named isn't asked about again",
+      len(titles_asked) == n and chat_sync.load("telegram_111")["title"] == "My own name")
 
 # ------------------------------------------------------------ a risky step asks in the chat
 app.sent.clear()
