@@ -112,8 +112,41 @@ with sync_playwright() as pw:
     welcome = pg.evaluate("() => document.querySelector('#onboard .ob-step[data-step=\"1\"]').textContent.replace(/\\s+/g, ' ')")
     pg.screenshot(path=os.path.join(shots, "1_welcome.png"))
     check("the welcome no longer says nothing leaves the machine", "Nothing leaves" not in welcome)
-    check("the welcome says what is different: your own AI plan, memory, helpers, phone, asks first",
-          all(w in welcome for w in ("already pay for", "remember", "helpers", "phone", "OK")))
+    check(f"the welcome is a hello and one line on what it is {welcome.strip()!r}",
+          "I run on your PC and do real things on it." in welcome and "What makes me different" not in welcome)
+    agent = pg.evaluate("() => _agentName()")
+    check(f"the hello uses the agent's own name ({agent})", f"Hey, I'm {agent}." in welcome)
+
+    # Each step is a title, at most one short line, and its controls: no boxed notes, no pitch.
+    steps = pg.evaluate("""() => [...document.querySelectorAll('#onboard .ob-step')].map(s => ({
+        n: Number(s.dataset.step),
+        notes: s.querySelectorAll('.ob-tipline, .ob-points, .ap-accent-note').length,
+        subs: s.querySelectorAll(':scope > .ob-sub, :scope .ob-split-main > .ob-sub').length,
+        text: s.textContent.replace(/\\s+/g, ' ') }))""")
+    check(f"setup has eight steps and nothing indexes a ninth {[s['n'] for s in steps]}",
+          [s["n"] for s in steps] == list(range(1, 9)) and pg.evaluate("() => OB_TOTAL_STEPS") == 8
+          and pg.evaluate("() => document.querySelectorAll('#ob-progress .dot').length") == 8)
+    check(f"no step has a boxed note {[s['n'] for s in steps if s['notes']]}", all(not s["notes"] for s in steps))
+    check(f"no step has more than one line under its title {[s['n'] for s in steps if s['subs'] > 1]}",
+          all(s["subs"] <= 1 for s in steps))
+    pitch = ("What makes me different", "Keys are never copied", "Letters, digits and spaces, up to 20",
+             "A few quick choices", "Try one", "You're all set", "This is optional", "Hear it before")
+    check(f"none of the old pitch or helper lines remain {[p for p in pitch if any(p in s['text'] for s in steps)]}",
+          not [p for p in pitch if any(p in s["text"] for s in steps)])
+    check("no step hardcodes a persona name in its fields",
+          pg.evaluate("() => !/JARVIS|FRIDAY/.test([...document.querySelectorAll('#onboard input, #onboard textarea')].map(i => i.placeholder).join(' '))"))
+    bad = pg.evaluate("""async () => {
+      obStep = 6; obRender(); await new Promise(r => setTimeout(r, 300));
+      const el = $('ob-agent-name'); el.value = 'Bad_Name!'; el.dispatchEvent(new Event('input'));
+      const out = { err: !$('ob-agent-name-err').hidden, placeholder: el.placeholder };
+      $('ob-next').click(); await new Promise(r => setTimeout(r, 200));
+      out.stayed = obStep === 6;
+      el.value = 'Friday'; el.dispatchEvent(new Event('input'));
+      out.cleared = $('ob-agent-name-err').hidden;
+      el.value = ''; el.dispatchEvent(new Event('input'));
+      return out; }""")
+    check(f"a bad name is caught as it's typed and holds the step {bad}",
+          bad["err"] and bad["stayed"] and bad["cleared"] and bad["placeholder"] == agent)
 
     lang = pg.evaluate("""async () => {
       const wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -133,20 +166,25 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(200)
     pg.screenshot(path=os.path.join(shots, "2_voice_language.png"))
     check(f"the voice step asks the language, from the list listening knows ({lang['langs']})", lang["langs"] >= 20)
-    check(f"Hindi offers only Hindi voices and says so {lang['hi']}",
-          lang["hi"]["voices"] and all(v.startswith("h") for v in lang["hi"]["voices"]) and "Hindi" in lang["hi"]["note"])
+    check(f"Hindi offers only Hindi voices {lang['hi']}",
+          lang["hi"]["voices"] and all(v.startswith("h") for v in lang["hi"]["voices"]))
     check(f"German keeps the English voices and says no voice speaks it {lang['de']['note']!r}",
           all(v[:1] in "ab" for v in lang["de"]["voices"]) and "English voice" in lang["de"]["note"])
     check("English goes back to the English voices", all(v[:1] in "ab" for v in lang["en"]["voices"]))
 
-    pg.evaluate("() => { obStep = 9; obRender(); }")
-    pg.wait_for_timeout(400)
-    pg.screenshot(path=os.path.join(shots, "3_all_set.png"))
-    tries = pg.evaluate("() => [...document.querySelectorAll('#onboard .ob-try')].map(b => b.dataset.try)")
-    check(f"the last step offers one try that shows memory and helpers {tries}",
-          any("remember" in t and "helpers" in t for t in tries))
-    pg.evaluate("() => obFinish(true)")
-    pg.wait_for_timeout(800)
+    pg.evaluate("() => { obStep = 8; obRender(); }")
+    pg.wait_for_timeout(500)
+    pg.screenshot(path=os.path.join(shots, "3_last_step.png"))
+    last = pg.evaluate("() => ({ next: $('ob-next').textContent, meta: $('ob-step-meta').textContent, skip: $('ob-skip').hidden })")
+    check(f"the memory step is the last one, with Finish {last}",
+          last["next"] == "Finish" and last["meta"] == "Step 8 of 8" and last["skip"])
+    pg.click("#ob-next")
+    for _ in range(40):
+        pg.wait_for_timeout(150)
+        if pg.evaluate("() => !!document.getElementById('tour-card')"):
+            break
+    check("Finish goes straight to the tour", pg.evaluate("() => !!document.getElementById('tour-card')"))
+    check("and setup is closed", pg.evaluate("() => !$('onboard').classList.contains('open')"))
     check(f"finishing sends the language picked {posted[-1] if posted else None}",
           bool(posted) and posted[-1].get("language") == "hi")
 

@@ -560,15 +560,15 @@ with sync_playwright() as pw:
       const picks = [...document.querySelectorAll('#ob-brain-choices .ob-choice')];
       picks[0].click();
       return { titles: picks.map(b => b.querySelector('.ob-choice-title').textContent),
-               tip: document.getElementById('ob-brain-tip').textContent,
+               tip: !!document.getElementById('ob-brain-tip'),
                banner: document.getElementById('ob-brain-status').textContent, picked: JSON.parse(obState.brain) };
     }""")
     for pat in ("**/api/llmserver/status", "**/api/models", "**/api/team/choices"):
         pg.unroute(pat)
     check(f"setup offers an agent that is installed as the brain, and picking it is remembered {setup['titles']}",
           setup["titles"] == ["Claude Code", "Codex"] and setup["picked"] == {"kind": "agent", "id": "claude-code"})
-    check("it names the other agents found as helpers and leaves out one its account refused",
-          "OpenCode" in setup["tip"] and "Gemini CLI" not in setup["tip"])
+    check(f"the brain step has no note box, and one plain line for Lite {setup['banner']!r}",
+          not setup["tip"] and setup["banner"].strip().startswith("Pick an agent below, or a cloud model next."))
     # One that isn't installed is set up from a dialog: install, sign in, use.
     state = {"installed": False, "signed_in": None}
     asked: list = []

@@ -3991,9 +3991,10 @@ class JarvisCLI:
                                  else C_ERR)
                         ntools = len(b.get("tools", []))
                         err = b.get("error", "")
-                        print(f"  {color}● {b['name']:20}{C_RESET} {b.get('state', '?'):12} "
-                              f"{C_DIM}{ntools} tools{C_RESET}"
-                              + (f"  {C_ERR}{err[:60]}{C_RESET}" if err else ""))
+                        print(f"  {color}● {b.get('raw_name') or b['name']:20}{C_RESET} "
+                              + (f"{C_DIM}{err}{C_RESET}" if err
+                                 else f"{C_DIM}{ntools} tools{C_RESET}" if b.get("state") == "connected"
+                                 else f"{C_DIM}starting{C_RESET}"))
                 else:
                     print()
                     print(f"  {C_DIM}no outbound MCP servers configured yet. "
@@ -4002,14 +4003,7 @@ class JarvisCLI:
             if sub == "edit":
                 mcp_path.parent.mkdir(parents=True, exist_ok=True)
                 if not mcp_path.is_file():
-                    sample = {"mcpServers": {
-                        "example-filesystem": {
-                            "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-filesystem", str(_P.home() / "Documents")],
-                            "env": {},
-                        }
-                    }}
-                    mcp_path.write_text(__import__("json").dumps(sample, indent=2), encoding="utf-8")
+                    mcp_path.write_text(__import__("json").dumps({"mcpServers": {}}, indent=2), encoding="utf-8")
                 editor = os.environ.get("EDITOR") or ("notepad" if sys.platform == "win32" else "nano")
                 try:
                     __import__("subprocess").Popen([editor, str(mcp_path)])
@@ -5225,7 +5219,8 @@ class JarvisCLI:
             from hearth import mcp_client
             r = mcp_client.bootstrap()
             if r.get("servers", 0) > 0:
-                print(f"{C_DIM}● MCP: spawning {r['servers']} bridge(s){C_RESET}")
+                n = r["servers"]
+                print(f"{C_DIM}● MCP: starting {n} server{'' if n == 1 else 's'} (/mcp shows them){C_RESET}")
         except Exception as e:
             print(f"{C_DIM}● MCP client bootstrap skipped: {e}{C_RESET}")
         # Passive update nudge: the GUI pops a modal on launch, the CLI only
