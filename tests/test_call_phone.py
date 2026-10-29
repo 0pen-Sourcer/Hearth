@@ -202,8 +202,7 @@ class FakeCall:
 
 ad = RB.Relay(asyncio.new_event_loop())
 ad._push = lambda chat, obj: pushed.append(obj) or "m1"
-notified: list = []
-ad.notify = lambda *a, **k: notified.append(a)
+ad.notify = lambda *a, **k: None
 fake = FakeCall()
 ad._call_for = lambda chat: fake
 hub = cc.Hub(ad, configured_senders=["phone"])
@@ -219,7 +218,6 @@ pushed.clear()
 hub._busy["c_call"]["tap"] = False
 ad.ask("phone1", "Before I go on: may I open Chrome?")
 check("an ordinary one doesn't", "tap" not in next(f for f in pushed if f.get("type") == "ask") and fake.asked[1] is False)
-check(f"in a call, the question isn't pushed again: the call's notification asks it ({len(notified)})", not notified)
 cc._TURN.ctx = None
 hub._busy.clear()
 

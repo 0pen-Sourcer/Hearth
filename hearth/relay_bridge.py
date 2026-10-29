@@ -967,10 +967,8 @@ class Relay(cc.Adapter):
         if call is not None:
             call.ask(text, tap=tap, aid=aid)
         mid = self._push(chat, {"type": "ask", "text": text, "ask": aid, **({"tap": True} if tap else {})})
-        if call is None:          # in a call, the call's own notification asks it, with Allow and Deny
-            from . import persona
-            self.notify(chat, {"kind": "ask", "title": f"{persona.NAME} asks", "body": text, "c": c, "ask": aid},
-                        urgent=True)
+        from . import persona
+        self.notify(chat, {"kind": "ask", "title": f"{persona.NAME} asks", "body": text, "c": c, "ask": aid}, urgent=True)
         return mid
 
     def send_file(self, chat, path):
