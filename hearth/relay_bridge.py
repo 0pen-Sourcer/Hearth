@@ -1087,7 +1087,9 @@ class Room:
             self.bridge.adapter.rooms[self.chat] = self
             await self.ws.send(json.dumps({"t": "hello", "eph": R.b64(R.raw_public(eph))}))
             from . import persona
-            await self.deliver({"type": "hi", "name": persona.NAME})
+            # The turns running now: the phone drops any other it still draws as
+            # working (one whose end it missed while it was closed).
+            await self.deliver({"type": "hi", "name": persona.NAME, "running": self.bridge.running()})
             warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "box" and self.phone:          # Allow or Deny tapped on a notification
@@ -1164,6 +1166,16 @@ class Bridge:
         p = d.get("pending") or {}
         if p.get("room") and time.time() - float(p.get("at") or 0) < PAIR_LIFE_S:
             out.setdefault(p["room"], {"ps": p["ps"], "phone": ""})
+        return out
+
+    def running(self) -> List[str]:
+        """The turns answering now, here and in coding agents' sessions."""
+        hub = getattr(self, "hub", None)
+        out = []
+        if hub is not None:
+            with hub._lock:
+                out += [str(r.get("t")) for r in hub._busy.values() if r.get("t")]
+        out += [str(r.get("t")) for r in list(self.agent_runs.values()) if r.get("t")]
         return out
 
     def on_message(self, room: Room, m: Dict[str, Any]) -> None:
@@ -1274,7 +1286,7 @@ class Bridge:
             return
         if not text:
             return
-        run = self.agent_runs[cid] = {"q": None, "answer": False}
+        run = self.agent_runs[cid] = {"q": None, "answer": False, "t": turn}
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
 

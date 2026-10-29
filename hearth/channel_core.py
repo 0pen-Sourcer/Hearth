@@ -25,6 +25,7 @@ import json
 import os
 import re
 import secrets
+import contextvars
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -192,7 +193,32 @@ def chat_id_for(channel: str, chat: str) -> str:
 # The turn being answered on this thread: the Hearth chat it belongs to ("c") and
 # an id for the turn ("t"), so an app that shows several chats can put what it is
 # sent in the right one.
-_TURN = threading.local()
+class _TurnHere:
+    """The chat and turn being answered here, for whatever the turn sends to an app.
+    A context variable, not a thread's: asyncio.to_thread carries it to the threads a
+    turn's tools and approvals run on, so what they send is filed under the turn
+    (sent without it, the phone drew a "Thinking" row that never ended)."""
+    _v: "contextvars.ContextVar[Optional[Dict[str, str]]]" = contextvars.ContextVar("channel_turn", default=None)
+
+    @property
+    def ctx(self) -> Optional[Dict[str, str]]:
+        return self._v.get()
+
+    @ctx.setter
+    def ctx(self, value: Optional[Dict[str, str]]) -> None:
+        self._v.set(value)
+
+
+_TURN = _TurnHere()
+
+# The app and chat this turn is answering in, for the tools that send to "my phone":
+# in a turn from the phone app or a chat app, that is this same conversation.
+_HERE: "contextvars.ContextVar[Optional[tuple]]" = contextvars.ContextVar("channel_here", default=None)
+
+
+def here() -> Optional[tuple]:
+    """(adapter, chat) when the turn running here came from an app, else None."""
+    return _HERE.get()
 
 
 def turn_context() -> Dict[str, str]:
@@ -364,6 +390,8 @@ class Hub:
         if run.get("regen"):
             chat_sync.drop_last_turn(cid)             # the answer asked for again replaces the last one
         _TURN.ctx = {"c": cid, "t": secrets.token_hex(5)}
+        run["t"] = _TURN.ctx["t"]                     # which turn is running, for a phone that reconnects
+        _HERE.set((self.a, chat))
         try:
             from . import live_bus
             live_bus.publish(live_bus.turn_event(cid, self.a.name, _TURN.ctx["t"], "start", {"text": text}))
@@ -588,6 +616,55 @@ def push(channel: str, text: str) -> str:
         return f"Error sending to {channel.title()}: {type(e).__name__}: {e}"
 
 
+def _multipart(fields: Dict[str, str], name: str, path: str) -> tuple:
+    import mimetypes
+    boundary = secrets.token_hex(16)
+    parts = []
+    for k, v in fields.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
+    fname = os.path.basename(path).replace('"', "_")
+    mime = mimetypes.guess_type(fname)[0] or "application/octet-stream"
+    with open(path, "rb") as f:
+        data = f.read()
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{fname}"\r\n'
+                 f"Content-Type: {mime}\r\n\r\n".encode() + data + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def push_file(channel: str, path: str) -> str:
+    """Send a file to the owner on an app, from this PC: a picture shows as one."""
+    import urllib.request
+    cfg = config_of(channel)
+    token, who = (cfg.get("bot_token") or "").strip(), owner_of(channel)
+    if channel not in ("telegram", "discord"):
+        return f"Error: {channel or 'that app'} can't take a file sent from this PC (telegram or discord)."
+    if not token or not who:
+        return f"Error: {channel.title()} isn't connected and paired (Settings > Connectors)."
+    if os.path.getsize(path) > (48 << 20 if channel == "telegram" else 24 << 20):
+        return f"Error: {os.path.basename(path)} is too big to send over {channel.title()}."
+    try:
+        if channel == "telegram":
+            photo = os.path.splitext(path)[1].lower() in (".png", ".jpg", ".jpeg", ".webp") \
+                and os.path.getsize(path) < 10 << 20
+            body, ctype = _multipart({"chat_id": str(who)}, "photo" if photo else "document", path)
+            urllib.request.urlopen(urllib.request.Request(
+                f"https://api.telegram.org/bot{token}/{'sendPhoto' if photo else 'sendDocument'}", data=body,
+                headers={"Content-Type": ctype, "User-Agent": "Inglen"}), timeout=60)
+            return f"Sent {os.path.basename(path)} to your Telegram."
+        h = {"Authorization": f"Bot {token}", "User-Agent": "DiscordBot (https://github.com/0pen-sourcer/hearth, 0.7.6) Inglen"}
+        chan = json.loads(urllib.request.urlopen(urllib.request.Request(
+            "https://discord.com/api/v10/users/@me/channels", data=json.dumps({"recipient_id": who}).encode(),
+            headers=dict(h, **{"Content-Type": "application/json"})), timeout=12).read().decode())
+        body, ctype = _multipart({"payload_json": "{}"}, "files[0]", path)
+        urllib.request.urlopen(urllib.request.Request(
+            f"https://discord.com/api/v10/channels/{chan['id']}/messages", data=body,
+            headers=dict(h, **{"Content-Type": ctype})), timeout=60)
+        return f"Sent {os.path.basename(path)} to your Discord (a DM)."
+    except Exception as e:
+        return f"Error: {channel.title()} didn't take it: {type(e).__name__}: {e}"
+
+
 def push_any(text: str) -> bool:
     """To whichever app is connected, Telegram first. False when none could."""
     for ch in ("telegram", "discord"):
@@ -653,17 +730,54 @@ def _persona_name() -> str:
 
 
 def _what(name: str, args: Dict[str, Any]) -> str:
-    """A risky step in a few words, for the question."""
+    """A risky step in a few plain words, for the question: never the tool's own name."""
     a = args or {}
-    if name == "run_command":
-        return f"run `{str(a.get('command') or '')[:160]}`"
-    if name in ("write_file", "edit_file", "append_file"):
-        return f"change {a.get('path') or 'a file'}"
+
+    def cut(v: Any, n: int = 120) -> str:
+        t = " ".join(str(v or "").split())
+        return t if len(t) <= n else t[:n].rstrip() + "..."
+
+    def base(p: Any) -> str:
+        return os.path.basename(str(p or "").rstrip("\\/")) or str(p or "") or "that"
+
+    if name in ("run_command", "start_job"):
+        return ("start " if name == "start_job" else "run ") + f"`{cut(a.get('command') or a.get('cmd'), 160)}`"
+    if name in ("write_file", "append_file"):
+        return f"write {base(a.get('path'))}"
+    if name == "edit_file":
+        return f"change {base(a.get('path'))}"
+    if name == "create_directory":
+        return f"make the folder {base(a.get('path'))}"
     if name in ("delete_file", "delete_path"):
         return f"delete {a.get('path') or 'a file'}"
-    if name in ("send_email",):
-        return f"send an email to {a.get('to') or 'someone'}"
-    return f"use {name}" + (f" ({', '.join(f'{k}={str(v)[:40]}' for k, v in list(a.items())[:2])})" if a else "")
+    if name == "move_path":
+        return f"move {base(a.get('source') or a.get('path'))} to {a.get('destination') or 'another folder'}"
+    if name == "send_email":
+        return f"send an email to {a.get('to') or 'someone'}" + (f" (\"{cut(a.get('subject'), 60)}\")" if a.get("subject") else "")
+    if name == "send_to_phone":
+        what = a.get("path") or a.get("file")
+        return (f"send {base(what)} to your phone" if what else
+                f"send this to your phone: \"{cut(a.get('message') or a.get('text'))}\"")
+    if name in ("open_url", "open_in_browser"):
+        return f"open {cut(a.get('url'), 100)}"
+    if name == "open_app":
+        return f"open {a.get('name') or a.get('app') or 'an app'}"
+    if name == "install_skill":
+        return f"install the skill {a.get('name') or a.get('source') or ''}".rstrip()
+    if name in ("delegate", "launch_team"):
+        who = a.get("agent") or a.get("runtime") or "another agent"
+        return f"hand this to {who}" + (f": \"{cut(a.get('task') or a.get('prompt'), 80)}\"" if a.get("task") or a.get("prompt") else "")
+    if name in ("generate_image", "generate_video", "forge_generate"):
+        return f"make {'a video' if 'video' in name else 'an image'}" + (f" of \"{cut(a.get('prompt'), 80)}\"" if a.get("prompt") else "")
+    if name == "load_model":
+        return f"load {a.get('model') or a.get('name') or 'another model'}"
+    if name.startswith(("computer_", "desktop_", "browse_")) or name in ("execute_actions", "smart_click"):
+        return "use the mouse and keyboard on your PC"
+    if name == "read_inbox":
+        return "read your email"
+    words = name.replace("_", " ")
+    shown = ", ".join(cut(v, 40) for v in list(a.values())[:2] if isinstance(v, (str, int, float)) and str(v).strip())
+    return f"{words}" + (f": {shown}" if shown else "")
 
 
 def _transcribe(path: str) -> str:

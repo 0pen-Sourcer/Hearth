@@ -2516,10 +2516,11 @@ async def _run_once(
             emit("nudge", reason="ignored NEXT STEP hint from tool result")
             messages.append({
                 "role": "user",
+                # Said as Inglen's note, never as the person: they didn't write it.
                 "content": (
-                    f"The previous tool result told you exactly what to do next: "
-                    f"'{_pending_next_step}'. Execute that NEXT STEP NOW — call "
-                    f"the tool. Don't narrate, don't describe, don't ask. Act."
+                    f"(Inglen's note, not the person's words: the last tool result suggested a "
+                    f"next step: '{_pending_next_step}'. Take it if it serves what they asked; "
+                    f"if it doesn't, answer them as you were.)"
                 ),
             })
             continue

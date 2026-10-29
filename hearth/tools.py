@@ -5354,12 +5354,9 @@ def _screenshot(p: Dict) -> str:
     delay_note = (f" (waited {delay:.0f}s before capture)" if delay > 0 else "")
     size_note = f" ({img.size[0]}x{img.size[1]})" if img is not None else ""
     return (
-        f"Saved: {out}{size_note}{delay_note}\n"
-        f"NEXT STEP: if the user asked you to DESCRIBE / TELL THEM WHAT'S "
-        f"ON the screen, call view_image with path='{out}' RIGHT NOW in "
-        f"this same turn — don't stop here. If they asked you to SHOW or "
-        f"OPEN the screenshot in their gallery, call open_app with that "
-        f"path instead. Only stop if they only asked you to CAPTURE."
+        f"Saved the screenshot: {out}{size_note}{delay_note}. "
+        f"To see what's on it, look at it with view_image. To send it to them, "
+        f"send_to_phone with this path (or put the path in your reply in a chat app)."
     )
 
 
@@ -7657,17 +7654,42 @@ def _focus_window(p: Dict) -> str:
 
 
 def _send_to_phone(p: Dict) -> str:
-    """Send a message from this PC to the owner on a connected chat app (the
-    outbound side; the apps answer incoming messages by themselves)."""
+    """Send a message or a file from this PC to the owner's phone. In a turn that
+    came from the phone app or a chat app, that is this same conversation; from the
+    window or the terminal, the connected chat app (Telegram first)."""
     from . import channel_core
     channel = (p.get("channel") or "").strip().lower()
     message = (p.get("message") or "").strip()
-    if not message:
-        return "Error: message is required."
+    path = os.path.expanduser(str(p.get("path") or "").strip().strip('"'))
+    if not message and not path:
+        return "Error: give a message, a file path, or both."
+    if path and not os.path.isfile(path):
+        return f"Error: no file at {path}."
+    here = channel_core.here()
+    if here is not None and not channel:
+        adapter, chat = here
+        try:
+            if message:
+                adapter.send(chat, message)
+            if path:
+                if not callable(getattr(adapter, "send_file", None)):
+                    return f"Error: {getattr(adapter, 'label', 'this app')} can't take files; the message was sent."
+                adapter.send_file(chat, path)
+        except Exception as e:
+            return f"Error: it didn't send: {type(e).__name__}: {e}"
+        what = " and ".join(x for x in ("the message" if message else "", os.path.basename(path) if path else "") if x)
+        return f"Sent {what} here, in this conversation: they see it now."
     if not channel:
-        return "Sent." if channel_core.push_any(message) else \
-            "Error: no chat app is connected and paired (Settings > Connectors)."
-    return channel_core.push(channel, message)
+        for ch in ("telegram", "discord"):
+            if channel_core.config_of(ch).get("bot_token") and channel_core.owner_of(ch):
+                channel = ch
+                break
+        else:
+            return "Error: no chat app is connected and paired (Settings > Connectors)."
+    out = channel_core.push(channel, message) if message else ""
+    if path and not out.startswith("Error"):
+        out = channel_core.push_file(channel, path)
+    return out
 
 
 _HANDLERS["send_to_phone"] = _send_to_phone
@@ -7758,17 +7780,18 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "send_to_phone",
     "description": (
-        "Send a message FROM this PC TO the user's phone, on a chat app they connected "
-        "(Telegram, or Discord as a DM). Use for 'send this to my Telegram', 'text me "
-        "this', 'ping my phone'. Leave channel out to use whichever is connected. "
-        "Messages they send come in and are answered by themselves; this is only for "
-        "starting one from here."
+        "Send a message or a file (a screenshot, a photo, a PDF) from this PC to the user's "
+        "phone. When they are talking to you from the phone app or a chat app, it goes to that "
+        "same conversation; from the window or terminal, to the chat app they connected "
+        "(Telegram, or Discord as a DM). Use for 'send me a photo', 'text me this', 'ping my "
+        "phone'. Leave channel out unless they named one."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "channel": {"type": "string", "enum": ["telegram", "discord"], "description": "Leave out for whichever is connected."},
             "message": {"type": "string", "description": "The text to send."},
+            "path": {"type": "string", "description": "A file on this PC to send (a screenshot, a photo, a PDF): it arrives as an attachment."},
         },
         "required": ["message"],
     },
@@ -9288,6 +9311,13 @@ def mode_allows(name: str, args=None) -> bool:
         return act == "show" or (m == "auto" and act != "discard")
     if name == "connectors" and str((args or {}).get("action") or "status") == "status":
         return True                     # looking at what's connected changes nothing
+    if name == "send_to_phone" and not (args or {}).get("channel"):
+        try:
+            from .channel_core import here
+            if here() is not None:
+                return True             # into the very conversation they're writing in: nothing to ask
+        except Exception:
+            pass
     if m == "auto":
         # What the app made itself (this week), it may delete or move without asking: each change is
         # copied aside first, so it can be undone (hearth/undo.py).
