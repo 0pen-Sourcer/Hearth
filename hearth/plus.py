@@ -3,8 +3,10 @@
 Plus is sold through Dodo Payments as a subscription with a licence key. A key
 is activated once per PC (Dodo counts activations), checked again now and then,
 and remembered in ~/.hearth/plus.json. Dodo's licence endpoints are public, so
-no secret lives in the app; the relay server keeps the real subscription state
-from Dodo's webhooks and is what actually lets a lapsed account go.
+no secret lives in the app. Dodo disables a subscription's key itself when the
+subscription is cancelled, expires, goes on hold or is paused, and validate then
+says it isn't valid; the relay asks the same endpoint, so a lapsed account loses
+the relay within its few hours of cache, with no webhook needed.
 
 A key that can't be checked (offline) stays good for a grace period after its
 last successful check, so a trip without internet doesn't switch Plus off.
