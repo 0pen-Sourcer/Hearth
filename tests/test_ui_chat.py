@@ -1328,7 +1328,7 @@ with sync_playwright() as pw:
       const mo = new MutationObserver(() => { if (!names.includes(el.textContent)) names.push(el.textContent); });
       mo.observe(el, { childList: true, characterData: true, subtree: true });
       $('onboard').classList.add('open'); obStep = 1; obRender();
-      for (let i = 0; i < 300 && !(names.length > 2 && el.textContent === 'JARVIS'); i++) await sleep(10);
+      for (let i = 0; i < 300 && !(names.length > 2 && el.textContent === 'Inglen'); i++) await sleep(10);
       mo.disconnect();
       const final = el.textContent;
       // The preview speaks with the name typed in the step before.
@@ -1356,7 +1356,7 @@ with sync_playwright() as pw:
       return { names, final, accent, said, room, back };
     }""")
     check(f"setup's first line tries on other names before settling on the one in use {extras['names']}",
-          len(extras["names"]) >= 3 and extras["final"] == "JARVIS" and "FRIDAY" in extras["names"])
+          len(extras["names"]) >= 3 and extras["final"] == "Inglen" and "Nova" in extras["names"])
     check(f"setup's look offers the accent, the same setting as Settings {extras['accent']}", extras["accent"] == ["sage", "sage"])
     check(f"the preview talks as the name typed a step before {extras['said']}",
           extras["said"] == ["Message Friday…", "friday", "Friday"])
