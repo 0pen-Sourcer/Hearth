@@ -418,6 +418,11 @@ PROVIDERS = {
 }
 
 
+def urlparse_host(base: str) -> str:
+    from urllib.parse import urlparse
+    return (urlparse(base or "").hostname or "").lower()
+
+
 def provider_for(base: str) -> str:
     """Which provider an address belongs to: its id, "local" for a server on
     this PC (or no address at all), "" for one Hearth has no name for."""
@@ -1462,6 +1467,19 @@ async def _run_once(
     # stash the block here and ride it on a user turn after the tool loop.
     _pending_image_block: Optional[Dict[str, Any]] = None
 
+    # A provider known to be out until a time isn't asked again before then: the
+    # turn says so straight away, as an agent brain's does (provider_limits).
+    if not _is_local_endpoint(LOCAL_API_BASE):
+        from . import provider_limits
+        _held = provider_limits.blocked(LOCAL_API_BASE, LOCAL_API_KEY)
+        if _held:
+            _pid = provider_for(LOCAL_API_BASE)
+            _who = PROVIDERS[_pid][0] if _pid in PROVIDERS else (urlparse_host(LOCAL_API_BASE) or "This provider")
+            emit("error", category=_held.get("what") or "quota", retryable=False,
+                 message=provider_limits.card(_who, _held))
+            emit("done", reply="", iterations=0)
+            return 0
+
     for depth in range(max_depth):
         iterations = depth + 1
         # User hit Stop in the GUI — bail out cleanly between turns.
@@ -1843,9 +1861,21 @@ async def _run_once(
                         info = classify_api_error(e2, _is_local_endpoint(LOCAL_API_BASE))
                         e = e2
             if info is not None:
+                if not _is_local_endpoint(LOCAL_API_BASE):
+                    try:                          # its reset time, so the next turn before then isn't spent
+                        from . import provider_limits
+                        provider_limits.note(LOCAL_API_BASE, LOCAL_API_KEY, info.category, info.hint, e)
+                    except Exception:
+                        pass
                 emit("error", message=info.hint, category=info.category,
                      retryable=info.retryable, detail=f"{type(e).__name__}: {e}")
                 return 4
+        if resp is not None and not _is_local_endpoint(LOCAL_API_BASE):
+            try:
+                from . import provider_limits
+                provider_limits.clear(LOCAL_API_BASE, LOCAL_API_KEY)
+            except Exception:
+                pass
         if resp is None and should_cancel is not None and should_cancel():
             emit("cancelled", message="stopped by user")
             break
