@@ -6189,11 +6189,11 @@ function popupsMode() {
 }
 // A toast that asks: stays until answered, with a yes and a later. With
 // pop-ups off it is built but never shown.
-function askToast(title, body, yesLabel, onYes, onLater) {
+function askToast(title, body, yesLabel, onYes, onLater, laterLabel = 'Later') {
   const t = document.createElement('div');
   t.className = 'toast ok ask';
-  t.innerHTML = `<span class="t-ico"></span><div class="title">${esc(title)}</div><div class="body">${esc(body)}</div>
-    <div class="ask-row"><button class="primary" data-a="yes">${esc(yesLabel)}</button><button data-a="later">Later</button></div>`;
+  t.innerHTML = `<span class="t-ico"></span><div class="title">${esc(title)}</div>${body ? `<div class="body">${esc(body)}</div>` : ''}
+    <div class="ask-row"><button class="primary" data-a="yes">${esc(yesLabel)}</button><button data-a="later">${esc(laterLabel)}</button></div>`;
   const close = () => _toastOut(t);
   if (popupsMode() === 'none') return t;
   t.addEventListener('click', (e) => {
@@ -21702,6 +21702,23 @@ function showBroadcast(items) {
   if (ov.querySelector('.bc-card')) ov.style.display = 'block';
 }
 
+// The last run ended in a crash: said once, quietly. Send report opens a filled-in
+// GitHub issue for them to read and submit; nothing goes anywhere by itself.
+async function checkCrash() {
+  let r;
+  try { r = await api('/api/crash/pending'); } catch { return; }
+  if (!r || !r.crashed) return;
+  askToast('Inglen closed unexpectedly', '', 'Send report', async (t, close) => {
+    close();
+    const p = await api('/api/crash/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
+    if (!p || !p.url) return;
+    const a = document.createElement('a');
+    a.href = p.url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }, () => { api('/api/crash/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); },
+  'Dismiss');
+}
+
 async function pollAnnouncements() {
   try {
     const r = await api('/api/announcements/check', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
@@ -21830,6 +21847,7 @@ window.addEventListener('load', function initSidebarDrawer() {
   // doesn't race the onboarding modal or the first state refresh).
   setTimeout(promptUpdateIfAvailable, 2500);
   setTimeout(pollAnnouncements, 4500);
+  setTimeout(checkCrash, 3000);
 
   // First-run welcome card: show only on an empty chat AND when not dismissed.
   // Also reappears for users who haven't seen it yet (after the existing onboard

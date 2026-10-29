@@ -2696,6 +2696,9 @@ class HearthHandler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"path": detected or ""})
             except Exception as e:
                 return self._send_json(500, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/crash/pending":
+            from . import crashlog as _cl
+            return self._send_json(200, {"crashed": _cl.pending() is not None})
         if path == "/api/reminders/ideas":
             try:
                 return self._send_json(200, {"ideas": reminder_ideas(self._query().get("fresh") == "1")})
@@ -4039,6 +4042,15 @@ class HearthHandler(BaseHTTPRequestHandler):
             if not rid:
                 return self._send_json(400, {"ok": False, "error": "missing id"})
             return self._send_json(200, _r.done_reminder(rid))
+        if path == "/api/crash/dismiss":
+            from . import crashlog as _cl
+            _cl.dismiss()
+            return self._send_json(200, {"ok": True})
+        if path == "/api/crash/report":
+            from . import crashlog as _cl
+            p = _cl.pending()
+            _cl.dismiss()
+            return self._send_json(200, {"ok": bool(p), "url": _cl.report_url(p) if p else ""})
         if path == "/api/reminders/cancel":
             try:
                 from . import reminders as _r

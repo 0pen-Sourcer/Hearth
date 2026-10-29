@@ -489,6 +489,11 @@ def main(argv: Optional[list] = None) -> int:
                     pass
         except Exception:
             pass
+        try:
+            from .crashlog import clean_exit
+            clean_exit()
+        except Exception:
+            pass
         os._exit(0)
 
     _chat_item = chat_menu_item
