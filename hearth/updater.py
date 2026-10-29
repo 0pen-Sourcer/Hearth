@@ -120,7 +120,8 @@ def download_patch(on_progress=None, tag: str = "") -> dict:
 # that starts the app.
 _REPAIRABLE = [
     ("Inglen code", ["hearth/__init__.py", "hearth/web.py", "hearth/tools.py",
-                     "hearth/headless.py", "hearth/ui.html", "hearth/room.js", "hearth_cli.py"],
+                     "hearth/headless.py", "hearth/ui.html", "hearth/room.js", "hearth/call_audio.js",
+                     "hearth_cli.py"],
      "the app itself"),
     ("Skills and helpers", ["hearth/skills", "hearth/subagents"],
      "file-making skills and the helper agents' instructions"),

@@ -1,4 +1,4 @@
-"""A voice call from the phone app (Inglen Plus).
+"""A voice call: from the phone app (Inglen Plus), or voice mode in the window.
 
 The phone streams its mic as 16 kHz 16-bit mono frames over the encrypted
 relay. Here they are fed to the same speech recognizer voice mode uses (no PC
@@ -8,6 +8,10 @@ the phone, as the reply is written, a clause at a time. Talking over it, or a
 tap on the phone, cuts it off on both ends. Steps and approvals reach the call
 screen as they happen; a spoken "yes" approves only what Auto mode would let
 run anyway, and for the rest the phone's Allow button is asked for out loud.
+
+Voice mode in the window is the same call over a socket on the window's own
+server: the page captures the mic with the browser's echo cancelling and plays
+the voice through it, so talking over a reply works on speakers too.
 """
 from __future__ import annotations
 
@@ -75,6 +79,7 @@ class Call:
         self.post = post              # a line it says on its own, kept in the call's chat
         self.leaving = False          # it said goodbye: the call ends once that has been heard
         self.ready = False
+        self.turn = 0                 # the turn being spoken; a cut makes the one running go quiet
         self._lock = threading.Lock()
 
     # ---------------------------------------------------------------- the voice out
@@ -104,6 +109,9 @@ class Call:
             self.send({"type": "call.error", "detail": "Voice isn't set up on this PC yet. Open voice mode there once."})
             return False
         self.lease = lease
+        if self.ended:                          # ended while the listener was starting
+            _rv.stop_continuous(lease)
+            return False
         return True
 
     def end(self, by: str = "") -> None:
@@ -200,18 +208,26 @@ class Call:
     def _barge(self) -> None:
         """They talked over it: stop speaking here and on the phone."""
         self.speaker.stop()
-        self.send({"type": "call.state", "state": "listening"})
+        with self._lock:
+            self.turn += 1
+        self.send({"type": "call.state", "state": "listening", "barge": True})
 
     def hush(self) -> None:
         """The orb tapped on the phone: stop talking, keep the turn and the call."""
         self.speaker.stop()                     # the rest of this reply stays unsaid; its text still shows
+        with self._lock:
+            self.turn += 1
         self.send({"type": "call.state", "state": "listening"})
 
-    def begin(self) -> None:
-        """A turn starts in the call's chat (said, or typed during the call): its reply is spoken."""
+    def begin(self) -> int:
+        """A turn starts in the call's chat (said, or typed during the call): its reply is spoken.
+        Returns the turn's number; a reply given with an older one is not spoken."""
         with self._lock:
             self.spoken, self.reply = 0, ""
+            self.turn += 1
+            n = self.turn
         self.speaker.reset_abort()
+        return n
 
     def _heard(self, text: str) -> None:
         text = (text or "").strip()
@@ -241,9 +257,11 @@ class Call:
         self.send({"type": "call.state", "state": "thinking"})
 
     # ---------------------------------------------------------------- the reply, as it is written
-    def live(self, text: str) -> None:
+    def live(self, text: str, turn: Optional[int] = None) -> None:
         """The reply so far: speak each piece that is complete."""
         with self._lock:
+            if turn is not None and turn != self.turn:
+                return
             self.reply = text or ""
             while True:
                 rest = self.reply[self.spoken:]
@@ -262,9 +280,11 @@ class Call:
                 if piece:
                     self._speak(piece)
 
-    def done(self, text: str) -> None:
+    def done(self, text: str, turn: Optional[int] = None) -> None:
         """The finished reply: speak what is left of it, then listen again."""
         with self._lock:
+            if turn is not None and turn != self.turn:
+                return
             full = text or self.reply
             rest = full[self.spoken:].strip() if full.startswith(self.reply[:self.spoken]) else ""
             self.spoken = len(full)
@@ -306,3 +326,56 @@ class Call:
     def _speak(self, text: str) -> None:
         self.send({"type": "call.state", "state": "speaking"})
         self.speaker.speak(text)
+
+
+class Turn:
+    """A reply this process writes in the call's chat, followed from its events
+    (headless.run_once's emit) the way a bridge follows one: spoken as it is
+    written, its steps shown on the call, the rest said when it ends."""
+
+    _OPEN_TOOL = re.compile(r"<\|?tool_call\|?>(?![\s\S]*<\|?/\|?tool_call\|?>)", re.I)
+
+    def __init__(self, call: Call):
+        self.call = call
+        self.n = call.begin()
+        self.parts: List[str] = []
+        self.written: List[str] = []
+
+    def event(self, kind: str, kw: Dict[str, Any]) -> None:
+        c = self.call
+        if c.ended or self.n != c.turn:
+            return
+        if kind == "assistant_chunk" and kw.get("content"):
+            self.written.append(kw["content"])
+            so_far = "".join(self.parts) + "".join(self.written)
+            if not self._OPEN_TOOL.search(so_far):      # a call written as text is never read out half-made
+                c.live(so_far, turn=self.n)
+        elif kind == "assistant":
+            self.parts.append(kw.get("content") or "")
+            self.written.clear()
+        elif kind == "tool_call" and kw.get("name"):
+            from .term_render import tool_words
+            c.step(tool_words(kw["name"], kw.get("args")))
+
+    def end(self) -> None:
+        text = "".join(self.parts) or "".join(self.written)
+        self.call.done(text, turn=self.n)
+
+
+# What a spoken answer to an approval is, said on its own: the window takes only a
+# clear answer, so "no, do it this way instead" still goes through as a message.
+_ALWAYS = re.compile(r"^(always|always allow|yes always)$")
+_ALLOW = re.compile(r"^(yes|yeah|yep|yup|sure|ok|okay|allow|do it|go ahead|confirm|yes please)$")
+_DENY = re.compile(r"^(no|nope|nah|deny|don'?t|cancel|stop|no thanks)$")
+
+
+def spoken_answer(text: str) -> str:
+    """'always', 'allow', 'deny', or '' when the words aren't an answer."""
+    t = re.sub(r"[.!?,]+$", "", (text or "").strip().lower()).strip()
+    if _ALWAYS.match(t):
+        return "always"
+    if _ALLOW.match(t):
+        return "allow"
+    if _DENY.match(t):
+        return "deny"
+    return ""

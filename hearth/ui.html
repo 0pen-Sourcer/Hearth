@@ -4073,6 +4073,17 @@
   .voice-controls .icon-btn.exit:hover {
     color: var(--err); border-color: var(--err);
   }
+  /* An approval in voice mode: answer it out loud, or here. */
+  .voice-ask { display: flex; gap: 10px; margin-top: -8px; }
+  .voice-ask button {
+    font: 12px var(--mono); letter-spacing: 0.4px;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    background: var(--bg-2); color: var(--fg-dim); border: 1px solid var(--border);
+    transition: color .15s var(--ease), border-color .15s var(--ease);
+  }
+  .voice-ask button:hover { color: var(--fg); border-color: var(--fg-faint); }
+  .voice-ask button.yes { color: var(--accent); border-color: var(--accent-line); }
+  .voice-ask button.yes:hover { border-color: var(--accent); }
   .voice-bottom-text {
     color: var(--fg-faint);
     font-size: 11px;
@@ -4685,7 +4696,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Speakers mode</div>
-            <div class="hint">Turn this on if you use speakers and Inglen hears itself talking. It stops listening while it speaks. To cut in anyway, start with its name, like "Jarvis, stop". Leave it off with headphones.</div>
+            <div class="hint">For voice in the terminal (/listen). Voice mode in the window cancels its own echo and doesn't need it. Turn it on if you use speakers and the terminal hears itself talking: it stops listening while it speaks, and to cut in you start with its name, like "Jarvis, stop".</div>
           </div>
           <div class="switch" data-key="voice_half_duplex"></div>
         </div>
@@ -5955,6 +5966,12 @@
   <div class="voice-grid" id="voice-grid"></div>
   <div class="voice-status-text" id="voice-status-text">idle</div>
   <div class="voice-transcript" id="voice-transcript"></div>
+  <div class="voice-ask" id="voice-fix" hidden><button id="voice-fix-open" class="yes">Open microphone settings</button></div>
+  <div class="voice-ask" id="voice-ask" hidden>
+    <button id="voice-ask-yes" class="yes">Allow</button>
+    <button id="voice-ask-no">Deny</button>
+  </div>
+  <audio id="voice-audio" hidden></audio>
   <div class="voice-controls">
     <button class="icon-btn" id="voice-mic-toggle" title="Start / stop talking">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4"/><path d="M8 23h8"/></svg>
@@ -5972,6 +5989,8 @@
 <script src="/assets/d3.v7.min.js"></script>
 <!-- The Team room, the same file the phone app draws it with. -->
 <script src="/room.js"></script>
+<!-- Voice mode's sound: the mic and the voice, echo cancelled. The phone app's call uses the same file. -->
+<script src="/call_audio.js"></script>
 <script>
 'use strict';
 
@@ -6884,9 +6903,11 @@ function showInlinePermission(reqId, toolName, args, why) {
   if (voiceModeOn) {
     setVoiceStatus('needs permission');
     setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  Say "yes", "no", or "always".');
+    $('voice-ask').hidden = false;
     // And ask out loud: in voice mode nobody is reading the screen. Plain
     // words only, never a path or a command read character by character.
-    speakText(_spokenPermQuestion(toolName, args), true);
+    // In a call the PC asks itself, and says when only a click will do.
+    if (!winCall) speakText(_spokenPermQuestion(toolName, args), true);
   }
   setTimeout(() => document.getElementById('input').focus(), 0);
 }
@@ -6917,6 +6938,7 @@ function hideInlinePermission() {
   pendingPermTool = null;
   pendingPermArgs = null;
   $('perm-strip').hidden = true;
+  $('voice-ask').hidden = true;
   if (voiceModeOn) setVoiceTranscript('');
   document.getElementById('input').placeholder = `Message ${_agentName()}…`;
 }
@@ -11241,6 +11263,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
     // TTS auto-streaming ONLY in voice mode. In chat view, users get the
     // per-message "speak" button instead - no surprise audio.
     if (!voiceModeOn) { ttsBuffer = ''; return; }
+    if (winCall) { ttsBuffer = ''; return; }     // the PC speaks a call's replies as they're written
     if (!STATE.settings.voice_tts && !voiceModeOn) { ttsBuffer = ''; return; }
     if (!ttsBuffer) return;
     // Never speak a tool call the model emitted as text: strip COMPLETE blocks
@@ -16509,6 +16532,7 @@ async function enterVoiceMode() {
   }
   if (_dict) dictStop();   // voice mode takes the listener over
   voiceModeOn = true;
+  setVoiceTranscript('');          // nothing left over from the last time
   $('voice-mode').classList.add('show');
   setVoiceStatus('starting…');     // neutral until we know the brain is ready
   startVoiceGridWave();  // continuous reactive loop (mic + AI voice)
@@ -16583,6 +16607,9 @@ async function enterVoiceMode() {
 }
 function exitVoiceMode() {
   voiceModeOn = false;
+  if (winCall) endWindowCall();
+  $('voice-ask').hidden = true;
+  $('voice-fix').hidden = true;
   $('voice-mode').classList.remove('show');
   stopVoiceGridWave();
   if (recorder.recording) stopRecording().catch(() => {});
@@ -16896,6 +16923,7 @@ $('voice-mic-toggle').addEventListener('click', () => {
     if (_utterTimer) { clearTimeout(_utterTimer); _utterTimer = null; }
     _utterBuf = '';
     setVoiceTranscript('');
+    if (winCall) { if (_voiceMuted) winCallQuiet(); return; }
     api('/api/voice/realtime/mute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify({ muted: _voiceMuted }) }).catch(() => {});
     return;
@@ -16988,15 +17016,21 @@ async function warmUpBrainForVoice() {
 
 let _rtUserStop = false, _rtFailed = false;
 async function startRealtimeVoice() {
-  if (rtVoiceActive) return;
+  if (rtVoiceActive || winCall) return;
   _rtUserStop = false; _rtFailed = false; _voiceReady = false;
+  // Made on the click when there is one, so the voice may play.
+  const audio = winCallCan() ? CallAudio.make() : null;
   const ok = await probeRealtimeVoice();
-  if (!ok) return false;
+  if (!ok) { if (audio) audio.close(); return false; }
   // Don't present "listening" against a brain that can't answer yet.
   setVoiceStatus('warming up the model…');
   const ready = await warmUpBrainForVoice();
-  if (!voiceModeOn) return false;      // user exited during warm-up
-  if (!ready) return false;            // warm-up already showed why (failure / no model)
+  if (!voiceModeOn || !ready) { if (audio) audio.close(); return false; }   // exited, or warm-up said why
+  if (audio) {
+    const r = await startWindowCall(audio);
+    if (r !== 'pc-mic') return r;
+  }
+  if (rtVoiceActive || winCall) return;
   rtVoiceActive = true;
   _voiceMuted = false;
   rtVoiceAbort = new AbortController();
@@ -17174,6 +17208,7 @@ function handleRealtimeEvent(ev) {
 
 async function stopRealtimeVoice() {
   _rtUserStop = true;
+  if (winCall) { endWindowCall(); return; }
   rtVoiceActive = false;
   if (rtVoiceAbort) {
     try { rtVoiceAbort.abort(); } catch {}
@@ -17187,10 +17222,6 @@ async function stopRealtimeVoice() {
 // The exit-side stop is wired via the existing click handler; the enter-side
 // hook fires after enterVoiceMode runs by adding a one-shot listener on the
 // same button.
-$('btn-voice-mode').addEventListener('click', async () => {
-  const ok = await probeRealtimeVoice();
-  if (ok) startRealtimeVoice().catch(() => {});
-});
 $('voice-exit').addEventListener('click', () => {
   stopRealtimeVoice().catch(() => {});
 });
@@ -17198,6 +17229,228 @@ $('voice-exit').addEventListener('click', () => {
 $('voice-mode').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') stopRealtimeVoice().catch(() => {});
 });
+
+// ============================================================
+// VOICE MODE AS A CALL. The mic is captured here with the browser's echo
+// cancelling and the PC's voice plays back through it (call_audio.js), while
+// the PC listens, decides when a sentence is done and speaks each reply as it
+// is written (hearth/call.py, over /api/voice/call). It is the call the phone
+// app makes, so it never hears itself on speakers, and talking over a reply
+// cuts it off there too. Without a mic the page may use, voice mode listens
+// through the PC's own mic as before.
+// ============================================================
+let winCall = null;
+
+function winCallCan() {
+  return typeof CallAudio !== 'undefined' && CallAudio.can() && !!window.WebSocket && !!window.RTCPeerConnection;
+}
+
+// The mic picked in Settings, by name, as the browser lists it, chosen the way
+// the PC chooses it (realtime_voice._mic_index): the pick; if it is gone, the
+// Windows default when that is a real mic, said out loud; otherwise stop and
+// say why. Windows names a mic the same in both lists, but a USB one may carry
+// its ids here and an old pick may be cut to 31 letters; system sound (Stereo
+// Mix and such) never counts as a mic.
+const _micBare = (l) => String(l || '').toLowerCase().replace(/^(default|communications) - /, '')
+  .replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/, '').trim();
+const _micShown = (l) => String(l || '').replace(/^(Default|Communications) - /, '');
+async function winCallMic(A, name, notMics) {
+  const bad = (l) => (notMics || []).some(h => _micBare(l).includes(h));
+  const want = _micBare(name);
+  await A.mic();                       // the default input; the labels show only once the page may use a mic
+  // Each mic once by its own id where it has one; "default" and "communications" are other names for one of them.
+  const all = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.label);
+  const alias = (d) => ['default', 'communications'].includes(d.deviceId);
+  const devs = all.filter(d => !alias(d)).concat(all.filter(d => alias(d) && !all.some(o => !alias(o) && _micBare(o.label) === _micBare(d.label))));
+  const now = A.label();
+  const fail = (why) => { throw Object.assign(new Error('no mic'), { why }); };
+  if (!want) {
+    if (now && !bad(now)) return '';
+    const mics = [...new Set(devs.filter(d => !bad(d.label)).map(d => _micShown(d.label)))].slice(0, 4);
+    fail(`'${_micShown(now) || 'The default input'}' is not a microphone.`
+      + (mics.length ? ` Pick yours in Settings > Voice: ${mics.join(', ')}.` : ' Connect one and try again.'));
+  }
+  if (bad(name)) fail(`'${name}' is not a microphone. Pick yours in Settings > Voice.`);
+  const pick = devs.find(d => _micBare(d.label) === want)
+    || devs.find(d => want.length >= 31 && _micBare(d.label).startsWith(want))
+    || devs.find(d => _micBare(d.label).length >= 31 && want.startsWith(_micBare(d.label)));
+  if (!pick) {
+    if (now && !bad(now)) return `'${name}' is not connected, so voice is using the Windows default input, '${_micShown(now)}'.`;
+    fail(`Your microphone '${name}' is not connected. Reconnect it, or pick another in Settings > Voice.`);
+  }
+  if (_micBare(pick.label) !== _micBare(now)) {
+    A.stream.getTracks().forEach(t => t.stop());
+    await A.mic(pick.deviceId);
+  }
+  return '';
+}
+
+function winCallSend(obj) {
+  const c = winCall;
+  if (c && c.ws.readyState === 1) c.ws.send(JSON.stringify(obj));
+}
+function winCallUp(bytes) {
+  const c = winCall;
+  if (!c || !c.live || _voiceMuted) return;
+  winCallSend({ type: 'call.up', rate: CallAudio.RATE, data: CallAudio.std64(bytes) });
+}
+// After mute, a second of quiet: the recognizer hears the sentence end instead of waiting on it.
+function winCallQuiet() {
+  if (!winCall || !winCall.live) return;
+  for (const z of CallAudio.quietSecond()) winCallSend({ type: 'call.up', rate: CallAudio.RATE, data: z });
+}
+
+async function startWindowCall(A) {
+  $('voice-fix').hidden = true;
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/voice/call');
+  const c = { ws, A, live: false, ready: false, ref: Math.random().toString(36).slice(2, 10), ended: false, tick: null };
+  winCall = c;
+  rtVoiceActive = true; _voiceMuted = false;
+  setMicUI();
+  setVoiceStatus('getting the microphone ready…');
+  const hello = new Promise((res, rej) => {
+    ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m.type === 'call.mic') res(m); else winCallFrame(c, m); };
+    ws.onerror = () => rej(new Error('the PC did not answer'));
+    ws.onclose = () => { rej(new Error('the PC did not answer')); winCallClosed(c); };
+  });
+  let mic;
+  try { mic = await hello; }
+  catch (e) { winCallStop(c); setVoiceStatus("voice didn't start: " + e.message); return false; }
+  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } winCallFrame(c, m); };
+  if (mic.page_mic === false) { winCallStop(c); return 'pc-mic'; }   // this PC's window doesn't lend its mic
+  try {
+    const note = await winCallMic(A, mic.name, mic.not_mics);
+    if (note) toast('Mic fell back to default', note, 'warn', 8000);
+  } catch (e) {
+    winCallStop(c);
+    if (e.why) { _rtFailed = true; setVoiceStatus(e.why); toast("Voice didn't start", e.why, 'err', 6000, true); return false; }
+    // The window lets its own page use the mic, so a refusal here is the system's own switch.
+    if (e && ['NotAllowedError', 'NotReadableError', 'SecurityError'].includes(e.name)) {
+      _rtFailed = true;
+      setVoiceStatus(mic.windows ? 'Windows is blocking the microphone' : 'The system is blocking the microphone', 'idle');
+      $('voice-fix').hidden = !mic.windows;
+      return false;
+    }
+    // The window may not use a mic here: listen through the PC's own, as before.
+    console.warn('voice mode: the page could not open the mic, so the PC listens', e);
+    return 'pc-mic';
+  }
+  if (winCall !== c) { A.close(); return false; }
+  await A.out($('voice-audio'));
+  await A.frames(winCallUp);
+  if (winCall !== c) { A.close(); return false; }
+  if (!A.aec) toast('Use headphones for voice', "This window can't cancel its own echo, so on speakers it may hear itself.", 'warn', 8000);
+  winCallSend({ type: 'call.start', chat: (activeConvo() || {}).id || '', ref: c.ref });
+  c.live = true;
+  c.tick = setInterval(() => winCallTick(c), 50);
+  return true;
+}
+
+function winCallTick(c) {
+  if (winCall !== c) return;
+  const t = performance.now();
+  if (!_voiceMuted) { voiceMicLevel = c.A.micLevel(); _lastMicAt = t; }
+  if (c.A.playing()) {
+    // The same reach the PC's own playback gave the grid (loudness x2.6, against x5 here).
+    _ttsLevel = _ttsLevel * 0.45 + c.A.outLevel() * 0.52 * 0.55;
+    _lastLevelAt = t;
+    if (_voiceState !== 'speaking' && !pendingPermId) setVoiceStatus('speaking');
+  }
+  if (c.A.ended() && !c.remic) {        // the mic went away (unplugged, or the system took it)
+    c.remic = true;
+    c.A.remic().then(() => { c.remic = false; }).catch(() => toast('The microphone stopped', 'Leave voice mode and start it again.', 'warn', 6000));
+  }
+}
+
+function winCallFrame(c, m) {
+  if (winCall !== c) return;
+  const kind = m.type;
+  if (kind === 'call.down') return c.A.down(m);
+  if (kind === 'call.flush') return c.A.flush();
+  if (kind === 'call.warming') {
+    _voiceFillPct = typeof m.pct === 'number' ? m.pct : null;
+    setVoiceStatus(m.detail || 'getting the microphone ready…');
+    return;
+  }
+  if (kind === 'call.slow') { if (!c.ready) toast('Voice is taking a while', m.message || '', 'warn', 12000, true); return; }
+  if (kind === 'call.state') {
+    if (m.barge) {
+      // Talked over: the voice stopped on the PC; stop it here and drop the reply being written.
+      c.A.flush();
+      ttsBuffer = '';
+      if (typeof stopGen === 'function' && STATE.streaming) stopGen();
+      STATE.streaming = false;
+      _bargeAwaitingUtterance = true;
+      flashGridInterrupt();
+      setVoiceStatus('listening');
+      return;
+    }
+    if (m.state === 'connecting') { if (!c.ready) setVoiceStatus('getting the microphone ready…'); return; }
+    if (m.state === 'listening') {
+      if (!c.ready) { c.ready = true; _voiceReady = true; _voiceFillPct = null; setMicUI(); }
+      if (!STATE.streaming && !c.A.playing() && !pendingPermId) setVoiceStatus(_voiceMuted ? 'muted' : 'listening');
+      return;
+    }
+    if (m.state === 'asking' && m.tap && pendingPermId) {
+      setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  This one needs a click on Allow.');
+      $('voice-ask').hidden = false;
+    }
+    return;
+  }
+  if (kind === 'call.partial') { if (!_voiceMuted) { setVoiceTranscript(m.text || ''); if (!c.A.playing()) setVoiceStatus('listening'); } return; }
+  if (kind === 'call.heard') { if (!_voiceMuted) setVoiceTranscript(m.text || ''); return; }
+  if (kind === 'call.say') return handleRealtimeEvent({ type: 'final', text: m.text || '' });
+  if (kind === 'asked') {                // answered out loud on the PC
+    if (pendingPermId && pendingPermId === m.ask) hideInlinePermission();
+    return;
+  }
+  if (kind === 'call.error') {
+    if (!c.ready) {
+      _rtFailed = true;
+      winCallStop(c);
+      setVoiceStatus(m.detail || 'voice stopped');
+      toast("Voice didn't start", m.detail || '', 'err', 5000, true);
+    } else toast('Voice', m.detail || 'something went wrong', 'warn', 5000);
+    return;
+  }
+  if (kind === 'call.ended' && (!m.ref || m.ref === c.ref)) winCallStop(c);
+}
+
+function winCallStop(c) {
+  if (c.ended) return;
+  c.ended = true;
+  clearInterval(c.tick);
+  try { c.ws.close(); } catch {}
+  c.A.close();
+  if (winCall === c) {
+    winCall = null;
+    rtVoiceActive = false;
+    _voiceReady = false;
+    setMicUI();
+  }
+}
+
+function winCallClosed(c) {
+  const was = winCall === c && c.live;
+  winCallStop(c);
+  // Dropped, not left: start again, the way the PC's own listener does.
+  if (was && voiceModeOn && !_rtUserStop && !_rtFailed) {
+    setVoiceStatus('restarting voice…');
+    setTimeout(() => { if (voiceModeOn && !winCall && !rtVoiceActive && !_rtUserStop) startRealtimeVoice().catch(() => {}); }, 700);
+  }
+}
+
+function endWindowCall() {
+  const c = winCall;
+  if (!c) return;
+  winCallSend({ type: 'call.end' });
+  winCallStop(c);
+}
+
+$('voice-ask-yes').addEventListener('click', () => sendPermDecision('allow'));
+// Windows' privacy page for the mic; once it is switched on, the mic button starts voice again.
+$('voice-fix-open').addEventListener('click', () => { api('/api/voice/mic-privacy', { method: 'POST' }).catch(() => {}); });
+$('voice-ask-no').addEventListener('click', () => sendPermDecision('deny'));
 
 // ============================================================
 // CONTEXTUAL HINTS - fire once per event, never again (per-browser).

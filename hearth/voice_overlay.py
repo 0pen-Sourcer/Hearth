@@ -249,7 +249,7 @@ def _run() -> None:
             # UI opens in a browser, the tab title is the address, not "Hearth" —
             # that mismatch is what left both grids on screen (the reported dupe).
             _fgl = fg.lower()
-            if ("hearth" in _fgl or "127.0.0.1:8765" in _fgl
+            if ("hearth" in _fgl or "inglen" in _fgl or "127.0.0.1:8765" in _fgl
                     or "localhost:8765" in _fgl):
                 if _shown:
                     try:

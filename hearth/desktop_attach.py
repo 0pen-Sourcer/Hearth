@@ -259,6 +259,7 @@ def main(argv: Optional[list] = None) -> int:
                     pass
             return False
 
+    grant_own_page(args.url)
     _win_holder["win"] = webview.create_window(
         "Inglen", url=args.url, js_api=_WinApi(), **kwargs)
     reload_if_stalled(_win_holder["win"], args.url)
@@ -375,6 +376,112 @@ def revive_backend(win, url: str, every: float = 2.0, misses: int = 3, limit: in
     t = threading.Thread(target=_watch, daemon=True, name="hearth-revive")
     t.start()
     return t
+
+
+def _origin(url: str) -> str:
+    import urllib.parse
+    u = urllib.parse.urlparse(str(url or ""))
+    return f"{u.scheme}://{u.netloc}".lower()
+
+
+# What the window's own page may use without the web view asking anyone: the
+# mic for voice mode, the camera and reading the clipboard should it ask.
+# Windows' own privacy switches stay the gate, as for any app on the PC.
+GRANTED = ("microphone", "camera", "clipboardread")
+
+
+def permission_for(kind: str, uri: str, own: str) -> bool:
+    """Whether a permission the page asks for is given: only those above, only to Inglen's own address."""
+    return _origin(uri) == _origin(own) and str(kind or "").strip().lower() in GRANTED
+
+
+def grant_own_page(url: str) -> bool:
+    """Answer the web view's permission requests in the host, so it never shows
+    its own bubble (which names the local address). WebView2 (Windows) and
+    WebKitGTK (Linux) are handled here; pywebview's Qt backend already allows
+    capture to any page it shows; on macOS the page doesn't ask for the mic
+    (voice mode listens through the PC's own mic there, see web.py's call.mic)."""
+    if sys.platform == "win32":
+        return _grant_webview2(url)
+    if sys.platform.startswith("linux"):
+        return _grant_gtk(url)
+    return False
+
+
+def _grant_gtk(url: str) -> bool:
+    """WebKitGTK: media capture switched on; permission-request answered for every request."""
+    try:
+        from webview.platforms import gtk as _g
+        webkit = _g.webkit
+    except Exception:
+        return False
+
+    def _asked(view, request):
+        try:
+            kind = ""
+            if isinstance(request, webkit.UserMediaPermissionRequest):
+                kind = "camera" if request.props.is_for_video_device else "microphone"
+            if permission_for(kind, view.get_uri(), url):
+                request.allow()
+            else:
+                request.deny()
+            return True
+        except Exception:
+            return False
+
+    made = _g.BrowserView.__init__
+    if getattr(made, "_own_page", False):
+        return True
+
+    def __init__(self, *a, **k):
+        made(self, *a, **k)
+        try:
+            self.webview.get_settings().set_enable_media_stream(True)
+            self.webview.connect("permission-request", _asked)
+        except Exception:
+            pass
+    __init__._own_page = True
+    _g.BrowserView.__init__ = __init__
+    return True
+
+
+def _grant_webview2(url: str) -> bool:
+    """WebView2: PermissionRequested, which pywebview leaves unhandled."""
+    try:
+        from webview.platforms import winforms  # noqa: F401  (sets up .NET the way pywebview wants)
+        from webview.platforms import edgechromium as _ec
+        from Microsoft.Web.WebView2.Core import CoreWebView2PermissionState
+    except Exception:
+        return False
+
+    def _asked(sender, args):
+        try:
+            ok = permission_for(str(args.PermissionKind), str(args.Uri), url)
+            args.State = CoreWebView2PermissionState.Allow if ok else CoreWebView2PermissionState.Deny
+        except Exception:
+            try:
+                args.State = CoreWebView2PermissionState.Deny
+            except Exception:
+                pass
+        try:
+            args.Handled = True                 # never the web view's own prompt
+        except Exception:
+            pass
+
+    ready = _ec.EdgeChrome.on_webview_ready
+    if getattr(ready, "_own_page", False):
+        return True
+
+    def on_webview_ready(self, sender, args):
+        ready(self, sender, args)
+        try:
+            if args.IsSuccess:
+                sender.CoreWebView2.PermissionRequested += _asked
+        except Exception:
+            pass
+    on_webview_ready._own_page = True
+    _ec.EdgeChrome.on_webview_ready = on_webview_ready
+    return True
 
 
 def reload_if_stalled(win, url: str, wait_s: float = 15.0, tries: int = 2) -> None:
