@@ -9,3 +9,5 @@ pymupdf<2
 pillow<13
 reportlab<5
 av<18
+windows-toasts<2       # reminder notices with Snooze and Done (tested on 1.3.1)
+winrt-runtime<4        # what windows-toasts runs on (tested on 3.2.1)

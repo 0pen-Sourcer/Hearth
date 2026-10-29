@@ -602,6 +602,7 @@ SNOOZE_MINUTES = 10
 SNOOZE_LABEL = f"Snooze {SNOOZE_MINUTES} min"
 DONE_LABEL = "Done"
 _live_toasts: list = []    # Windows drops a toast's buttons once the toast object is collected
+_firing = threading.local()  # .rid: the reminder the watcher is showing on this thread
 
 
 def on_reminder_action(rid: str, action: str) -> Dict:
@@ -703,12 +704,22 @@ def notify_reminder(rid: str, title: str, body: str) -> bool:
     return False
 
 
-def desktop_notify(title: str, body: str) -> bool:
+def desktop_notify(title: str, body: str, reminder_id: Optional[str] = None) -> bool:
     """Pop a desktop notification now. Tries plyer (cross-platform) then
     win10toast (Windows), falling back to stdout + TTS. Also sends it to the
     phone app they connected when they asked for that. Returns True if a real
     DESKTOP toast fired. Shared by the
-    reminder watcher AND the `notify` tool."""
+    reminder watcher AND the `notify` tool. A due reminder (its id given, or
+    the watcher firing it on this thread) gets Snooze and Done where the
+    desktop can show them, else the plain notice."""
+    rid = reminder_id or getattr(_firing, "rid", None)
+    if rid:
+        try:
+            if notify_reminder(rid, title, body):
+                _push_phone(title, body)
+                return True
+        except Exception:
+            pass
     _push_phone(title, body)  # phone push gets the full text, it has no limit
     # The Windows tray-balloon struct caps the body at 256 chars and the title
     # at 64. Overshooting raises inside the notifier's own worker thread, which
@@ -1027,18 +1038,15 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         toast_body = body
         if needs_confirm:
             toast_body = f"{body}\n(wants to run {action_tool}; open Inglen to confirm)"
-        shown = False
+        # The caller's notify always runs (the terminal prints it into the
+        # chat); desktop_notify inside it sees which reminder is firing.
+        _firing.rid = str(r.get("id") or "") or None
         try:
-            shown = notify_reminder(str(r.get("id") or ""), title, toast_body)
+            notify(title, toast_body)
         except Exception:
-            shown = False
-        if shown:
-            _push_phone(title, toast_body)
-        else:
-            try:
-                notify(title, toast_body)
-            except Exception:
-                pass
+            pass
+        finally:
+            _firing.rid = None
         # The reminder becomes a turn in its own chat, so JARVIS says it in his
         # own words and knows it fired. The notice above covers an empty desk.
         try:

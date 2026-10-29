@@ -32,6 +32,7 @@ MODULES = {
     "documents": ["pypdfium2", "matplotlib", "reportlab", "pptx", "openpyxl"],
     "Plus phone link": ["hearth.relay_crypto", "hearth.relay_bridge", "hearth.plus",
                         "cryptography.hazmat.primitives.ciphers.aead", "websockets", "segno"],
+    "reminder buttons": ["windows_toasts", "winrt.windows.ui.notifications"],
 }
 
 PROBE = r'''

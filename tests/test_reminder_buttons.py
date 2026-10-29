@@ -2,7 +2,8 @@
 
 Before, the notice was a plain balloon (win10toast, plyer): snoozing or
 finishing a reminder meant opening the window. Stand-ins: a notify-send that
-presses a button, and a windows_toasts module that records the toast.
+presses a button (Linux), and a windows_toasts module that records the toast
+and presses a button (Windows), so no real notice shows.
 
     python tests/test_reminder_buttons.py
 """
@@ -13,6 +14,7 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import time
 import types
 from datetime import datetime, timedelta
@@ -28,6 +30,12 @@ os.environ.update(HOME=HOME, USERPROFILE=HOME, HEARTH_WORKSPACE=WS, JARVIS_WORKS
                   HEARTH_NO_ACTIVITY_LOG="1", HEARTH_NO_BRIDGES="1",
                   PATH=BIN + os.pathsep + os.environ.get("PATH", ""))
 sys.path.insert(0, ROOT)
+WINDOWS = sys.platform == "win32"
+
+
+def press_for(body):
+    return "snooze" if "snz" in body else "done" if "dn" in body else ""
+
 
 # notify-send as libnotify 0.7.9+ has it: it shows the notice and prints the button pressed.
 with open(os.path.join(BIN, "notify-send"), "w") as f:
@@ -42,8 +50,45 @@ print("snooze" if "snz" in body else "done" if "dn" in body else "")
 """)
 os.chmod(os.path.join(BIN, "notify-send"), stat.S_IRWXU)
 
+# windows_toasts: records each toast; with `press` on, a button is pressed a moment later.
+shown = []
+win_press = {"on": True}
+
+
+class _Toast:
+    def __init__(self, text_fields, scenario=None):
+        self.text_fields, self.scenario, self.actions, self.on_activated = text_fields, scenario, [], None
+
+    def AddAction(self, b):
+        self.actions.append(b)
+
+    def AddImage(self, img):
+        pass
+
+
+class _Toaster:
+    def __init__(self, text, notifierAUMID=None):
+        self.aumid = notifierAUMID
+
+    def show_toast(self, t):
+        shown.append((self, t))
+        what = press_for(t.text_fields[-1])
+        if win_press["on"] and what and t.on_activated:
+            threading.Timer(0.2, t.on_activated, [types.SimpleNamespace(arguments=what)]).start()
+
+
+fake = types.ModuleType("windows_toasts")
+fake.ToastScenario = types.SimpleNamespace(Reminder="reminder")
+fake.Toast = _Toast
+fake.ToastButton = lambda content, arguments: (content, arguments)
+fake.InteractableWindowsToaster = _Toaster
+sys.modules["windows_toasts"] = fake
+
 from hearth import reminders as rem  # noqa: E402
 from hearth import chat_sync  # noqa: E402
+
+if not os.path.abspath(rem.REMINDERS_PATH).lower().startswith(os.path.abspath(WS).lower()):
+    sys.exit(f"refusing to run: reminders resolved to {rem.REMINDERS_PATH}")
 
 FAILS: list = []
 
@@ -78,8 +123,24 @@ def wait_for(cond, s=10.0):
     return False
 
 
+def notices():
+    """Each notice with buttons: (body, [button labels])."""
+    if WINDOWS:
+        return [(t.text_fields[-1], [a[0] for a in t.actions]) for _, t in shown]
+    if not os.path.exists(LOG):
+        return []
+    out = []
+    for c in (json.loads(x) for x in open(LOG).read().splitlines()):
+        out.append((c[-1], [a.split("=", 2)[2] for a in c if a.startswith("--action=")]))
+    return out
+
+
 rem.deliver = lambda r, note, wait_s=600: None          # no model here
-plain = []
+rem._ensure_app_identity = lambda: None                  # leave this PC's registry alone
+plain, phone, caller = [], [], []
+rem.use_tray(lambda t, b: plain.append((t, b)))          # the plain notice, as the tray shows it
+rem._push_phone = lambda t, b: phone.append((t, b)) or True
+
 snz = due_now("water the plants snz")
 dn = due_now("call the bank dn")
 daily = due_now("stretch snz daily", recurring="daily")
@@ -87,13 +148,23 @@ daily_due = get(daily)["due_iso"]
 chat_sync.post(rem.chat_id_for({"id": dn}), "call the bank", "reminder",
                [{"role": "assistant", "content": "Reminder: call the bank"}], unread=True)
 
-rem.start_watcher(lambda t, b: plain.append((t, b)))
-wait_for(lambda: os.path.exists(LOG) and len(open(LOG).read().splitlines()) >= 3)
-calls = [json.loads(x) for x in open(LOG).read().splitlines()] if os.path.exists(LOG) else []
+
+def window_notify(title, body):
+    # What the window and the terminal hand the watcher: their own step, then desktop_notify.
+    caller.append(body)
+    rem.desktop_notify(title, body)
+
+
+rem.start_watcher(window_notify)
+wait_for(lambda: len(notices()) >= 3)
+calls = notices()
 check(f"each due reminder is a notice with two buttons ({len(calls)})",
-      len(calls) == 3 and all("--action=snooze=Snooze 10 min" in c and "--action=done=Done" in c for c in calls))
-check("the notice says what the reminder is, in one line", any(c[-1] == "water the plants snz" for c in calls))
+      len(calls) == 3 and all(b == ["Snooze 10 min", "Done"] for _, b in calls))
+check("the notice says what the reminder is, in one line", any(c[0] == "water the plants snz" for c in calls))
 check("no plain notice as well", plain == [])
+check(f"the caller's own step still runs for each ({len(caller)})", len(caller) == 3)
+wait_for(lambda: len(phone) >= 3, 3)
+check(f"the phone copy goes out once each ({len(phone)})", len(phone) == 3)
 
 wait_for(lambda: not (get(snz) or {}).get("fired"))
 r = get(snz)
@@ -111,38 +182,11 @@ check("a repeating one keeps its own time after Snooze",
       d and d["due_iso"][11:16] == daily_due[11:16] and d["due_iso"] > daily_due)
 check("and the snooze is a one-off in 10 minutes",
       len(extra) == 1 and extra[0]["what"] == "stretch snz daily" and not extra[0].get("recurring_seconds"))
+rem.stop_watcher()
 
 # Windows: a toast in the reminder scenario, answered in this process.
-shown = []
-
-
-class _Toast:
-    def __init__(self, text_fields, scenario=None):
-        self.text_fields, self.scenario, self.actions, self.on_activated = text_fields, scenario, [], None
-
-    def AddAction(self, b):
-        self.actions.append(b)
-
-    def AddImage(self, img):
-        pass
-
-
-fake = types.ModuleType("windows_toasts")
-fake.ToastScenario = types.SimpleNamespace(Reminder="reminder")
-fake.Toast = _Toast
-fake.ToastButton = lambda content, arguments: (content, arguments)
-
-
-class _Toaster:
-    def __init__(self, text, notifierAUMID=None):
-        self.aumid = notifierAUMID
-
-    def show_toast(self, t):
-        shown.append((self, t))
-
-
-fake.InteractableWindowsToaster = _Toaster
-sys.modules["windows_toasts"] = fake
+win_press["on"] = False
+shown.clear()
 win = rem.set_reminder(when="5m", what="pay rent")["reminder"]["id"]
 ok = rem._windows_actions(win, "Inglen reminder", "pay rent", None)
 toaster, toast = shown[-1] if shown else (None, None)
@@ -154,13 +198,17 @@ check("its Done button acts on the reminder", bool((get(win) or {}).get("done_at
 toast.on_activated(types.SimpleNamespace(arguments="snooze"))
 check("and its Snooze button", (get(win) or {}).get("snooze_count") == 1)
 
-# A notify-send with no buttons: the plain notice, as before.
+# Where the buttons can't show (no windows-toasts; a notify-send without
+# actions), the reminder still gets the plain notice.
+plain.clear()
+sys.modules["windows_toasts"] = None                     # import fails, as in a build without it
 with open(os.path.join(BIN, "notify-send"), "w") as f:
     f.write(f"#!{sys.executable}\nimport sys\nprint('Usage: notify-send [OPTION...] SUMMARY')\n")
-check("without buttons on this desktop, the caller shows the plain notice",
-      rem.notify_reminder("x", "Inglen reminder", "x") is False if sys.platform.startswith("linux") else True)
+check("without buttons on this desktop, notify_reminder says so",
+      rem.notify_reminder(win, "Inglen reminder", "x") is False)
+got = rem.desktop_notify("Inglen reminder", "pay rent", reminder_id=win)
+check("and the plain notice shows instead", got and plain == [("Inglen reminder", "pay rent")])
 
-rem.stop_watcher()
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
