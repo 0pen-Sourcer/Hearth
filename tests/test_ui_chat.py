@@ -1821,7 +1821,7 @@ with sync_playwright() as pw:
         const el = emptyState(); document.body.prepend(el);
         const dot = getComputedStyle(el.querySelector('.hm-dot'));
         const tr = el.querySelector('.hm-trace');
-        const r = { cls: el.className, dot: dot.animationName, fill: dot.fillOpacity,
+        const r = { cls: el.className, dot: dot.animationName, fill: dot.fillOpacity, ease: dot.transitionTimingFunction,
                     trace: tr ? getComputedStyle(tr).animationName : 'missing',
                     shown: tr ? getComputedStyle(tr).opacity : '' };
         if (tr && cls.includes('loading')) {
@@ -1847,8 +1847,8 @@ with sync_playwright() as pw:
           ld["trace"] == "nookTrace" and ld["shown"] == "1" and ld["dot"] == "none"
           and ld.get("pctTrace") == "none" and str(ld.get("dash", "")).startswith("40")
           and ld.get("back") == "nookTrace")
-    check(f"ready: the ring fills and the dot settles once {mk['ready']}",
-          mk["ready"]["dot"] == "nookSettle" and mk["ready"]["fill"] == "1" and mk["ready"]["shown"] == "0")
+    check(f"ready: the ring fills and grows into the dot with one spring {mk['ready']}",
+          mk["ready"]["dot"] == "none" and "linear(" in mk["ready"]["ease"] and mk["ready"]["fill"] == "1" and mk["ready"]["shown"] == "0")
     pg.emulate_media(reduced_motion="reduce")
     still = pg.evaluate(mark_js)
     pg.emulate_media(reduced_motion="no-preference")

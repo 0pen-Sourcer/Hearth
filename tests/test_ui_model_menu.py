@@ -425,8 +425,8 @@ with sync_playwright() as pw:
       prov: provIco('openrouter'), unknown: provIco('custom') })""")
     check("a badge with no drawn logo shows its site's own icon",
           "/api/favicon?d=openrouter.ai" in marks["openrouter"] and "/api/favicon?d=goose-docs.ai" in marks["goose"])
-    check("a drawn logo stays, and a maker with no icon keeps its letter",
-          marks["claude"].startswith("<svg") and marks["aider"] == "A")
+    check("a drawn logo stays, and a maker with no icon shows the agent line icon, not its letter",
+          marks["claude"].startswith("<svg") and 'class="fav-kind"' in marks["aider"] and ">A<" not in marks["aider"])
     check("a saved provider in the menu carries its own mark, an unknown one the cloud",
           "openrouter.ai" in marks["prov"] and "<svg" in marks["unknown"] and "favicon" not in marks["unknown"])
 

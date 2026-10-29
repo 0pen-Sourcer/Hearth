@@ -85,6 +85,12 @@ def get(path):
 st, hd, body, took = get("/api/favicon?d=slow.example")
 check(f"a site not looked up yet is answered at once ({st} in {took:.2f}s)", took < 0.5 and st == 404)
 check(f"and the browser doesn't keep that answer ({hd.get('Cache-Control')})", hd.get("Cache-Control") == "no-store")
+check(f"and it says the icon is on its way, so the page keeps waiting ({hd.get('X-Icon')})", hd.get("X-Icon") == "later")
+os.makedirs(web._FAVICON_DIR, exist_ok=True)
+open(os.path.join(web._FAVICON_DIR, "gone.example.miss"), "w").close()
+st3, hd3, _, _ = get("/api/favicon?d=gone.example")
+check(f"a site known to have none says so, so the page stops waiting ({st3}, {hd3.get('X-Icon')})",
+      st3 == 404 and hd3.get("X-Icon") == "none")
 st2, _, _, took2 = get("/api/favicon?d=slow.example")
 check(f"asked again while it's being fetched: still at once, one fetch ({took2:.2f}s, {len(asked)} asked)",
       took2 < 0.5 and len(asked) == 1)

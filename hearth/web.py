@@ -1758,6 +1758,11 @@ def _icon_now(cached, fetch, arg):
     return None
 
 
+def _icon_fetching(fetch, arg) -> bool:
+    with _ICON_LOCK:
+        return (getattr(fetch, "__name__", ""), arg) in _ICON_JOBS
+
+
 def _icon_mime(data: bytes) -> str:
     if data[:4] == b"\x00\x00\x01\x00":
         return "image/x-icon"
@@ -3106,13 +3111,17 @@ class HearthHandler(BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if path == "/api/brand-icon":
                 from .brand_icons import brand_icon, brand_icon_cached
-                icon = _icon_now(brand_icon_cached, brand_icon, q.get("k", [""])[0])
+                fetch, arg = brand_icon, q.get("k", [""])[0]
+                icon = _icon_now(brand_icon_cached, fetch, arg)
             else:
-                icon = _icon_now(_favicon_cached, _favicon, q.get("d", [""])[0])
+                fetch, arg = _favicon, q.get("d", [""])[0]
+                icon = _icon_now(_favicon_cached, fetch, arg)
             if not icon:
                 # Not known yet (being fetched now) or none: the page shows its own stand-in, and
-                # the browser doesn't keep this answer, so the next draw asks again.
+                # the browser doesn't keep this answer, so the next draw asks again. X-Icon says
+                # which, so the page waits for one on its way and stops asking for one that isn't.
                 self.send_response(404)
+                self.send_header("X-Icon", "later" if _icon_fetching(fetch, arg) else "none")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", "0")
                 self.end_headers()

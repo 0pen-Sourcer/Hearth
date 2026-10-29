@@ -487,6 +487,31 @@
   .mp-ico.ag svg { fill: currentColor; }
   .hx-fav { width: 76%; height: 76%; object-fit: contain; display: block; border-radius: 2px; }
   .has-fav { background: #f4f2ee !important; }
+  /* A site's icon in its tile. Until it arrives the Nook waits in its place,
+     running the empty chat's getting-ready stroke; an icon that can't be had
+     gives way to a line icon for what it stands for (a globe for a site). */
+  .fav-slot, .fav-slot.hx-fav { position: relative; display: inline-block; flex: none; vertical-align: middle; }
+  .fav-slot > * { position: absolute; inset: 0; margin: auto; display: block; }
+  .fav-slot > img { width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity .25s var(--ease); }
+  .fav-slot.ok > img { opacity: 1; }
+  .fav-slot.ok > .nook-wait, .fav-slot.none > .nook-wait, .fav-slot.none > img, .fav-slot.ok > .fav-kind { display: none; }
+  .fav-slot > .nook-wait { width: 100%; height: 100%; }
+  .fav-slot > .fav-kind { width: 82%; height: 82%; animation: favKindIn .3s var(--ease) both; }
+  @keyframes favKindIn { from { opacity: 0; } }
+  .nook-wait { display: block; width: 100%; height: 100%; overflow: visible; }
+  .nook-wait .hm-bracket { opacity: .35; }
+  .nook-wait .hm-trace { stroke-dasharray: 0 300; stroke-dashoffset: 3; animation: nookTrace 2.2s infinite; }
+  .nook-wait .hm-dot { color: var(--nook-dot, var(--accent)); }
+  .hx-chip b, .hx-mini { --nook-dot: currentColor; }
+  /* A chat on its way: the list before it arrives, a chat being opened. */
+  .nook-loading { display: grid; place-items: center; padding: 22px 0; color: var(--fg-dim); }
+  .nook-loading .nook-wait { width: 28px; height: 28px; }
+  .chat-body > .nook-loading { height: 100%; padding: 0; animation: nookLoadingIn .4s var(--ease) .15s both; }
+  .chat-body > .nook-loading .nook-wait { width: 56px; height: 56px; }
+  @keyframes nookLoadingIn { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .nook-wait .hm-trace { animation: none; stroke-dasharray: 100 300; stroke-dashoffset: 0; }
+  }
   #btn-think:disabled { opacity: 0.4; cursor: default; }
   .convo-app { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.85; }
   .mp-txt { flex: 1; min-width: 0; }
@@ -823,12 +848,11 @@
     100% { stroke-dasharray: 0 300;  stroke-dashoffset: -103; }
   }
   .empty:not(.booting):not(.idle-nomodel) .empty-mark .hm-bracket { color: var(--fg-dim); }
-  .empty:not(.booting):not(.idle-nomodel) .empty-mark .hm-dot { animation: nookSettle .8s both; }
-  @keyframes nookSettle {
-    from { transform: translate(2.5px, 2.5px) scale(.9);
-           animation-timing-function: linear(0, .099, .305, .528, .719, .861, .954, 1.008, 1.032, 1.038,
-             1.035, 1.027, 1.018, 1.011, 1.005, 1.002, 1, .999, .999, .999, 1); }
-    to   { transform: none; }
+  /* The ring fills and grows into the dot from the size it has, with one spring. */
+  .empty:not(.booting):not(.idle-nomodel) .empty-mark .hm-dot {
+    transition-duration: .5s, .5s, .8s, .6s;
+    transition-timing-function: var(--ease), var(--ease), linear(0, .099, .305, .528, .719, .861, .954, 1.008, 1.032, 1.038,
+      1.035, 1.027, 1.018, 1.011, 1.005, 1.002, 1, .999, .999, .999, 1), var(--ease);
   }
   @media (prefers-reduced-motion: reduce) {
     .empty-mark, .empty-mark .hm-dot, .empty-mark .hm-trace, .empty-mark .hm-h, .empty-mark .hm-h::before, .empty-mark .hm-h::after { animation: none !important; }
@@ -1259,11 +1283,16 @@
   .hx-chip.skill b { background: var(--fg-dim); }
   .hx-chip b svg, .hx-mini svg { width: 70%; height: 70%; fill: #fff; display: block; }
   .fav-stack { display: inline-flex; align-items: center; }
-  .fav-stack img, .fav-stack .fav-more { width: 16px; height: 16px; border-radius: 50%; background: #fff;
-    border: 1.5px solid var(--bg-1); margin-left: -5px; object-fit: contain; padding: 1px; box-sizing: border-box; }
-  .fav-stack img:first-child { margin-left: 0; }
+  .fav-stack > .fav-slot, .fav-stack .fav-more { width: 16px; height: 16px; border-radius: 50%; background: var(--bg-3);
+    border: 1.5px solid var(--bg-1); margin-left: -5px; padding: 1px; box-sizing: border-box; color: var(--fg-dim); }
+  .fav-stack > .fav-slot.ok { background: #fff; }
+  .fav-stack > .fav-slot, .fav-cycle { overflow: hidden; }
+  .fav-stack > .fav-slot > .nook-wait, .fav-cycle > .nook-wait { width: 68%; height: 68%; }
+  .mp-ico > .fav-slot > .nook-wait { width: 72%; height: 72%; }
+  .fav-stack > :first-child { margin-left: 0; }
   .fav-stack .fav-more { display: inline-grid; place-items: center; font: 600 8.5px var(--sans); color: var(--fg-dim); background: var(--bg-3); width: auto; min-width: 16px; padding: 0 3px; border-radius: 99px; }
-  .fav-cycle { width: 14px; height: 14px; border-radius: 50%; object-fit: contain; background: #fff; padding: 1px; box-sizing: border-box; }
+  .fav-cycle { width: 14px; height: 14px; border-radius: 50%; padding: 1px; box-sizing: border-box; }
+  .fav-cycle.ok { background: #fff; }
   .t-head .hx-chip { margin-right: 2px; }
   .tool-run .tr-cards { display: none; padding-left: 12px; border-left: 1px solid var(--border); margin-left: 5px; }
   .tool-run.open .tr-cards { display: block; }
@@ -2272,7 +2301,7 @@
   .slash-cmd { color: var(--accent-2); font-family: var(--mono); font-weight: 600; font-size: 13px; }
   .src-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 2px; padding: 3px 9px 3px 6px;
     border: 1px solid var(--border); border-radius: 99px; font-size: 11.5px; color: var(--fg-dim); cursor: default; }
-  .src-chip > img, .src-list img { width: 14px; height: 14px; border-radius: 3px; }
+  .src-chip > .fav-slot, .src-list .fav-slot { width: 14px; height: 14px; border-radius: 3px; overflow: hidden; }
   .src-chip em { font-style: normal; color: var(--fg-faint); }
   .src-list { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 50; min-width: 280px; max-width: 420px;
     flex-direction: column; padding: 6px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px;
@@ -2281,7 +2310,7 @@
   .src-list a { display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; padding: 6px 8px; border-radius: 6px;
     color: var(--fg); text-decoration: none; }
   .src-list a:hover { background: var(--bg-2); }
-  .src-list a img { grid-row: span 2; margin-top: 2px; }
+  .src-list a .fav-slot { grid-row: span 2; margin-top: 2px; }
   .src-list b { font-weight: 600; font-size: 12px; }
   .src-list small { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-frame { width: min(82vw, 1100px); height: 68vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; display: block; }
@@ -4146,7 +4175,7 @@
       <span>Recent chats</span>
       <svg class="cv-caret" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
     </div>
-    <div class="convo-list" id="convo-list"></div>
+    <div class="convo-list" id="convo-list"><div class="nook-loading" aria-label="Loading chats"><svg class="nook-wait" viewBox="10 10 40 40" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><path class="hm-trace" pathLength="100" d="M16 40V22a6 6 0 0 1 6-6h18" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle class="hm-dot" cx="38" cy="38" r="7.5" fill="none" stroke="currentColor" stroke-width="3"/></svg></div></div>
     <div class="convo-list" id="convo-search-results" hidden></div>
 
     <div class="side-section">
@@ -7715,7 +7744,13 @@ function renderChat() {
   if (!c) { body.appendChild(emptyState()); return; }
   if (c._stub) {
     // Opened for the first time: fetch it, then draw it if it is still the one open.
-    ensureConvoLoaded(c).then(() => { if (activeConvo() === c && !c._stub) renderChat(); });
+    // A chat that takes a moment shows the Nook waiting; a quick one never does.
+    body.insertAdjacentHTML('beforeend', `<div class="nook-loading" aria-label="Opening the chat">${nookWait(false)}</div>`);
+    ensureConvoLoaded(c).then(() => {
+      if (activeConvo() !== c) return;
+      if (!c._stub) renderChat();
+      else body.querySelector(':scope > .nook-loading')?.remove();
+    });
     return;
   }
   if (!c.messages.length) { body.appendChild(emptyState()); return; }
@@ -7856,14 +7891,32 @@ function _markProgress(pct) {
   const mark = document.querySelector('.empty .empty-mark');
   const trace = mark && mark.querySelector('.hm-trace');
   if (!trace) return;
+  // The stroke is never cut from one length to another: the first percentage
+  // stops the running stroke where it is and springs from there, and a load
+  // that ends without one (it failed) draws the stroke back before it runs again.
+  const had = mark.classList.contains('has-pct');
+  const from = (_markPct != null ? (!had || trace._toPct) : had) && !_reduceMotion() ? getComputedStyle(trace) : null;
+  const was = from && { strokeDasharray: from.strokeDasharray, strokeDashoffset: from.strokeDashoffset };
+  if (trace._toPct) { trace._toPct.cancel(); trace._toPct = null; }
   mark.classList.toggle('has-pct', _markPct != null);
+  const sp = was && springEasing(0.5, 0.9);
   if (_markPct == null) {
     trace.style.removeProperty('stroke-dasharray');
     trace.style.removeProperty('stroke-dashoffset');
+    if (!was) return;
+    trace.style.animationDelay = sp.duration + 'ms';
+    trace._toPct = trace.animate([was, { strokeDasharray: '0px 300px', strokeDashoffset: '3px' }],
+      { duration: sp.duration, easing: sp.easing });
   } else {
+    trace.style.removeProperty('animation-delay');
     trace.style.strokeDasharray = _markPct + ' 300';
     trace.style.strokeDashoffset = '0';
+    if (!was) return;
+    trace._toPct = trace.animate([was, { strokeDasharray: _markPct + 'px 300px', strokeDashoffset: '0px' }],
+      { duration: sp.duration, easing: sp.easing });
   }
+  const a = trace._toPct;
+  a.onfinish = () => { if (trace._toPct === a) trace._toPct = null; };
 }
 
 function emptyState() {
@@ -8220,15 +8273,77 @@ const HARNESS = {
   'augment':      { label: 'Augment',      maker: 'Augment Code', c: '#16a34a', site: 'augmentcode.com' },
   'openhands':    { label: 'OpenHands',    maker: 'All Hands AI', c: '#e11d48', site: 'all-hands.dev' },
 };
+// The Nook while something is on its way, with the empty chat's getting-ready
+// stroke. `tight` crops the box to the mark, for small tiles.
+function nookWait(tight = true) {
+  const p = 'd="M16 40V22a6 6 0 0 1 6-6h18" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"';
+  return `<svg class="nook-wait" viewBox="${tight ? '10 10 40 40' : '-2 -2 64 64'}" aria-hidden="true">`
+    + `<path class="hm-bracket" ${p}/><path class="hm-trace" pathLength="100" ${p}/>`
+    + `<circle class="hm-dot" cx="38" cy="38" r="7.5" fill="none" stroke="currentColor" stroke-width="3"/></svg>`;
+}
+// What stands in for an icon that can't be had, by what it belongs to.
+const _FAV_KIND = {
+  site: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.7 2.6 15.3 0 18M12 3c-2.6 2.7-2.6 15.3 0 18"/>',
+  mcp: '<path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/><polyline points="22 4 12 14.01 9 11.01"/><path d="M2 12h6"/><path d="M16 12h6"/>',
+  agent: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+};
+function favKind(kind) {
+  const inner = (_FAV_KIND[kind] || _FAV_KIND.site).replace(/<(path|circle|polyline)/g, '<$1 fill="none"');
+  return `<svg class="fav-kind" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" `
+    + `stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+}
+// A site's icon (the cached favicons), with the Nook waiting until it comes.
+// `tile`: the slot sits in a coloured badge that turns light under an icon.
+function favSlot(domain, kind = 'site', cls = '', tile = false) {
+  return `<span class="fav-slot${cls ? ' ' + cls : ''}" data-kind="${kind}"${tile ? ' data-tile="1"' : ''}>${nookWait()}`
+    + `<img src="/api/favicon?d=${encodeURIComponent(domain)}" alt="" onload="_favOk(this)" onerror="_favMiss(this)"></span>`;
+}
+function _favOk(img) {
+  const slot = img.parentNode;
+  if (!slot || !slot.classList) return;
+  slot.classList.remove('none');
+  slot.classList.add('ok');
+  if (slot.dataset.tile && slot.parentNode) slot.parentNode.classList.add('has-fav');
+}
+// The icon isn't there. The PC may still be fetching it ("later"): ask again a
+// few times, the Nook still waiting; otherwise the line icon takes its place.
+async function _favMiss(img) {
+  const slot = img.parentNode;
+  if (!slot || !slot.classList) return;
+  const url = img.src.replace(/&t=\d+$/, '');
+  const tries = +(slot.dataset.tries || 0);
+  let again = false;
+  if (tries < 8) {
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      again = r.ok ? 'now' : r.headers.get('X-Icon') === 'later';
+    } catch {}
+  }
+  if (img.parentNode !== slot || !img.src.startsWith(url)) return;   // pointed elsewhere meanwhile
+  if (again) {
+    slot.dataset.tries = tries + 1;
+    setTimeout(() => { if (slot.isConnected && img.src.startsWith(url)) img.src = url + '&t=' + Date.now(); },
+      again === 'now' ? 0 : 800 + tries * 500);
+    return;
+  }
+  slot.classList.remove('ok');
+  slot.classList.add('none');
+  if (!slot.querySelector('.fav-kind')) slot.insertAdjacentHTML('beforeend', favKind(slot.dataset.kind));
+}
+// Point a slot at another site (the search line's cycling icons).
+function _favPoint(slot, domain) {
+  const img = slot && slot.querySelector('img');
+  if (!img) return;
+  slot.dataset.tries = 0;
+  img.src = '/api/favicon?d=' + encodeURIComponent(domain);
+}
 // The mark that sits in a badge: the maker's drawn icon, else its site's own
-// icon on a light tile, else the first letter (also when the icon can't be had).
+// icon on a light tile, else the line icon for an agent.
 function harnessMark(h) {
   const d = h && h.icon && HARNESS_ICONS[h.icon];
   if (d) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
-  const letter = esc((h && h.label || '?')[0]);
-  if (h && h.site) return `<img class="hx-fav" src="/api/favicon?d=${encodeURIComponent(h.site)}" alt="${letter}" `
-    + `onload="this.parentNode.classList.add('has-fav')" onerror="this.replaceWith(this.alt)">`;
-  return letter;
+  if (h && h.site) return favSlot(h.site, 'agent', 'hx-fav', true);
+  return favKind('agent');
 }
 // A saved provider's badge: its own mark where Inglen knows one, else a cloud.
 function provIco(id) {
@@ -8240,7 +8355,7 @@ function harnessChip(id, extraTitle = '') {
   return `<span class="hx-chip" style="--hx:${h.c}" title="${esc(h.label + (h.maker ? ' by ' + h.maker : '') + extraTitle)}"><b>${harnessMark(h)}</b>${esc(h.label)}</span>`;
 }
 function _favImg(domain) {
-  return `<img src="/api/favicon?d=${encodeURIComponent(domain)}" alt="" title="${esc(domain)}" loading="lazy" onerror="this.remove()">`;
+  return favSlot(domain).replace('<span ', `<span title="${esc(domain)}" `);
 }
 function _domainsIn(text) {
   const seen = [];
@@ -8287,23 +8402,23 @@ function _liveLabel(run, card) {
   if (n === 'delegate') return `${harnessChip(String(a.agent || '').toLowerCase())} working…`;
   if (n === 'web_fetch' || n === 'browse') {
     const d = _cardDomain(card);
-    if (d) return `<img class="fav-cycle" src="/api/favicon?d=${encodeURIComponent(d)}" alt="" onerror="this.remove()">Reading ${esc(d)}…`;
+    if (d) return `${favSlot(d, 'site', 'fav-cycle')}Reading ${esc(d)}…`;
   }
   if (n === 'web_search') {
     if (!run._cycle) {
       let i = 0;
       run._cycle = setInterval(() => {
-        const img = run._live.querySelector('.fav-cycle');
-        if (!img || !run.isConnected) { clearInterval(run._cycle); run._cycle = null; return; }
+        const slot = run._live.querySelector('.fav-cycle');
+        if (!slot || !run.isConnected) { clearInterval(run._cycle); run._cycle = null; return; }
         i = (i + 1) % _SEARCH_CYCLE.length;
-        img.animate([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: 'blur(3px)' }], { duration: 140, easing: 'ease-in' })
+        slot.animate([{ opacity: 1, filter: 'blur(0)' }, { opacity: 0, filter: 'blur(3px)' }], { duration: 140, easing: 'ease-in' })
           .onfinish = () => {
-            img.src = '/api/favicon?d=' + _SEARCH_CYCLE[i];
-            img.animate([{ opacity: 0, filter: 'blur(3px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 200, easing: 'ease-out' });
+            _favPoint(slot, _SEARCH_CYCLE[i]);
+            slot.animate([{ opacity: 0, filter: 'blur(3px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 200, easing: 'ease-out' });
           };
       }, 700);
     }
-    return `<img class="fav-cycle" src="/api/favicon?d=${_SEARCH_CYCLE[0]}" alt="">Searching the web…`;
+    return `${favSlot(_SEARCH_CYCLE[0], 'site', 'fav-cycle')}Searching the web…`;
   }
   return esc(n) + '…';
 }
@@ -8967,10 +9082,10 @@ function attachSources(msgEl, events) {
   const chip = document.createElement('span');
   chip.className = 'src-chip';
   chip.tabIndex = 0;
-  chip.innerHTML = `<img src="/api/favicon?d=${encodeURIComponent(host(urls[0]))}" alt="" onerror="this.remove()">`
+  chip.innerHTML = favSlot(host(urls[0]))
     + `<span>${esc(host(urls[0]))}</span>${urls.length > 1 ? `<em>+${urls.length - 1}</em>` : ''}`
     + `<span class="src-list">${urls.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">`
-      + `<img src="/api/favicon?d=${encodeURIComponent(host(u))}" alt="" onerror="this.remove()">`
+      + favSlot(host(u))
       + `<b>${esc(host(u))}</b><small>${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))}</small></a>`).join('')}</span>`;
   const actions = body.querySelector('.actions');
   if (actions) body.insertBefore(chip, actions); else body.appendChild(chip);
@@ -9161,14 +9276,13 @@ async function refreshModels() {
     // Repaint dropdown selection + sticker + eject + ctx from the brain that
     // refreshState owns.
     applyBrainState();
-    // If the empty ("Getting Inglen ready…") screen is up, refresh it when the
-    // model finishes loading so it flips to "ready" — only on CHANGE, so the
-    // fade/breathe animation doesn't restart every poll.
+    // If the empty ("Getting Inglen ready…") screen is up, flip it to "ready" when
+    // the model finishes loading, in place: drawing it again restarted its fade
+    // and moved the mark 6 px down in one frame just as the load ended.
     const _nowReady = !!(STATE.loadedModel && STATE.loadedModel.id) || STATE.brain.kind === 'cloud';
     if (_nowReady !== _prevLoadedReady) {
       _prevLoadedReady = _nowReady;
-      const _c = activeConvo();
-      if (_c && !(_c.messages || []).length) renderChat();
+      _refreshEmptyIfShown();
     }
   } catch (e) { console.error('refreshModels', e); }
 }
@@ -13726,7 +13840,13 @@ function _refreshEmptyIfShown() {
   if (existing) {
     const st = _computeEmptyState();
     if (existing.className !== st.cls) {
+      // The dot's breathing starts dim; it eases there from how bright it was.
+      const dot = existing.querySelector('.empty-mark .hm-dot');
+      const was = dot && getComputedStyle(dot).opacity;
       existing.className = st.cls;
+      const now = dot && getComputedStyle(dot).opacity;
+      if (dot && !_reduceMotion() && Math.abs(was - now) > 0.05)
+        dot.animate([{ opacity: was }, { opacity: now }], { duration: 600, easing: 'cubic-bezier(.3, 0, .2, 1)' });
       const t = existing.querySelector('.empty-title');
       const s = existing.querySelector('.empty-sub');
       if (t) t.textContent = st.title;
@@ -14131,8 +14251,7 @@ const _ICON_MCP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 function mcpMark(b, dot) {
   let inner = _ICON_MCP;
   if (b.kind === 'folder') inner = _ICON_FOLDER;
-  else if (b.site) inner = `<img class="hx-fav" src="/api/favicon?d=${encodeURIComponent(b.site)}" alt="" `
-    + `onload="this.parentNode.classList.add('has-fav')" onerror="this.outerHTML=_ICON_MCP">`;
+  else if (b.site) inner = favSlot(b.site, 'mcp', 'hx-fav', true);
   return `<span class="mp-ico mcp-mark" title="${esc(b.site || '')}">${inner}<span class="mcp-dot ${dot}"></span></span>`;
 }
 
