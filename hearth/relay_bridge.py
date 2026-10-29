@@ -626,7 +626,8 @@ def ideas() -> Dict[str, Any]:
 # routes (its address is handed to this bridge when the window starts it), so a
 # switch from the phone is the same switch as one made in the window.
 WINDOW_URL = os.environ.get("HEARTH_WINDOW_URL", "").rstrip("/")
-_SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None}
+_SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None,
+             "gen_stats": (True, False)}
 
 
 def _window(method: str, path: str, body: Optional[Dict[str, Any]] = None, timeout: float = 30) -> Dict[str, Any]:
@@ -752,7 +753,10 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
                            "size_gb": d.get("size_gb")} for d in disk if not (d.get("not_chat") or d.get("incomplete"))],
                 "loaded": [x.get("id") for x in models.get("models") or [] if x.get("state") == "loaded"],
                 "approval_mode": settings.get("approval_mode") or "ask",
-                "think_default": bool(settings.get("think_default")), "think_level": settings.get("think_level") or ""}
+                "think_default": bool(settings.get("think_default")), "think_level": settings.get("think_level") or "",
+                # The window's "stats under replies" (on unless turned off there); the phone shows them only when
+                # it was turned on on purpose, so it gets the setting as it is, unset included.
+                "gen_stats": settings.get("gen_stats")}
     if what == "agent_models":
         return _window("GET", "/api/brain/agent/models?id=" + re.sub(r"[^a-z0-9_-]", "", str(m.get("id") or "")))
     if what == "use":
@@ -1551,7 +1555,7 @@ class Bridge:
                     cc._TURN.ctx = prev
 
     # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
-    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|preferred_model|ui_theme|ui_accent|theme)")
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme)")
 
     def follow_window(self) -> None:
         """Pass what changes on the PC (live_bus) to every paired phone as it happens:
