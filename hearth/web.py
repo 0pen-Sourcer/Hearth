@@ -6067,6 +6067,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
         claude_brain.set_bridge_url(f"http://127.0.0.1:{server.server_address[1]}")
     except Exception:
         pass
+    live_bus.announce_window(f"http://127.0.0.1:{server.server_address[1]}")
     # Clear write temporaries a killed save left behind, before anything lists
     # the folder and reports one as a conversation.
     for _d in (CONVOS_DIR, os.path.dirname(SETTINGS_PATH) or "."):

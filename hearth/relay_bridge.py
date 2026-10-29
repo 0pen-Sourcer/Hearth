@@ -1487,7 +1487,8 @@ class Bridge:
             out = {"type": "changed", "what": "brain"}
         elif kind == "chat" and ev.get("chat"):
             out = {"type": "changed", "what": "chat", "c": ev["chat"], **({"gone": True} if ev.get("gone") else {})}
-        elif kind == "turn" and ev.get("from") == "window" and ev.get("chat"):
+        elif kind == "turn" and ev.get("from") not in (None, "", self.adapter.name) and ev.get("chat"):
+            # A turn the window, the terminal or a chat app is running, shown on the phones as it goes.
             self._mirror(phones, ev)
             return
         if out:
@@ -1507,7 +1508,7 @@ class Bridge:
             if kind == "start":
                 self._mirrored[t] = ""
                 for chat in phones:
-                    self.adapter._push(chat, {"type": "user", "text": ev.get("text") or "", "via": "window"})
+                    self.adapter._push(chat, {"type": "user", "text": ev.get("text") or "", "via": ev.get("from") or "window"})
             elif kind == "chunk":
                 self._mirrored[t] = text + str(ev.get("text") or "")
                 for chat in phones:

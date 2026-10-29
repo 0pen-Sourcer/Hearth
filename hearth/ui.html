@@ -7274,7 +7274,28 @@ function onLiveEvent(ev) {
     return;
   }
   if (ev.kind !== 'turn' || ev.from === 'window') return;
-  const c = STATE.conversations.find(x => x.id === ev.chat);
+  let c = STATE.conversations.find(x => x.id === ev.chat);
+  if (ev.type === 'start' && (!c || c._stub)) {
+    // A turn from the phone, the terminal or a chat app in a chat this window hasn't
+    // loaded (a chat just started there): load or make it, then show the turn as it goes.
+    // Events that arrive meanwhile wait in order.
+    const held = LIVE.held || (LIVE.held = new Map());
+    held.set(ev.turn, [ev]);
+    (async () => {
+      if (c) { try { await ensureConvoLoaded(c); } catch {} }
+      else {
+        c = { id: ev.chat, title: (ev.text || 'New chat').trim().slice(0, 60), messages: [], created: Date.now(),
+              updated: Date.now(), source: ev.from };
+        STATE.conversations.unshift(c);
+        renderConvoList();
+      }
+      const queued = held.get(ev.turn) || [];
+      held.delete(ev.turn);
+      for (const q of queued) onLiveEvent(q);
+    })();
+    return;
+  }
+  if (LIVE.held && LIVE.held.has(ev.turn)) { LIVE.held.get(ev.turn).push(ev); return; }
   if (!c || c._stub || (c.id === STATE.activeId && STATE.streaming)) return;
   let t = LIVE.turns.get(ev.turn);
   if (ev.type === 'start') {
@@ -7286,6 +7307,7 @@ function onLiveEvent(ev) {
   if (!t) return;
   const r = t.reply;
   if (ev.type === 'chunk') r.content += ev.text || '';
+  else if (ev.type === 'think') r.events.push({ kind: 'think_chunk', content: ev.text || '', pos: r.content.length });
   else if (ev.type === 'said') r.content = ev.text || r.content;
   else if (ev.type === 'step') r.events.push({ kind: 'tool', name: ev.tool || '', args: liveArgs(ev.tool || '', ev.cmd || ''), result: '', ms: 0, pos: r.content.length });
   else if (ev.type === 'step_out') { const last = r.events[r.events.length - 1]; if (last) last.result = ev.out || ''; }
