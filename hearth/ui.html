@@ -16335,6 +16335,16 @@ let _voiceFillOrder = null;
 // firing a separate chat turn per breath (which jammed the loop).
 let _utterBuf = '', _utterTimer = null;
 const _UTTER_GAP = 900;
+// A sentence the recognizer closed itself is finished and goes almost at once:
+// a question, or a statement of a few words ending in a full stop. Anything else
+// may be a breath mid-thought and waits out the gap for the rest of it.
+const _UTTER_DONE_GAP = 150;
+function _utterGap(t) {
+  const s = String(t || '').trim().replace(/["')\]]+$/, '');
+  if (/[?!？！]$/.test(s)) return _UTTER_DONE_GAP;
+  if (/[.।。]$/.test(s) && s.split(/\s+/).length >= 3) return _UTTER_DONE_GAP;
+  return _UTTER_GAP;
+}
 // Voice HUD state drives the grid's EFFECT so each phase reads distinctly:
 //   speaking  → radial bloom from real TTS amplitude
 //   listening → gentle breathe (realtime mic is server-side, no client level)
@@ -17101,7 +17111,7 @@ function handleRealtimeEvent(ev) {
         STATE.streaming = false;
         setVoiceStatus('thinking…');
         send(msg);
-      }, 500);
+      }, Math.min(500, _utterGap(_utterBuf)));
       return;
     }
     // Stitch fragments: append, show the running transcript, and (re)arm a gap
@@ -17132,7 +17142,7 @@ function handleRealtimeEvent(ev) {
       // Server pauses the mic during TTS playback so we won't hear our own voice.
       send(msg);
     };
-    _utterTimer = setTimeout(fire, _UTTER_GAP);
+    _utterTimer = setTimeout(fire, _utterGap(_utterBuf));
   } else if (ev.type === 'warming') {
     // The speech model is still loading; the first run downloads it, and the
     // grid fills from the centre as the download comes in.

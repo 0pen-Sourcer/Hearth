@@ -370,6 +370,42 @@ def _on_mic_chunk(data) -> None:
         pass
 
 
+def _let_recorder_use_gpu() -> None:
+    """RealtimeSTT puts its speech models on the graphics card only when torch
+    says CUDA is there, and the torch bundled here is the processor-only build:
+    so with "Listening runs on: graphics card" both models ran on the processor,
+    and one sentence took about 4 s to finish instead of under 0.3 s. The models
+    run on ctranslate2, which has its own CUDA; when that sees a card, RealtimeSTT
+    is told so."""
+    try:
+        import RealtimeSTT.audio_recorder as _ar  # type: ignore
+        real = _ar.torch
+        if getattr(real, "_ctranslate2_cuda", False) or real.cuda.is_available():
+            return
+        import ctranslate2  # type: ignore
+        if ctranslate2.get_cuda_device_count() <= 0:
+            return
+
+        class _Cuda:
+            def __getattr__(self, name):
+                return getattr(real.cuda, name)
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        class _Torch:
+            _ctranslate2_cuda = True
+            cuda = _Cuda()
+
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+        _ar.torch = _Torch()
+    except Exception:
+        pass
+
+
 def _build_recorder(sess: Optional[_Session] = None):
     """Lazily build the AudioToTextRecorder with ChatGPT-voice-mode tuning.
 
@@ -503,6 +539,8 @@ def _build_recorder(sess: Optional[_Session] = None):
             except Exception: pass
 
     device, compute = _stt_device()
+    if device == "cuda":
+        _let_recorder_use_gpu()
     kwargs = dict(
         model=model,
         language=lang,

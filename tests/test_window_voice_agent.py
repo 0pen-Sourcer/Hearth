@@ -186,6 +186,11 @@ with sync_playwright() as pw:
         pg.wait_for_timeout(250)
     check(f"the voice chat gets a title, not 'New chat' ({title!r})", bool(title) and title != "New chat")
 
+    gaps = pg.evaluate("""() => typeof _utterGap === 'function' ? [
+        _utterGap('What time is it?'), _utterGap('Set a timer for ten minutes.'), _utterGap('आज शाम क्या है?'),
+        _utterGap('so I was thinking'), _utterGap('Okay.')] : null""")
+    check(f"a sentence the recognizer closed goes at once, a breath mid-thought waits for the rest ({gaps})",
+          bool(gaps) and max(gaps[:3]) <= 200 and min(gaps[3:]) >= 800)
     check("Settings can send voice mode back to the PC's own mic",
           pg.evaluate("() => { STATE.settings.voice_window_call = false; const off = !winCallCan(); STATE.settings.voice_window_call = true; return off && winCallCan(); }"))
     pg.keyboard.press("Escape")
