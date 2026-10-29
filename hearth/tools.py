@@ -23,6 +23,7 @@ import shlex
 import secrets
 import shutil
 import socket
+import asyncio
 import time
 import time as _t   # module-level alias; several tools use `_t.sleep/monotonic`
 import fnmatch
@@ -620,7 +621,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "list_archive",
         "description": (
             "List contents of a .zip/.jar/.whl/.apk/.tar/.tar.gz/.tar.bz2/.tar.xz "
-            "archive WITHOUT extracting it. Returns path + size per entry. "
+            "archive without extracting it. Returns path + size per entry. "
             "Use this before extract_archive_file or before deciding whether to "
             "ask the user to unpack. For .rar/.7z, hints to use 7-Zip via "
             "run_command (stdlib can't read them). Read-only — works anywhere on disk."
@@ -877,7 +878,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "next user message. Use it only when you want to peek before "
             "the notification surfaces (e.g. after a long pause). Pass the "
             "agent_id that spawn_subagent returned (the 'sub_...' id). This is "
-            "NOT get_job_result - a subagent id is not a job_id. Returns "
+            "not get_job_result - a subagent id is not a job_id. Returns "
             "{ok, status: 'running'|'done', result?: {...}}.",
         "parameters": {
             "type": "object",
@@ -895,7 +896,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "extract_archive_file",
         "description": (
-            "Pull ONE file out of an archive into the workspace, without "
+            "Pull one file out of an archive into the workspace, without "
             "unpacking the whole thing. archive_path can be anywhere on "
             "disk; inner_path is the path inside the archive (use "
             "list_archive first to see options). The extracted file lands "
@@ -907,7 +908,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "archive_path": {"type": "string", "description": "Path to the archive."},
-                "inner_path": {"type": "string", "description": "Path of the file INSIDE the archive (e.g. 'docs/readme.txt'). If unique, a suffix match like 'readme.txt' also works."},
+                "inner_path": {"type": "string", "description": "Path of the file inside the archive (e.g. 'docs/readme.txt'). If unique, a suffix match like 'readme.txt' also works."},
                 "output_name": {"type": "string", "description": "Optional workspace-relative destination name. Default = basename(inner_path)."},
             },
             "required": ["archive_path", "inner_path"],
@@ -967,7 +968,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     # ---- WEB ----
     {
         "name": "web_search",
-        "description": "Free DuckDuckGo HTML search. Returns top result titles/snippets/URLs. INVISIBLE to the user — this is research for YOU, not something they can see. To OPEN a page for the user, use open_url / open_in_browser / browse.",
+        "description": (
+            "Search the web (DuckDuckGo) and get the top results: titles, snippets and links. The person "
+            "doesn't see these results; they are for your research. To show them a page, use open_url, "
+            "open_in_browser or browse."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -990,7 +995,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "url": {"type": "string"},
                 "max_chars": {"type": "integer", "description":
                     "Characters of page text to return (default 8000). Raise it, up "
-                    "to 60000, when you need the WHOLE page, for example reading full "
+                    "to 60000, when you need the whole page, for example reading full "
                     "docs or source rather than a summary."},
             },
             "required": ["url"],
@@ -1113,7 +1118,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "duration":     {"type": "integer", "description": "Seconds, 1-15. Default 5."},
                 "aspect_ratio": {"type": "string", "description": "16:9 | 9:16 | 1:1 | 4:3 | 3:4 | 3:2 | 2:3. Default 16:9."},
                 "resolution":   {"type": "string", "description": "'480p' or '720p'. Default 720p."},
-                "image_url":    {"type": "string", "description": "Optional, for image-to-video. A local image file PATH (e.g. exactly what generate_image returned) or a URL. Set this ONLY when the user wants THAT specific image animated; leave empty for a fresh text-to-video."},
+                "image_url":    {"type": "string", "description": "Optional, for image-to-video. A local image file PATH (e.g. exactly what generate_image returned) or a URL. Set this only when the user wants that specific image animated; leave empty for a fresh text-to-video."},
                 "where":        {"type": "string", "enum": ["local", "cloud"], "description": "Only when asked for one: on this PC, or a cloud provider."},
             },
             "required": ["prompt"],
@@ -1144,16 +1149,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "ask_user",
         "description": (
-            "Ask the user a multi-choice question when you genuinely need a "
-            "decision before continuing — picking between two valid approaches, "
-            "clarifying an ambiguous file/folder, choosing which of several "
-            "matches to act on. The user sees a numbered list (CLI) or a modal "
-            "with buttons (GUI). Return value is the chosen label, or the "
-            "user's free-text reply if they pick 'Other'. "
-            "DO NOT use this for every small decision — it interrupts. Use it "
-            "only when running ahead would commit to the wrong thing. If the "
-            "user is clearly absent (headless / batch run), this returns an "
-            "error and you should pick the safest default and proceed."
+            "Ask the person to choose between options before going on: two valid approaches, which of several "
+            "matches to act on, an ambiguous file or folder. They see the options as buttons (window) or a "
+            "numbered list (terminal) and can answer in their own words instead. Returns the option they "
+            "picked or what they wrote. Use it only where guessing would commit to the wrong thing; small "
+            "decisions are yours to make. With nobody there to answer it returns an error: take the safest "
+            "choice and go on."
         ),
         "parameters": {
             "type": "object",
@@ -1205,8 +1206,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "description": (
             "Find the biggest folders and files under a path. Native Python "
             "— no shell. Drive-root scans ('C:\\\\') and whole-tree walks "
-            "(max_depth<=0) AUTO-BACKGROUND because they can take minutes "
-            "to hours. When backgrounded, returns a job_id IMMEDIATELY so "
+            "(max_depth<=0) auto-background because they can take minutes "
+            "to hours. When backgrounded, returns a job_id immediately so "
             "the user keeps chatting; call get_job_result(job_id) later "
             "for the report. Override with background:false to force sync."
         ),
@@ -1256,7 +1257,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "locate_path",
-        "description": "Smart locator: find a folder or app by name without globbing the whole disk. Checks top-level dirs of every drive, common parent dirs (Documents, Downloads, Desktop, Program Files, LocalAppData), Start Menu shortcuts, and the Windows installed-apps registry. Returns ranked matches. USE THIS instead of glob_files('**/*X*') for 'where is X on my PC' questions — it's fast and never crashes.",
+        "description": (
+            "Find a folder or an app by name without searching the whole disk: the top of every drive, the "
+            "usual places (Documents, Downloads, Desktop, Program Files, AppData), Start menu shortcuts and "
+            "the installed-apps list. Returns the likeliest matches first. For 'where is X on my PC', use "
+            "this rather than glob_files('**/*X*'): it is fast and doesn't time out."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -1306,7 +1312,12 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "open_in_browser",
-        "description": "Open a URL in a SPECIFIC browser (and optional profile) — the user SEES it in their own browser, and it stays open. Like open_url but for a named browser. Use for 'open/watch/play X in Brave/Chrome'. Browsers detected from PATH + registry; if the user has a preferred browser in memory, use it, else ask once.",
+        "description": (
+            "Open a link in a browser the person names, optionally in a given profile, where they see it and "
+            "it stays open. Like open_url, for a named browser: 'play X in Brave', 'open this in Chrome'. "
+            "Browsers are found from PATH and the registry. If memory has their preferred browser, use it; "
+            "otherwise ask once."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -1414,7 +1425,11 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "clipboard_read",
-        "description": "Read the clipboard. Returns copied TEXT directly; a copied IMAGE is saved to a temp file and the path returned (then call view_image on it — handles 'I copied a screenshot, what is it?'); copied FILE(S) return their paths.",
+        "description": (
+            "Read the clipboard. Copied text comes back as text; a copied picture is saved to a file and its "
+            "path returned (view_image shows it, for 'I copied a screenshot, what is it?'); copied files come "
+            "back as their paths."
+        ),
         "parameters": {"type": "object", "properties": {}},
     },
     {
@@ -1461,7 +1476,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     },
     {
         "name": "memory_recall",
-        "description": "Search saved memories. Use this BEFORE assuming. Returns top matches with their bodies. Empty query returns the index.",
+        "description": "Search saved memories. Use this before assuming. Returns top matches with their bodies. Empty query returns the index.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1509,10 +1524,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "notify",
         "description": (
-            "Pop a desktop notification (Windows toast) RIGHT NOW. Use for "
-            "'let me know when X is done', to flag a finished long task, or any "
-            "immediate heads-up. For a FUTURE/scheduled reminder use set_reminder "
-            "instead — this one fires instantly."
+            "Show a desktop notification now. Use for 'let me know when X is done', to flag a long task that "
+            "finished, or any heads-up that can't wait. For a later time use set_reminder; this one shows at "
+            "once."
         ),
         "parameters": {
             "type": "object",
@@ -1526,7 +1540,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "whoami",
         "description": (
-            "Introspect your own runtime config. Call this INSTEAD of guessing "
+            "Introspect your own runtime config. Call this instead of guessing "
             "or running shell commands when the user asks 'what model are you', "
             "'what's your endpoint', 'are you local or cloud', 'what can you do', "
             "'what's your context window', or 'who built you'. Returns the live "
@@ -1538,10 +1552,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "list_models",
         "description": (
-            "List the LLM models available on the connected server (LM Studio / Ollama / "
-            "cloud) by querying its API. Use this to answer 'what models do I have' / "
-            "'which models are loaded' / 'what can I switch to'. Do NOT scan the disk for "
-            "model files — that's slow and wrong; this is instant and correct."
+            "List the models the connected server or provider offers (LM Studio, Ollama, a cloud provider), "
+            "from its API. Use for 'what models do I have', 'which is loaded', 'what can I switch to'. It "
+            "answers at once; searching the disk for model files is slow and misses what a server offers."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -1634,7 +1647,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     # ---- SESSION CONTROL ----
     {
         "name": "end_session",
-        "description": "Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.). Send your farewell text in your reply FIRST, then call this tool with no args. The CLI will save history and exit cleanly. Don't call it for casual 'thanks' mid-task.",
+        "description": "Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.). Send your farewell text in your reply first, then call this tool with no args. The CLI will save history and exit cleanly. Don't call it for casual 'thanks' mid-task.",
         "parameters": {"type": "object", "properties": {}},
     },
 ]
@@ -4824,13 +4837,9 @@ def _open_app(p: Dict) -> str:
         except Exception:
             pass
         msg = (
-            f"Error: could not find '{name}' on this system. "
-            f"Tried PATH, UWP URI, file path, and Start Menu shortcuts. "
-            f"NEXT STEP: if '{name}' is a known web service (Discord, Spotify, "
-            f"WhatsApp, Telegram, YouTube, Twitter, Reddit, Gmail, Notion, "
-            f"GitHub, Slack, ChatGPT, Claude, etc.), call open_in_browser with "
-            f"the canonical URL (e.g. https://{name.lower()}.com) — that's the "
-            f"right fallback. Do NOT ask the user where it's installed."
+            f"Error: '{name}' isn't installed here as far as PATH, Store apps, file paths "
+            f"and Start menu shortcuts show. If it is a web service, open its site with "
+            f"open_in_browser instead; there's no need to ask them where it is installed."
         )
         if suggestions:
             msg += "\nClosest installed matches (use list_installed_apps for more):\n  " + "\n  ".join(suggestions)
@@ -5536,18 +5545,15 @@ def _capture_active_window(p: Dict) -> str:
             _rows.append('  [%d] %s: %s' % (m['n'], m['type'], m['name'][:40]))
         _hdr = 'Saved: %s (%dx%d) - window %r' % (out, img_w, img_h, win_title)
         _mid = '%d controls are numbered on the image:' % len(marks)
-        _tip = ('NEXT STEP: view_image on it to SEE the numbers, then click one with '
-                'smart_click(mark=N) - that uses the control real centre, so no '
-                'pixel estimation is involved.')
+        _tip = ('view_image shows the numbers; smart_click(mark=N) then clicks that '
+                "control at its real centre, with no pixels to estimate.")
         return chr(10).join([_hdr, _mid] + _rows + [_tip])
     return (
-        f"Saved: {out} ({img_w}x{img_h}) — window {win_title!r}\n"
-        f"COORDINATE CONTRACT: this image is {img_w}x{img_h} px, top-left = (0,0). "
-        f"Any pixel you read off it is in THIS space.\n"
-        f"NEXT STEP: view_image path='{out}' to see it. To CLICK something, then "
-        f"call smart_click(x, y, label=<what it is>) with the pixel at the target's "
-        f"CENTER in this {img_w}x{img_h} image — Inglen snaps it to the real UI "
-        f"control and verifies."
+        f"Saved: {out} ({img_w}x{img_h}), window {win_title!r}.\n"
+        f"Pixels read off this picture are in its own {img_w}x{img_h} space, (0,0) at the "
+        f"top left. view_image shows it; to click something, smart_click(x, y, label=<what "
+        f"it is>) with the pixel at the target's centre, and Inglen snaps it to the real "
+        f"control and checks it."
     )
 
 
@@ -5817,9 +5823,9 @@ def _memory_list(p: Dict) -> str:
     # Steer the model to the right tool: memory is read via memory_recall, never
     # by guessing file paths and read_file'ing them (which invents wrong paths and
     # then wrongly concludes "I can't see my memory").
-    return (idx + "\n\n[To read a memory's full content, call memory_recall(query). "
-            "Do NOT read_file the memory folder — memory is managed only through "
-            "the memory_recall / memory_save tools.]")
+    return (idx + "\n\n[memory_recall(query) reads a memory in full. Memories are kept through "
+            "memory_recall and memory_save; reading the memory folder's files directly "
+            "misses how they are stored.]")
 
 
 def _worklog(p: Dict) -> str:
@@ -6950,7 +6956,7 @@ for _bt in (
     },
     {
         "name": "browse_click",
-        "description": "Click a link or button on the CURRENT browser page by its visible text (use the exact text from the CLICKABLE list that browse returned). Returns the new page.",
+        "description": "Click a link or button on the current browser page by its visible text (use the exact text from the clickable list that browse returned). Returns the new page.",
         "parameters": {
             "type": "object",
             "properties": {"text": {"type": "string", "description": "Visible text of the link/button to click."}},
@@ -7003,7 +7009,11 @@ for _bt in (
     },
     {
         "name": "browse_close",
-        "description": "Close the browser session. ONLY when the user is truly DONE with it. If they want to WATCH a video, READ a page, or are still looking at what you opened, LEAVE IT OPEN — closing it yanks away what they're viewing. When in doubt, don't close.",
+        "description": (
+            "Close the browser session, only once the person is done with it. While they are watching a "
+            "video, reading a page or looking at anything you opened, leave it open: closing it takes it away "
+            "from them. If unsure, leave it open."
+        ),
         "parameters": {"type": "object", "properties": {}},
     },
 ):
@@ -7013,18 +7023,15 @@ for _bt in (
 TOOL_DEFINITIONS.append({
     "name": "create_plugin",
     "description": (
-        "Write a NEW local tool (plugin) for yourself when no existing tool fits "
-        "a capability the user needs — then use it immediately and forever after. "
-        "100% local, saved to ~/Jarvis/plugins/<name>.py. The `code` must be a "
-        "complete Python module defining EXACTLY two module-level names:\n"
-        "  TOOL = {\"name\": \"<same as name>\", \"description\": \"...\", "
-        "\"parameters\": {\"type\": \"object\", \"properties\": {...}, \"required\": [...]}}\n"
-        "  def run(args: dict) -> str: ...  # returns a string result\n"
-        "Use the Python stdlib freely. Don't shadow a built-in tool name. Keep it "
-        "SMALL — one focused capability, a few lines (a 100+ line module usually "
-        "means you're overcomplicating it). If create_plugin rejects your code, FIX "
-        "that error and call create_plugin AGAIN — never fall back to write_file / "
-        "run_command. Only create a plugin for a genuinely missing capability."
+        "Write a new tool for yourself when none of the existing tools can do something the person needs, "
+        "then use it, now and later. It stays on this PC, saved in the workspace's plugins folder. `code` "
+        "is a complete Python module that defines exactly two names:\n  TOOL = {\"name\": \"<same as name>\", "
+        "\"description\": \"...\", \"parameters\": {\"type\": \"object\", \"properties\": {...}, \"required\": [...]}}\n  "
+        "def run(args: dict) -> str: ...  # returns the result as text\nUse the standard library freely, "
+        "don't reuse a built-in tool's name, and keep it to one small capability (a module past 100 lines "
+        "is usually doing too much). If it is refused, fix the error it names and call create_plugin "
+        "again rather than working around it with write_file or run_command. Only for a capability that "
+        "is really missing."
     ),
     "parameters": {
         "type": "object",
@@ -7112,14 +7119,12 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "create_skill",
     "description": (
-        "Author a NEW user skill saved to ~/Jarvis/skills/<name>/. Use when "
-        "you find yourself running the same multi-step workflow twice — "
-        "crystallize it as a skill so future-you (and the user) can invoke "
-        "it by name. `name` is lower-kebab-case (e.g. 'summarize-youtube'). "
-        "`description` is the one-line when-to-use (the catalog summary). "
-        "`body` is the markdown workflow body (steps, defaults, don'ts). "
-        "Optional `scripts` is {filename: source} written under scripts/. "
-        "Available immediately via list_skills + load_skill."
+        "Save a workflow as a skill, in the workspace's skills folder. Use when you have run the same "
+        "multi-step workflow twice: next time it is one load_skill away, for you and for the person. "
+        "`name` is lower-kebab-case ('summarize-youtube'); `description` is one line on when to use it "
+        "(shown in the catalog); `body` is the workflow in markdown (steps, defaults, what to avoid); "
+        "optional `scripts` is {filename: source}, written under scripts/. Usable at once through "
+        "list_skills and load_skill."
     ),
     "parameters": {
         "type": "object",
@@ -7155,7 +7160,7 @@ def _install_skill(p: Dict) -> str:
             + ("SHIPS SCRIPTS and can run shell commands / modify files (its "
                "scripts execute via run_command, which still prompts you)."
                if m.get("risky") else "uses only safe tools.")
-            + " Install ONLY after the user agrees, by calling install_skill "
+            + " Install only after the user agrees, by calling install_skill "
               "again with confirm=true.")
         return json.dumps(out, ensure_ascii=False, indent=2)
     # Phase 2: user confirmed -> install (re-fetches; placing files is harmless
@@ -7170,15 +7175,12 @@ _HANDLERS["install_skill"] = _install_skill
 TOOL_DEFINITIONS.append({
     "name": "install_skill",
     "description": (
-        "Install a shareable skill from a GitHub repo or a local folder into "
-        "~/Jarvis/skills/. Source forms: 'owner/repo', 'owner/repo@branch', "
-        "'owner/repo/subdir', a full github.com URL, or a local path. "
-        "TWO-PHASE for safety: call first WITHOUT confirm to fetch + inspect — "
-        "you get {name, description, scripts, risky_tools, risky}. Relay that to "
-        "the user (especially if `risky` — it ships scripts that run shell "
-        "commands), and only after they agree, call again with confirm=true to "
-        "install. Use when the user pastes a skill link or asks to add a skill. "
-        "After install, call load_skill(name) to use it."
+        "Install a skill someone shares, from GitHub or a folder on this PC, into the workspace's skills "
+        "folder. Sources: 'owner/repo', 'owner/repo@branch', 'owner/repo/subdir', a github.com link, or a "
+        "local path. In two steps: call it without confirm to fetch and inspect it (you get its name, "
+        "description, scripts, the risky tools it uses and whether it is risky); tell the person what it "
+        "contains, especially when it ships scripts that run commands; and only once they agree, call it "
+        "again with confirm=true. Then load_skill(name) to use it."
     ),
     "parameters": {
         "type": "object",
@@ -7677,10 +7679,9 @@ def _focus_window(p: Dict) -> str:
             fg_title = win32gui.GetWindowText(win32gui.GetForegroundWindow()) or "(unknown)"
         except Exception:
             fg_title = "(unknown)"
-        return (f"Could NOT bring '{title}' to the front - '{fg_title[:40]}' still has "
-                f"focus (Windows refused the activation). Do NOT click or type yet: "
-                f"the input would go to the wrong window. Try focus_window again, or "
-                f"ask the user to click the window once.")
+        return (f"Couldn't bring '{title}' to the front: '{fg_title[:40]}' still has focus "
+                f"(Windows refused). Clicking or typing now would go to the wrong window. "
+                f"Try focus_window again, or ask them to click the window once.")
     _record_focus_target(hwnd)   # keystrokes verify focus against this window
     return f"Brought '{title}' to the front (focus verified).{extra}"
 
@@ -7836,7 +7837,7 @@ _HANDLERS["manage_window"] = _manage_window
 TOOL_DEFINITIONS.append({
     "name": "focus_window",
     "description": (
-        "Bring an ALREADY-OPEN window to the front / focus it, by a substring of "
+        "Bring an already-open window to the front / focus it, by a substring of "
         "its title (e.g. 'Spotify', 'chrome', 'notepad', a game's name). Use when "
         "the user says 'switch to / bring up / show me / pull up X' and X is "
         "already running — this raises the existing window instead of launching a "
@@ -7854,10 +7855,9 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "list_windows",
     "description": (
-        "List EVERY open window (title, state — foreground/minimized/open — and "
-        "owning app). Use to see what's actually on the desktop before acting: "
-        "'what do I have open', 'is Steam running', or to pick a window to "
-        "focus_window / act on. desktop_snapshot only sees the foreground window; "
+        "List every open window: its title, whether it is in front, minimized or open, and the app it "
+        "belongs to. Use it to see what is on the desktop before acting ('what do I have open', 'is Steam "
+        "running') or to pick a window for focus_window. desktop_snapshot sees only the window in front; "
         "this sees them all."
     ),
     "parameters": {"type": "object", "properties": {}},
@@ -7866,7 +7866,7 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "arrange_windows",
     "description": (
-        "Lay windows out on screen in ONE call: position and size several windows "
+        "Lay windows out on screen in one call: position and size several windows "
         "at named regions. Use for 'put the browser on the left and the editor on "
         "the right', 'chat top-right, game bottom-right', 'tile these three'. "
         "Deterministic, no screenshot or clicking involved, so prefer it over the "
@@ -7911,15 +7911,12 @@ TOOL_DEFINITIONS.append({
 TOOL_DEFINITIONS.append({
     "name": "read_pdf_large",
     "description": (
-        "Map-reduce summarize a VERY large PDF (hundreds of pages) that won't "
-        "fit any single context. Splits the PDF into page windows, summarizes "
-        "each window with a cheap local LLM call, then reduces the per-chunk "
-        "summaries into one structured overview (themes, key points, "
-        "per-section bullets). Use this — not read_file — when the user asks to "
-        "'summarize this whole book/report'. Extracted text + chunk summaries "
-        "are cached so a re-ask is instant. mode='background' returns a job_id "
-        "immediately and writes the summary to <pdf>_summary.md (overnight use "
-        "case); poll get_job_result(job_id) or read the file when done."
+        "Summarize a very large PDF (hundreds of pages) that won't fit in one context: it is read in page "
+        "windows, each summarized by a small model call, then combined into one overview (themes, key "
+        "points, a summary per section). Use this rather than read_file for 'summarize this whole book or "
+        "report'. Text and summaries are kept, so asking again is instant. mode='background' returns a "
+        "job_id at once and writes the summary to <pdf>_summary.md; check it with get_job_result(job_id) "
+        "or read the file when it is done."
     ),
     "parameters": {
         "type": "object",
@@ -8132,7 +8129,7 @@ _HANDLERS["computer_drag"] = _computer_drag
 for _cd in (
     {"name": "computer_screen", "description":
         "Report screen size + current cursor position. Call this + a screenshot "
-        "(view_image) FIRST so you know the pixel coordinate space before clicking.",
+        "(view_image) first so you know the pixel coordinate space before clicking.",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "computer_move", "description":
         "Glide the mouse to absolute screen pixel (x,y). The real cursor moves "
@@ -8140,9 +8137,7 @@ for _cd in (
      "parameters": {"type": "object", "properties": {
         "x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"]}},
     {"name": "computer_click", "description":
-        "Click the mouse. Give (x,y) to move there first, or omit to click the "
-        "current spot. button: left|right|middle. double:true = double-click. "
-        "ALWAYS screenshot first to find coordinates — don't guess.",
+        "Click the mouse. Give x and y to move there first, or leave them out to click where the pointer is. button: left, right or middle; double: true for a double-click. Take a screenshot first to find the coordinates rather than guessing them.",
      "parameters": {"type": "object", "properties": {
         "x": {"type": "integer"}, "y": {"type": "integer"},
         "button": {"type": "string", "enum": ["left", "right", "middle"]},
@@ -8200,12 +8195,11 @@ def _desktop_snapshot(p: Dict) -> str:
         # must not tell the model it is looking at a browser when it is in
         # VS Code or Slack.
         lines.append("")
-        lines.append("NOTE: these are only the WINDOW's own frame controls (minimize, close, "
-                     "tabs, toolbar) — what is INSIDE it is not exposed (a Chromium-based "
-                     "app, a browser or an Electron one like VS Code, Slack or Discord, "
-                     "keeps its renderer tree off). Do NOT look for the app's buttons or "
-                     "text boxes here. To act inside it: capture_active_window -> view_image "
-                     "to SEE it -> smart_click(x, y, text=...) with a pixel from that image.")
+        lines.append("These are only the window's own frame controls (minimize, close, tabs, "
+                     "toolbar): this app doesn't expose what is inside it, as browsers and apps "
+                     "built on Chromium don't. Its buttons and text boxes won't appear here. To "
+                     "act inside it: capture_active_window, view_image to see it, then "
+                     "smart_click(x, y, text=...) with a pixel from that picture.")
     else:
         lines.append("→ act with desktop_click(idx=N) or desktop_type(idx=N, text=...).")
     return "\n".join(lines)
@@ -8260,7 +8254,7 @@ for _cd in (
         "double": {"type": "boolean"}}}},
     {"name": "desktop_type", "description":
         "Write text into a UI element from the last desktop_snapshot (by idx or "
-        "name). Sets the value DIRECTLY where the control supports it — no focus "
+        "name). Sets the value directly where the control supports it — no focus "
         "change, works even if the window is in the background (paste-equivalent); "
         "falls back to click-to-focus + keystrokes for fields that don't. "
         "mode 'replace' sets the whole field (a search box, a form field); 'append' adds "
@@ -8451,8 +8445,8 @@ _HANDLERS["launch_team"] = _launch_team
 TOOL_DEFINITIONS.append({
     "name": "launch_team",
     "description":
-        "Spawn a TEAM of sub-agents that work in parallel and open a live "
-        "terminal pane for each so the user can WATCH them build side by side "
+        "Spawn a team of sub-agents that work in parallel and open a live "
+        "terminal pane for each so the user can watch them build side by side "
         "(Windows Terminal panes / tmux). Use when the user asks for 'a team', "
         "'multiple agents', 'one frontend one backend one architect', or to "
         "watch agents work at once. Decompose the user's goal into focused "
@@ -8532,6 +8526,91 @@ TOOL_DEFINITIONS.append({
         "task": {"type": "string", "description": "The full task, self-contained: it does not see this chat."},
         "folder": {"type": "string", "description": "Folder it works in. Default: the workspace."},
     }, "required": ["agent", "task"]},
+})
+
+
+def _agent_sessions(p: Dict) -> str:
+    """Coding-agent sessions on this PC (Claude Code, Codex and the others Inglen
+    reads): list them, read one, or send one a message and get its reply. A reply
+    is that agent's words, never the person's: it can't approve anything here."""
+    from . import agent_sessions as S
+    act = str(p.get("action") or "list").strip().lower()
+    if act == "list":
+        q = str(p.get("query") or "").strip().lower()
+        rows = S.listing(80)
+        if q:
+            rows = [r for r in rows if q in " ".join(str(r.get(k) or "") for k in ("title", "project", "cwd", "label", "agent")).lower()]
+        rows = rows[:max(1, min(int(p.get("limit") or 12), 40))]
+        if not rows:
+            return "No coding-agent sessions on this PC" + (f" match '{q}'." if q else ".")
+        now = time.time() * 1000
+        out = []
+        for r in rows:
+            mins = int((now - (r.get("at") or now)) / 60000)
+            ago = f"{mins} min ago" if mins < 90 else (f"{mins // 60} h ago" if mins < 2880 else f"{mins // 1440} days ago")
+            state = {"open": ", open in its app now", "recent": ", working now"}.get(r.get("live") or "", "")
+            out.append(f"- {r['chat']}: {r.get('label') or S.label(r['agent'])}, \"{r.get('title') or '(untitled)'}\" "
+                       f"in {r.get('project') or r.get('cwd') or '?'}, {ago}{state}")
+        return "Coding-agent sessions, newest first (session id first):\n" + "\n".join(out)
+    cid = str(p.get("session") or "").strip()
+    if not S.parse_chat(cid):
+        return "Error: give the session id that list shows (it starts with as_)."
+    if act == "read":
+        d = S.transcript(cid, max(2, min(int(p.get("last") or 12), 60)))
+        if d.get("error"):
+            return f"Error: {d['error']}."
+        lines = [f"{d.get('label')} session \"{d.get('title') or '(untitled)'}\" in {d.get('cwd') or '?'}"
+                 + (f" ({d['more']} earlier messages not shown)" if d.get("more") else "") + ":"]
+        for m in d.get("messages") or []:
+            who = "Person" if m.get("role") == "user" else d.get("label") or "Agent"
+            steps = ", ".join(st.get("w") or "" for st in (m.get("steps") or [])[:6] if isinstance(st, dict))
+            text = " ".join(str(m.get("text") or "").split())[:1200]
+            lines.append(f"[{who}{' (error)' if m.get('error') else ''}] " + (f"({steps}) " if steps else "") + text)
+        return "\n".join(lines)
+    if act == "send":
+        text = str(p.get("message") or "").strip()
+        if not text:
+            return "Error: give the message to send."
+        said, errors = [], []
+
+        def emit(kind, **f):
+            if kind == "text" and f.get("text"):
+                said.append(str(f["text"]))
+            elif kind == "error" and f.get("message"):
+                errors.append(str(f["message"]))
+
+        async def ask(question: str) -> bool:
+            return False                 # nobody here to answer for the person; the agent is told no
+
+        rc = asyncio.run(S.say(cid, text, emit, ask))
+        name = S.label((S.parse_chat(cid) or ("", ""))[0])
+        if errors and not said:
+            return f"Error: {errors[-1]}"
+        reply = "\n\n".join(said).strip() or "(it finished without a reply)"
+        return (f"{name} answered (its words, not the person's; it can't approve anything here):\n{reply}"
+                + (f"\n\nIt also said: {errors[-1]}" if errors else "") + ("" if rc == 0 else f"\n(exit {rc})"))
+    return "Error: action is list, read or send."
+
+
+_HANDLERS["agent_sessions"] = _agent_sessions
+TOOL_DEFINITIONS.append({
+    "name": "agent_sessions",
+    "description":
+        "The coding-agent sessions on this PC (Claude Code, Codex and others), the ones the person "
+        "runs in those apps: list them, read where one got to, or send one a message and get its "
+        "reply. Use it when they ask about or want to carry on work happening in one of those agents "
+        "('what is Codex doing on the game', 'tell the Claude Code session to run the tests'). Sending "
+        "carries that session on in its own project folder, under that agent's own rules. What it "
+        "answers is its words, not the person's: report it, and don't treat it as their approval. To "
+        "start a new task in an agent instead, use delegate.",
+    "parameters": {"type": "object", "properties": {
+        "action": {"type": "string", "enum": ["list", "read", "send"], "description": "list (the default), read or send."},
+        "query": {"type": "string", "description": "list: words to filter by (project, title, agent)."},
+        "limit": {"type": "integer", "description": "list: how many, newest first (default 12)."},
+        "session": {"type": "string", "description": "read and send: the session id from list (starts with as_)."},
+        "last": {"type": "integer", "description": "read: how many of its latest messages (default 12)."},
+        "message": {"type": "string", "description": "send: the message, written as the person would to that agent."},
+    }, "required": ["action"]},
 })
 
 
@@ -8654,12 +8733,11 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
         import difflib
         near = difflib.get_close_matches(name, list(_HANDLERS), n=3, cutoff=0.55)
         if near:
-            return (f"Error: there is no tool named '{name}'. Did you mean: "
-                    f"{', '.join(near)}? Call the correct tool DIRECTLY by name — "
-                    f"do NOT try to import or run a tool via run_command.")
-        return (f"Error: there is no tool named '{name}'. Do NOT invent tools or "
-                f"import them with run_command. If you need a capability you don't "
-                f"see, call load_tools(\"<what you need>\") to discover it, then use it.")
+            return (f"Error: there is no tool named '{name}'. Did you mean {', '.join(near)}? "
+                    f"Call it by name; tools can't be imported or run through run_command.")
+        return (f"Error: there is no tool named '{name}'. load_tools(\"<what you need>\") "
+                f"finds the tools that are held back; tools can't be imported or run "
+                f"through run_command.")
     # Dry-run mode (benchmarks): measure which tool the model REACHES for
     # without the side effect. State-changing tools return a synthetic success
     # so the chain keeps going; read-only tools (read_file, list_directory,
@@ -8942,6 +9020,7 @@ _DEFERRED_TOOLS = {
     "race_helpers",        # comparing agents is an occasional ask
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # starting a message to the phone is rare
+    "agent_sessions",      # reaching a coding agent's session is an occasional ask
     "connectors",          # setting up a chat app is occasional
     "focus_window",        # niche window management
     "glob_files",          # find_file already accepts glob patterns + is fuzzier
@@ -9212,6 +9291,8 @@ _RISKY_TOOLS: set = {
     # These act outside the machine: one sends a message to a phone, the other
     # downloads and installs code.
     "send_to_phone", "install_skill", "connectors",
+    # Sends a message into a coding agent's session, which then works on the person's files.
+    "agent_sessions",
     "memory_forget", "extract_archive_file", "create_plugin", "delete_plugin",
     "read_inbox", "send_email",
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
@@ -9343,6 +9424,8 @@ def mode_allows(name: str, args=None) -> bool:
         return act == "show" or (m == "auto" and act != "discard")
     if name == "connectors" and str((args or {}).get("action") or "status") == "status":
         return True                     # looking at what's connected changes nothing
+    if name == "agent_sessions" and str((args or {}).get("action") or "list") in ("list", "read"):
+        return True                     # looking at a coding agent's sessions changes nothing
     if name == "send_to_phone" and not (args or {}).get("channel"):
         try:
             from .channel_core import here
@@ -9357,7 +9440,7 @@ def mode_allows(name: str, args=None) -> bool:
             return True
         if name in _ALWAYS_ASK_IN_AUTO:
             return _reviewed(name, args)
-        if name == "delegate":
+        if name in ("delegate", "agent_sessions"):
             return True                 # an agent program, under its own rules; Auto doesn't stop it
         if name in _SHELL_TOOLS:
             cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")

@@ -145,12 +145,10 @@ def save_and_register(name: str, code: str, workspace: str,
     tool, run, err = validate_plugin_source(code)
     if err:
         return (
-            f"Error: plugin code invalid — {err}. Nothing was written.\n"
-            f"NEXT STEP: FIX exactly that error and call create_plugin AGAIN with "
-            f"corrected `code`. Keep the plugin SMALL — one focused capability, a "
-            f"few lines, plain stdlib. Do NOT fall back to write_file / run_command "
-            f"/ edit_file, and do NOT try to run the plugin as a script — plugins are "
-            f"loaded, not executed. Just re-call create_plugin with valid code."
+            f"Error: the plugin's code was refused: {err}. Nothing was written.\n"
+            f"Fix that and call create_plugin again with the corrected `code`: one small "
+            f"capability, the standard library, a few lines. A plugin is loaded, not run as a "
+            f"script, so writing it with write_file or running it with run_command won't work."
         )
     if tool["name"] != name:
         return f"Error: TOOL['name'] is '{tool['name']}' but file name is '{name}' — make them match."

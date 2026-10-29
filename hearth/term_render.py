@@ -51,6 +51,11 @@ _ARG_KEYS = ("command", "path", "query", "url", "name", "pattern", "prompt", "wh
 def tool_words(name: str, args: Optional[Dict[str, Any]]) -> str:
     """A tool call said plainly: "Ran echo hi", "Read notes.txt"."""
     args = args if isinstance(args, dict) else {}
+    if name == "agent_sessions":
+        act = str(args.get("action") or "list")
+        who = _session_agent(args.get("session"))
+        return {"read": f"Read {who}'s session", "send": f"Sent a message to {who}"}.get(
+            act, "Looked at the coding agents' sessions")
     verb, key = _VERB.get(name, (name.replace("_", " ").capitalize(), ""))
     val = args.get(key) if key else None
     if val is None and name not in _VERB:
@@ -63,6 +68,16 @@ def tool_words(name: str, args: Optional[Dict[str, Any]]) -> str:
     if key == "url" and val:
         val = re.sub(r"^https?://(www\.)?", "", val).rstrip("/")
     return f"{verb} {val[:90]}".strip() if val else verb
+
+
+def _session_agent(cid: Any) -> str:
+    """The agent a session id (as_<agent>_<id>) belongs to, by its name."""
+    try:
+        from .agent_sessions import label, parse_chat
+        got = parse_chat(str(cid or ""))
+        return label(got[0]) if got else "a coding agent"
+    except Exception:
+        return "a coding agent"
 
 
 # ---------------------------------------------------------------- markdown
