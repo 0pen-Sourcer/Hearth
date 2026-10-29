@@ -146,6 +146,39 @@ check("a screenshot's result doesn't shout orders", "TELL THEM WHAT'S" not in sr
 hsrc = open(os.path.join(ROOT, "hearth", "headless.py"), encoding="utf-8").read()
 check("and a next-step note is never written as if the person said it", "Don't narrate, don't describe, don't ask. Act." not in hsrc)
 
+# Said while a turn runs (a call, mostly): kept as their own words, and one said too late to
+# be read is the next turn, not lost. Owner, 2026-10-29: "his words don't appear" after a call.
+said_in, gate = [], {"go": False}
+
+
+async def listening(prompt, *, emit, drain_steer=None, **k):
+    said_in.append(prompt)
+    end = time.time() + 5
+    while not gate["go"] and time.time() < end:
+        await asyncio.sleep(0.02)
+    heard = drain_steer() if drain_steer else []
+    emit("assistant", content="Heard: " + ", ".join(heard) if heard else "Okay.")
+    if prompt == "start the call":
+        gate["late"] = hub.receive("talk", "me", "and one more thing")
+    return 0
+
+headless.run_once = listening
+hub.receive("talk", "me", "start the call")
+time.sleep(0.2)
+check("a word said while it runs joins the turn", hub.receive("talk", "me", "also check the logs") == "joined")
+gate["go"] = True
+end = time.time() + 10
+while (hub._busy or len(said_in) < 2) and time.time() < end:
+    time.sleep(0.05)
+for t in list(hub.threads):
+    t.join(3)
+saved = (chat_sync.load(cc.chat_id_for(app.name, "talk")) or {}).get("messages") or []
+words = [m["content"] for m in saved if m.get("role") == "user"]
+check(f"what they said during the turn is kept as their own message ({words})",
+      words[:2] == ["start the call", "also check the logs"])
+check(f"one said too late for the model is the next turn, not lost ({gate.get('late')}, {said_in})",
+      gate.get("late") == "joined" and said_in[-1] == "and one more thing" and "and one more thing" in words)
+
 b = RB.Bridge.__new__(RB.Bridge)
 b.hub, b.agent_runs = hub, {"as_codex_x": {"t": "agent1"}}
 hub._busy["k"] = {"t": "turn9"}

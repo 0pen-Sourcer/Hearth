@@ -1050,6 +1050,7 @@ class Room:
         self.lookups: set = set()
         self.seen_boxes: set = set()          # answers from notifications already taken
         self.call = None                      # a voice call from the phone, while one is on
+        self.saying = None                    # a reply read aloud to the phone in the PC's voice
         self.call_gone_told = False
 
     @property
@@ -1146,6 +1147,9 @@ class Room:
             if m and str(m.get("type") or "").startswith("call."):
                 self.on_call(m)
                 return
+            if m and str(m.get("type") or "").startswith("say."):
+                self.on_say(m)
+                return
             if m and m.get("type") == "req":
                 # Lookups run side by side, so a slow one (icons from the web)
                 # never holds up a switch the person is waiting on.
@@ -1154,6 +1158,45 @@ class Room:
                 task.add_done_callback(self.lookups.discard)
             elif m:
                 await asyncio.to_thread(self.bridge.on_message, self, m)
+
+    def on_say(self, m: Dict[str, Any]) -> None:
+        """Read aloud on the phone, in the PC's own voice (Settings > Voice, as the call):
+        say.start {text, ref} streams the voice as say.down frames, then say.end;
+        say.stop cuts it. One at a time per phone."""
+        kind, ref = m.get("type"), str(m.get("ref") or "")
+        old, self.saying = self.saying, None
+        if old is not None:
+            old.stop()
+        if kind != "say.start" or not str(m.get("text") or "").strip():
+            return
+        from . import voice as _voice
+        adapter, chat = self.bridge.adapter, self.chat
+
+        def send(obj):
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+            try:
+                adapter._push(chat, dict(obj, ref=ref))
+            finally:
+                cc._TURN.ctx = prev
+
+        class Sink:
+            def __call__(self, samples, sr):
+                send({"type": "say.down", "sr": int(sr), "data": base64.b64encode(samples.astype("<i2").tobytes()).decode()})
+
+            def flush(self):
+                send({"type": "say.flush"})
+
+        speaker = _voice.Speaker(sink=Sink(), first_chunk=40)
+        self.saying = speaker
+
+        def run():
+            said = speaker.speak(str(m["text"]), blocking=True)
+            if said == "no_voice":
+                send({"type": "say.error", "detail": "The PC's voice isn't set up yet. Turn it on in Settings, Voice."})
+            send({"type": "say.end"})
+            if self.saying is speaker:
+                self.saying = None
+        threading.Thread(target=run, daemon=True, name="relay-say").start()
 
     def on_call(self, m: Dict[str, Any]) -> None:
         """A call from the phone: its audio frames, its start and its end."""

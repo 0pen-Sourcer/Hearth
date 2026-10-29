@@ -525,9 +525,13 @@ class Hub:
                     except Exception:
                         pass
 
+        steered: List[Dict[str, Any]] = []      # what they said while it ran, kept as their own messages
+
         def steer() -> List[str]:
             with self._lock:
-                said, run["steer"] = list(run["steer"]), []
+                said, run["steer"] = list(run.get("steer") or []), []
+            at = int(time.time() * 1000)
+            steered.extend({"role": "user", "content": s, "via": self.a.name, "at": at} for s in said)
             return said
 
         try:
@@ -578,12 +582,27 @@ class Hub:
             {"role": "user", "content": text, "via": self.a.name, "at": now,
              **({"displayContent": run.get("shown") or "", "attachments": attachments(run["files"])}
                 if run.get("files") else {})},
+            *steered,
             {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
              **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
         with self._lock:
             self._busy.pop(run.get("key", chat), None)
+            late = list(run.get("steer") or [])   # said after the model last looked: the next turn, not lost
+            run["steer"] = []
         _TURN.ctx = None
+        if late:
+            nxt = {"steer": [], "question": None, "answer": None, "key": run.get("key", chat), "regen": False,
+                   "shown": "", "files": []}
+            with self._lock:
+                if run.get("key", chat) in self._busy:
+                    self._busy[run.get("key", chat)]["steer"].extend(late)
+                    return None
+                self._busy[run.get("key", chat)] = nxt
+            t = threading.Thread(target=self._turn, args=(chat, "\n".join(late), reply_to, nxt, cid), daemon=True,
+                                 name=f"{self.a.name}-turn")
+            self.threads.append(t)
+            t.start()
         return None
 
 
