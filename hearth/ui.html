@@ -7994,6 +7994,19 @@ function renderMessage(m) {
     // show. Naming a file the user can't see, right above a reply where the
     // model clearly CAN see it, reads like the image never arrived.
     let _userText = m.displayContent || m.content || '';
+    // A file sent from the phone or a chat app before attachments were kept on the
+    // message: its note for the model becomes the attachment it stands for.
+    if (!m.displayContent && !(m.attachments && m.attachments.length) && typeof _userText === 'string') {
+      const notes = [..._userText.matchAll(/\n?\[(?:They sent (.+?), saved at (.+?)\. Look at it with view_image[\s\S]*?before answering about it\.|Attached: (.+?), saved at (.+?)\. (?:It's a picture: view_image shows it|read_file reads it)\.)\]/g)];
+      if (notes.length) {
+        m = Object.assign({}, m, { attachments: notes.map(n => {
+          const name = n[1] || n[3], path = n[2] || n[4];
+          return { name, path, isImage: /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(name) };
+        }) });
+        for (const n of notes) _userText = _userText.replace(n[0], '');
+        _userText = _userText.trim();
+      }
+    }
     if (m.attachments && m.attachments.length) {
       _userText = _userText.replace(/\n?\[attached:[^\]]*\]\s*$/, '').trimEnd();
     }

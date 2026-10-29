@@ -323,10 +323,12 @@ class Hub:
                     self.a.heard(chat, heard, cid)      # the app shows the words, as the window does
                 except Exception:
                     pass
-        for f in files or []:
-            text = (text + "\n" if text else "") + (
-                f"[They sent {os.path.basename(f)}, saved at {f}. Look at it with view_image if it's a picture, "
-                f"or read_file, before answering about it.]")
+        # What they wrote is what their message shows; the note naming what they
+        # attached is for the model only (kept in `content`, as the window keeps it).
+        shown = text.strip()
+        files = [f for f in files or [] if f]
+        if files:
+            text = (text + "\n" if text else "") + attachment_note(files)
         text = text.strip()
         if not text:
             return "empty"
@@ -345,7 +347,8 @@ class Hub:
                     return "answered"
                 run["steer"].append(text)
                 return "joined"
-            run = {"steer": [], "question": None, "answer": None, "key": key, "regen": regen}
+            run = {"steer": [], "question": None, "answer": None, "key": key, "regen": regen,
+                   "shown": shown, "files": files}
             self._busy[key] = run
         t = threading.Thread(target=self._turn, args=(chat, text, reply_to, run, cid), daemon=True,
                              name=f"{self.a.name}-turn")
@@ -394,7 +397,8 @@ class Hub:
         _HERE.set((self.a, chat))
         try:
             from . import live_bus
-            live_bus.publish(live_bus.turn_event(cid, self.a.name, _TURN.ctx["t"], "start", {"text": text}))
+            live_bus.publish(live_bus.turn_event(cid, self.a.name, _TURN.ctx["t"], "start",
+                                                     {"text": run.get("shown", text) if run.get("files") else text}))
         except Exception:
             pass
         steps = callable(getattr(self.a, "step", None))     # an app that shows each step itself
@@ -569,7 +573,9 @@ class Hub:
             # shows it in red there too and it isn't fed back to the model as something said.
             events.append({"kind": "error", "text": final, "pos": 0})
         chat_sync.post(cid, " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}", self.a.name, [
-            {"role": "user", "content": text, "via": self.a.name, "at": now},
+            {"role": "user", "content": text, "via": self.a.name, "at": now,
+             **({"displayContent": run.get("shown") or "", "attachments": attachments(run["files"])}
+                if run.get("files") else {})},
             {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
              **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
@@ -749,6 +755,46 @@ def _persona_name() -> str:
         return NAME
     except Exception:
         return "JARVIS"
+
+
+_PICTURE = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic")
+
+
+def attachment_note(paths: List[str]) -> str:
+    """What the model is told about files the person sent with a message."""
+    out = []
+    for p in paths:
+        pic = os.path.splitext(p)[1].lower() in _PICTURE
+        out.append(f"[Attached: {os.path.basename(p)}, saved at {p}. "
+                   + ("It's a picture: view_image shows it.]" if pic else "read_file reads it.]"))
+    return "\n".join(out)
+
+
+def attachments(paths: List[str]) -> List[Dict[str, Any]]:
+    """The files on a message, as the window keeps them: shown as attachments, not text."""
+    return [{"name": os.path.basename(p), "path": p, "isImage": os.path.splitext(p)[1].lower() in _PICTURE}
+            for p in paths]
+
+
+# Notes written before attachments were kept on the message.
+_OLD_NOTE = re.compile(r"\[They sent (.+?), saved at (.+?)\. Look at it with view_image.*?before answering about it\.\]", re.S)
+_NOTE = re.compile(r"\[Attached: (.+?), saved at (.+?)\. (?:It's a picture: view_image shows it|read_file reads it)\.\]")
+
+
+def sent_files(msg: Dict[str, Any]) -> List[str]:
+    """The files a person's message carried: its attachments, or in an older chat, its notes."""
+    if msg.get("attachments"):
+        return [a.get("path") for a in msg["attachments"] if a.get("path")]
+    text = str(msg.get("content") or "") if isinstance(msg.get("content"), str) else ""
+    return [m.group(2) for m in list(_OLD_NOTE.finditer(text)) + list(_NOTE.finditer(text))]
+
+
+def said_text(msg: Dict[str, Any]) -> str:
+    """What the person wrote in a message, without the notes about what they attached."""
+    if msg.get("displayContent") is not None and msg.get("attachments"):
+        return str(msg.get("displayContent") or "")
+    text = str(msg.get("content") or "") if isinstance(msg.get("content"), str) else ""
+    return _NOTE.sub("", _OLD_NOTE.sub("", text)).strip()
 
 
 def shown_result(content: Any, limit: int = 4000) -> str:

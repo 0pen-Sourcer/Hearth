@@ -31,7 +31,7 @@ with open(os.path.join(WS, "settings.json"), "w", encoding="utf-8") as f:
     json.dump({"onboarded": True, "approval_mode": "ask"}, f)
 sys.path.insert(0, ROOT)
 
-from hearth import channel_core as cc, headless, tools  # noqa: E402
+from hearth import channel_core as cc, headless, relay_bridge as RB, tools  # noqa: E402
 
 cc.ACCESS_FILE = os.path.join(WS, "channel_access.json")
 FAILS: list = []
@@ -116,6 +116,25 @@ ev = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "tool"] if 
 check(f"the window gets each step with what came back, how long and where it was in the reply ({ev[:1]})",
       ev and ev[0]["name"] == "take_screenshot" and "Saved the screenshot" in ev[0]["result"]
       and ev[0]["ms"] >= 40 and ev[0]["pos"] == len("Taking one now. ") and not any(k.startswith("_") for k in ev[0]))
+# A file sent from the phone: their message is what they wrote, with the file as an attachment.
+seen.clear()
+hub.receive("me", "me", "See", files=[SHOT])
+end = time.time() + 10
+while hub._busy and time.time() < end:
+    time.sleep(0.05)
+for t in hub.threads:
+    t.join(3)
+saved = (chat_sync.load(cc.chat_id_for(app.name, "me")) or {}).get("messages") or []
+me = [m for m in saved if m.get("role") == "user"][-1]
+check(f"their message shows what they wrote, the file as an attachment ({me.get('displayContent')!r}, {me.get('attachments')})",
+      me.get("displayContent") == "See" and me.get("attachments") == [{"name": "shot.png", "path": SHOT, "isImage": True}])
+check(f"the model is told about it in plain words ({me['content']!r})",
+      me["content"].startswith("See\n[Attached: shot.png, saved at ") and "view_image shows it" in me["content"]
+      and "They sent" not in me["content"])
+got = RB.answer({"what": "open", "chat": cc.chat_id_for(app.name, "me")})["messages"]
+mine = [m for m in got if m.get("role") == "user"][-1]
+check(f"the phone shows the words and the file card, not the note ({mine.get('text')!r})",
+      mine.get("text") == "See" and [c["name"] for c in mine.get("files") or []] == ["shot.png"])
 check("send_to_phone in plain words", cc._what("send_to_phone", {"message": "Relay test"}) == 'send this to your phone: "Relay test"')
 
 check("from the window (no app turn), it still asks", tools.mode_allows("send_to_phone", {"message": "x"}) is False)
@@ -127,7 +146,6 @@ check("a screenshot's result doesn't shout orders", "TELL THEM WHAT'S" not in sr
 hsrc = open(os.path.join(ROOT, "hearth", "headless.py"), encoding="utf-8").read()
 check("and a next-step note is never written as if the person said it", "Don't narrate, don't describe, don't ask. Act." not in hsrc)
 
-from hearth import relay_bridge as RB  # noqa: E402
 b = RB.Bridge.__new__(RB.Bridge)
 b.hub, b.agent_runs = hub, {"as_codex_x": {"t": "agent1"}}
 hub._busy["k"] = {"t": "turn9"}

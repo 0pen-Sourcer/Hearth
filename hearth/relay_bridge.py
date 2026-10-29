@@ -281,14 +281,14 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             files = []
             from . import relay_media
             from .bridge_status import files_in
-            sent = re.findall(r"\[They sent .+?, saved at (.+?)\. Look at it", text, flags=re.S)
+            sent = cc.sent_files(dict(x, content=text)) if role == "user" else []
             for p in (sent if role == "user" else files_in(text, relay_media.MAX_FILE)):
                 c = relay_media.card(p)
                 if c:
                     files.append(c)
-            # A file sent from a phone is kept as a note for the model; the person sent the file.
-            text = re.sub(r"\[They sent (.+?), saved at .+?before answering about it\.\]",
-                          lambda g: "Sent " + g.group(1), text, flags=re.S)
+            # What they wrote, without the note telling the model about the files: the files show as cards.
+            if role == "user":
+                text = cc.said_text(dict(x, content=text))
             failed = next((str(e.get("text") or "") for e in events if e.get("kind") == "error"), "")
             if failed and not text.strip():
                 msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
@@ -413,8 +413,8 @@ def drop_from(cid: str, text: str, back: int = 0) -> bool:
         return False
 
     def said(x):
-        # A message that carried a file has the note about it after the words.
-        return re.sub(r"\s*\[They sent .+$", "", " ".join(chat_sync._text(x.get("content")).split()))
+        # What the person wrote, without the note about files they attached.
+        return " ".join(cc.said_text(dict(x, content=chat_sync._text(x.get("content")))).split())
 
     mine = [i for i, x in enumerate(msgs) if x.get("role") == "user"]
     at = None
