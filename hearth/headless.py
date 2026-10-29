@@ -1449,8 +1449,8 @@ async def _run_once(
     # every turn (pure overhead) and fall to the hard trim + a one-time warning.
     _compact_fails = 0
     _compact_warned = False
-    # Vision delivery: view_image / screenshot / capture return a text marker
-    # (__JARVIS_IMAGE__ <path>). For a vision model we must turn that into a real
+    # Vision delivery: view_image / screenshot / capture name the picture on an
+    # "Image: <path> (...)" line (tools.media_line). For a vision model we must turn that into a real
     # image the model can SEE — otherwise it "reads" the marker text and reports
     # the image as blank. Cloud endpoints reject a multimodal TOOL message, so we
     # stash the block here and ride it on a user turn after the tool loop.
@@ -2350,9 +2350,10 @@ async def _run_once(
                 # (view_image already returns a plain "I can't see images" note
                 # for a text-only model, so a marker here means vision is on.)
                 _tool_content: Any = model_result
-                if isinstance(model_result, str) and model_result.startswith("__JARVIS_IMAGE__"):
-                    _im = re.match(r"__JARVIS_IMAGE__\s+(.+?)\s+\(\d+\s+bytes", model_result)
-                    _ip = _im.group(1).strip() if _im else ""
+                from .tools import media_in as _media_in
+                _seen = _media_in(model_result) if isinstance(model_result, str) and name == "view_image" else []
+                if _seen and _seen[0][0] == "image":
+                    _ip = _seen[0][1]
                     if _ip and os.path.isfile(_ip):
                         try:
                             _url, _scale = image_for_model(_ip)
@@ -2361,8 +2362,7 @@ async def _run_once(
                                 # LM Studio / llama.cpp VLMs accept the image inline
                                 # in the tool result (OpenAI tool-calling path).
                                 _tool_content = [
-                                    {"type": "text", "text":
-                                     f"image loaded: {os.path.basename(_ip)} — look at it before describing.{_scale}"},
+                                    {"type": "text", "text": f"The picture {os.path.basename(_ip)}.{_scale}"},
                                     _block,
                                 ]
                             else:
@@ -2370,8 +2370,8 @@ async def _run_once(
                                 # builtin server's manual-tools rewrite stringifies
                                 # list content and loses it. Either way, ack here
                                 # and ride the image on a user turn after the loop.
-                                _tool_content = (f"Image captured ({os.path.basename(_ip)}). "
-                                                 f"It's attached in the next message — look and answer.{_scale}")
+                                _tool_content = (f"Opened {os.path.basename(_ip)}; the picture follows "
+                                                 f"in the next message.{_scale}")
                                 _pending_image_block = _block
                         except OSError:
                             pass
@@ -2421,7 +2421,7 @@ async def _run_once(
                 messages.append({
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Here's the image — look at it and answer."},
+                        {"type": "text", "text": "(Inglen, not the person: the picture the last step opened.)"},
                         _pending_image_block,
                     ],
                 })

@@ -181,6 +181,8 @@
   .steer-note .steer-who { display: block; font: 11.5px var(--sans); color: var(--fg-faint); margin-bottom: 2px; }
   .steer-note .steer-who em { font-style: normal; }
   .steer-note .steer-text { color: var(--fg); font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+  .step-pic { display: block; max-width: min(360px, 100%); max-height: 260px; margin-top: 8px; border-radius: 8px;
+              border: 1px solid var(--border); cursor: zoom-in; object-fit: contain; background: var(--bg-0); }
   .review-note { display: flex; align-items: flex-start; gap: 7px; margin: 4px 0 8px; font: 12.5px/1.45 var(--sans); color: var(--fg-dim); }
   .review-note svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
   .review-note.ask { color: var(--warn); }
@@ -7755,7 +7757,7 @@ function replayAssistant(msgDiv, m, body) {
       const t = makeToolCard(ev.name, ev.args || {});
       // Keep the green/red diff for file writes; the terse text result would
       // clobber it. Other tools show their result as before.
-      if (!t.div.classList.contains('has-diff')) t.body.textContent = ev.result || '';
+      if (!t.div.classList.contains('has-diff')) fillToolBody(t.body, ev.name, ev.result || '');
       if (t.div._askFill) { t.div._askFill(ev.result || ''); t.div.classList.remove('open'); }
       if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
       appendPart(t.div, msgDiv);
@@ -8667,6 +8669,28 @@ function makeSubagentCard(notif) {
 const _ICON_MAKER = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 2.1 3.2-.3.9 3.1 2.8 1.6-1.2 3 1.2 3-2.8 1.6-.9 3.1-3.2-.3L12 22l-2.4-2.1-3.2.3-.9-3.1-2.8-1.6 1.2-3-1.2-3 2.8-1.6.9-3.1 3.2.3z"/><path d="m8.5 12 2.4 2.4 4.6-4.8"/></svg>';
 const MEDIA_MAKERS = new Set(['generate_image', 'generate_video', 'check_video_task', 'forge_generate']);
 const _ICON_FOLDER = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+// A picture or video a tool names on a line of its own (tools.media_line):
+// "Image: <path> (305 KB, png)". Older chats have "__JARVIS_IMAGE__ <path> (n bytes, png)".
+function MEDIA_LINE_RE() {
+  return /^(?:__JARVIS_(IMAGE|VIDEO)__|(Image|Video):)[ \t]+([^\n]+?)(?:[ \t]+\(\d[\d.]*[ \t]*(?:bytes|[KMG]?B)\b[^)\n]*\))?[ \t]*$/gm;
+}
+// A step's detail: what came back, and for a picture the model opened, the picture.
+function fillToolBody(body, name, result) {
+  const text = String(result || '');
+  const pics = name === 'view_image' ? [...text.matchAll(MEDIA_LINE_RE())].filter(m => (m[1] || m[2]).toLowerCase() === 'image') : [];
+  // The lines naming pictures or videos aren't text to read: a made one shows in the
+  // chat, one the model opened shows here.
+  const said = text.replace(MEDIA_LINE_RE(), '').replace(/\n{3,}/g, '\n\n').trim();
+  body.textContent = said || (text.match(MEDIA_LINE_RE()) ? '' : text);
+  for (const m of pics) {
+    const path = m[3].trim(), img = document.createElement('img');
+    img.className = 'step-pic';
+    img.alt = img.title = path.split(/[\\/]/).pop();
+    img.src = '/file?path=' + encodeURIComponent(path);
+    img.onclick = (e) => { e.stopPropagation(); openLightbox(img.src, 'image', path); };
+    body.appendChild(img);
+  }
+}
 function makeMediaBlock(kind, path) {
   // Standalone media card - sits in the assistant's message stream (NOT
   // inside the tool card body). Survives re-render because it's keyed off
@@ -11665,23 +11689,23 @@ async function send(forced = null, displayAs = null, opts = {}) {
             if (!/^\s*(error|traceback)|exit code [1-9]|command failed/i.test(raw.slice(0, 400)))
               pendingTool.div.classList.remove('open');
           } else {
-            pendingTool.body.textContent = raw;
+            fillToolBody(pendingTool.body, pendingTool.div._toolName, raw);
           }
           if (pendingTool.div._askFill) pendingTool.div._askFill(raw);
         }
 
         // Detect media markers and surface them as a SEPARATE message-level
         // event + a live block under the tool card.
-        const mediaRe = /__JARVIS_(IMAGE|VIDEO)__\s+([^\n]+?)(?:\s+\(\d+\s+bytes[^)]*\))?$/gim;
+        const mediaRe = MEDIA_LINE_RE();
         let _firstMedia = true;
         // A picture or video a tool made goes in the chat; one the model only
         // looked at (a screenshot, an image it opened) stays in its step.
         const _made = MEDIA_MAKERS.has(pendingTool.div._toolName);
         for (const m of _made ? [...raw.matchAll(mediaRe)] : []) {
-          const kind = m[1].toLowerCase();
-          const path = m[2].trim();
-          // False positive: the marker appears INSIDE grepped/read source code
-          // (reading Inglen's own files, where "__JARVIS_IMAGE__ {path} (...)" is a
+          const kind = (m[1] || m[2]).toLowerCase();
+          const path = m[3].trim();
+          // False positive: the line appears INSIDE grepped/read source code
+          // (reading Inglen's own files, where "Image: {path} (...)" is a
           // literal code string) — that's not a real image. A real path has a
           // separator and no template braces or a "file.py:12:" grep prefix.
           if (/[{}]/.test(path) || !/[\\/]/.test(path) || /^[^\\/]*\.\w+:\d+:/.test(path)) continue;

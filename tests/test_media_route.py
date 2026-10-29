@@ -58,7 +58,7 @@ imagine._post_json = fake_post
 out = tools._generate_image({"prompt": "a lighthouse at dusk"})
 check(f"on a local model an image goes to the saved Grok key ({out.splitlines()[0][:70]})",
       bool(sent) and sent[0][0].startswith("https://api.x.ai/v1/") and sent[0][1] == "Bearer xai-saved-key")
-check("and is shown in the chat", "__JARVIS_IMAGE__" in out)
+check("and is shown in the chat", [k for k, _ in tools.media_in(out)] == ["image"] and "__JARVIS" not in out)
 
 sent.clear()
 v = imagine.start_video("waves rolling in")

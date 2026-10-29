@@ -6886,7 +6886,7 @@ class JarvisCLI:
                 "content": result,
             }
 
-            # If view_image returned the __JARVIS_IMAGE__ marker, decide based
+            # If view_image named a picture (tools.media_line), decide based
             # on whether the loaded model is vision-capable:
             #   - Vision model (id contains vl/vision/gemma-3/llava/moondream)
             #     → rewrite tool content as a multimodal block so the model
@@ -6895,75 +6895,52 @@ class JarvisCLI:
             #     the model EXPLICITLY that it can't describe images so it
             #     doesn't try (which used to stall for 80+ seconds or
             #     hallucinate generic "VS Code on left, terminals in middle")
-            if (
-                name == "view_image" and not denied
-                and isinstance(result, str)
-                and result.startswith("__JARVIS_IMAGE__")
-            ):
-                m = re.match(r"__JARVIS_IMAGE__\s+(.+?)\s+\(\d+\s+bytes", result)
-                if m:
-                    img_path = m.group(1).strip()
-                    if os.path.isfile(img_path):
-                        is_vision = self._is_vision_capable()
-                        if is_vision:
-                            try:
-                                from hearth.headless import image_for_model
-                                _url, _scale = image_for_model(img_path)
-                                image_block = {
-                                    "type": "image_url",
-                                    "image_url": {"url": _url},
-                                }
-                                if _is_local_endpoint(LOCAL_API_BASE):
-                                    # LM Studio VLMs accept the image inline in
-                                    # the tool result (tested path).
-                                    tool_msg["content"] = [
-                                        {"type": "text", "text": f"image loaded: {os.path.basename(img_path)} - look at it before describing"},
-                                        image_block,
-                                    ]
-                                else:
-                                    # Cloud OpenAI-compat (Gemini/OpenAI) reject
-                                    # multimodal content in a TOOL message - it
-                                    # has to ride a user turn. Ack here, attach
-                                    # the image as a user message after the loop.
-                                    tool_msg["content"] = (
-                                        f"Screenshot captured ({os.path.basename(img_path)}). "
-                                        f"The image is attached in the next message - "
-                                        f"look at it and answer."
-                                    )
-                                    self._pending_image_block = image_block
-                                self.last_image_path = img_path
-                            except OSError:
-                                pass
+            from hearth.tools import media_in as _media_in
+            _seen = _media_in(result) if (name == "view_image" and not denied and isinstance(result, str)) else []
+            img_path = _seen[0][1] if (_seen and _seen[0][0] == "image") else ""
+            if img_path and os.path.isfile(img_path):
+                self.last_image_path = img_path
+                if self._is_vision_capable():
+                    try:
+                        from hearth.headless import image_for_model
+                        _url, _scale = image_for_model(img_path)
+                        image_block = {"type": "image_url", "image_url": {"url": _url}}
+                        if _is_local_endpoint(LOCAL_API_BASE):
+                            # A local server takes the picture inline in the tool result.
+                            tool_msg["content"] = [
+                                {"type": "text", "text": f"The picture {os.path.basename(img_path)}.{_scale}"},
+                                image_block,
+                            ]
                         else:
-                            # Text-only model - replace marker with a clear
-                            # admission so model doesn't hallucinate or stall
-                            tool_msg["content"] = (
-                                f"Image saved at {img_path}. "
-                                f"The currently-loaded model ({self.current_model}) "
-                                f"is NOT vision-capable - you cannot actually see this image. "
-                                f"Do NOT describe what's in it (any description would be "
-                                f"made-up). Either: tell the user to switch to a vision "
-                                f"model (Gemma 3 vision, Qwen-VL, Llava, MiniCPM-V) and "
-                                f"re-ask, OR open the image for them with "
-                                f"open_app('{img_path}') so they can view it themselves."
-                            )
-                            self.last_image_path = img_path
+                            # Cloud endpoints refuse a picture in a tool message: it
+                            # goes on a turn of its own after the tool loop.
+                            tool_msg["content"] = (f"Opened {os.path.basename(img_path)}; the picture "
+                                                   f"follows in the next message.{_scale}")
+                            self._pending_image_block = image_block
+                    except OSError:
+                        pass
+                else:
+                    tool_msg["content"] = (
+                        f"The picture is at {img_path}, but the model in use ({self.current_model}) "
+                        f"can't see pictures, so nothing about what it shows can be said. Tell them, "
+                        f"and offer to open it for them (open_app with that path) or to switch to a "
+                        f"model that can see."
+                    )
 
             self.messages.append(tool_msg)
 
             # generate_image / generate_video / check_video_task → pop the
             # file open in the OS default viewer + show a clickable file:// path
             # so the CLI user has the same "look, here's the image" moment
-            # the GUI gets via inline render. Markers are __JARVIS_IMAGE__
-            # <path> and __JARVIS_VIDEO__ <path>.
+            # the GUI gets via inline render. The result names each on an
+            # "Image: <path>" or "Video: <path>" line (tools.media_in reads them).
             if (
                 name in ("generate_image", "generate_video", "check_video_task")
                 and not denied
                 and isinstance(result, str)
             ):
-                _media_re = re.compile(r"__JARVIS_(?:IMAGE|VIDEO)__\s+([^\n(]+?)(?:\s+\(|\s*$)", re.MULTILINE)
-                for _m in _media_re.finditer(result):
-                    _media_path = _m.group(1).strip().rstrip(")").rstrip()
+                from hearth.tools import media_in as _media_in
+                for _kind, _media_path in _media_in(result):
                     if _media_path and os.path.isfile(_media_path):
                         print(f"{C_FRAME}│ {C_OK}↳ saved:{C_RESET} {_media_path}")
                         # Open in the OS default viewer (image viewer / mp4 player).
@@ -7001,7 +6978,7 @@ class JarvisCLI:
             self.messages.append({
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Here is the screenshot you just captured - look at it and answer my question."},
+                    {"type": "text", "text": "(Inglen, not the person: the picture the last step opened.)"},
                     self._pending_image_block,
                 ],
             })
