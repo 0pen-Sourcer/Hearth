@@ -163,7 +163,9 @@ def model_id(chosen: str, effort: str, fast: bool, rows: Optional[List[Dict[str,
     if not row:
         return chosen
     if not row["id"]:
-        return ""
+        # Auto: Cursor's own "auto" model, named. Sending no --model ran whatever
+        # the Cursor CLI had saved last, which a free plan can refuse.
+        return row["model"]
     if effort and effort in row["ids"]:
         level = effort
     elif chosen in row["ids"].values() or chosen in row["fast_ids"].values():

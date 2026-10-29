@@ -7837,7 +7837,9 @@ function replayAssistant(msgDiv, m, body) {
     } else if (ev.kind === 'auto_review') {
       appendPart(makeReviewNote(ev.words, ev.verdict), msgDiv);
     } else if (ev.kind === 'error') {
-      appendPart(makeMeta(ev.text || 'error', 'err'), msgDiv);
+      const m = makeMeta(ev.text || 'error', 'err');
+      if (ev.switch && ev.switch.provider) m.appendChild(planSwitchButton(ev.switch));
+      appendPart(m, msgDiv);
     }
   }
   flushThink();
@@ -9453,7 +9455,8 @@ async function _mpRowsOf(key) {
     const chosen = (STATE.agentInfo && STATE.agentInfo.provider === id ? STATE.agentInfo.model : info.model) || '';
     return info.models.map(m => ({
       v: `agent::${id}::${m.id}`, t: m.label, cur: inUse && chosen === m.id,
-      s: [m.id ? '' : (m.model || ''), _fmtCtx(m.ctx), m.about && m.id ? m.about : ''].filter(Boolean).join(' · '),
+      s: [m.refused ? `Not on your ${m.refused} plan` : '', m.id ? '' : (m.model || ''), _fmtCtx(m.ctx),
+          m.about && m.id ? m.about : ''].filter(Boolean).join(' · '),
       from: `${AGENT_BRAINS[id]} · your ${AGENT_PLANS[id] || AGENT_BRAINS[id]} plan`,
       ico: `<span class="mp-ico ag" style="--hx:${h.c || 'var(--accent)'}">${harnessMark(h)}</span>` }));
   }
@@ -9808,6 +9811,24 @@ function agentBrainOn(id) {
   brainToast(name, `On your ${AGENT_PLANS[id] || name} plan. Helpers use your local model when one is loaded.`);
   applyBrainState();
   refreshModels();
+}
+// An agent's model wasn't on the person's plan: one tap back to its own default.
+function planSwitchButton(sw) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'btn-mini'; b.textContent = sw.label || 'Use Default';
+  b.style.cssText = 'display:block;margin-top:8px';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      await api('/api/brain/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ provider: sw.provider, model: sw.model || '' }) });
+      // The agent is the brain already; only its model changed, and the button says so.
+      loadAgentInfo(sw.provider);
+      applyBrainState();
+      b.textContent = (sw.label || 'Use Default').replace(/^Use /, 'Now on ');
+    } catch (e) { b.disabled = false; toast("Couldn't switch", e.message, 'err'); }
+  });
+  return b;
 }
 // The one message a brain switch ends with, whatever the brain.
 function brainToast(name, detail, kind = 'ok') {
@@ -12202,8 +12223,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
         b.addEventListener('click', () => mpOpen());
         _err.appendChild(b);
       }
+      if (ev.category === 'plan' && ev.switch && ev.switch.provider) _err.appendChild(planSwitchButton(ev.switch));
       chatBody.appendChild(_err);
-      assistantMsg.events.push({ kind: 'error', text: ev.message, pos: assistantMsg.content.length });
+      assistantMsg.events.push(Object.assign({ kind: 'error', text: ev.message, pos: assistantMsg.content.length },
+        ev.category === 'plan' && ev.switch ? { switch: ev.switch } : {}));
       // ALSO toast so the user can't miss it. The chat inline meta is small
       // and the user reported "no responses" when an auth failure was
       // actually being rendered in red - they just didn't see it because
@@ -12214,7 +12237,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
           ev.category === 'unreachable' ? 'Endpoint unreachable' :
             ev.category === 'rate_limit' ? 'Rate limited' :
               ev.category === 'quota' ? 'Out of usage' :
-                "The model didn't answer",
+                ev.category === 'plan' ? 'Not on your plan' :
+                  "The model didn't answer",
         ev.message || 'unknown',
         'err', 8000
       );

@@ -159,7 +159,7 @@ check("the level picked is put back into the id, spelled as Cursor lists it",
       and cur.model_id("gpt-5.5", "high", True, ms) == "gpt-5.5-high"
       and cur.model_id("gpt-5.5", "max", False, ms) == "gpt-5.5-medium"
       and cur.model_id("gpt-5.5-high", "", False, ms) == "gpt-5.5-high"
-      and cur.model_id("", "high", False, ms) == "")
+      and cur.model_id("", "high", False, ms) == "auto")
 real_chosen, real_effort = cb.chosen_model, cb.chosen_effort
 cb.chosen_model, cb.chosen_effort = (lambda p: "gpt-5.5"), (lambda: "low")
 turn("again", [])
