@@ -29,7 +29,9 @@ from . import voice as _voice
 # piece a clause once it is long enough to sound whole.
 _SENTENCE = re.compile(r"[.!?]+[\"')\]]*\s|\n\n")
 _CLAUSE = re.compile(r"[,;:]\s")
+_BREAK = re.compile(r"[,;:–-]\s")
 FIRST_CLAUSE = 24
+QUICK_START = 12
 
 TAP_LINE = "That one needs a tap on Allow."
 
@@ -80,6 +82,10 @@ class Call:
         self.leaving = False          # it said goodbye: the call ends once that has been heard
         self.ready = False
         self.turn = 0                 # the turn being spoken; a cut makes the one running go quiet
+        # How soon a reply starts to be heard: by default the first clause once it is long enough
+        # to sound whole; quick, at any clause break once a dozen letters are written (as the
+        # window's voice mode always has).
+        self.quick = False
         self._lock = threading.Lock()
 
     # ---------------------------------------------------------------- the voice out
@@ -267,6 +273,9 @@ class Call:
                 rest = self.reply[self.spoken:]
                 m = _SENTENCE.search(rest)
                 cut = m.end() if m else 0
+                if not cut and self.spoken == 0 and self.quick and len(rest) >= QUICK_START:
+                    ends = [c.end() for c in _BREAK.finditer(rest)]
+                    cut = ends[-1] if ends else 0
                 if not cut and self.spoken == 0 and len(rest) >= FIRST_CLAUSE:
                     c = None
                     for c in _CLAUSE.finditer(rest):

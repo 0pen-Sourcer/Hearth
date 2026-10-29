@@ -1535,6 +1535,7 @@ def _load_settings() -> Dict:
         "voice_stt": False,
         "sounds": True,        # a soft cue when a turn finishes, a low one on an error
         "voice_mic_hint_dismissed": False,  # first-voice mic tip, "don't show again"
+        "voice_window_call": True,   # window voice mode listens and speaks in the page (echo cancelled)
         "voice_half_duplex": False,  # hold the mic closed while speaking, for speakers
         "stt_device": "cpu",   # cpu / cuda
         "tts_device": "cpu",   # cpu / cuda / dml
@@ -2062,45 +2063,82 @@ def _window_turn_event(turn, kind: str, fields: Dict[str, Any]) -> None:
         print(f"[hearth.voice] window call: {type(e).__name__}: {e}", flush=True)
 
 
+_WIN_AWAY_S = 20                    # how long a call waits for its page to reconnect
+
+
+def _window_call_over(call, link) -> None:
+    """The window's call ends: its listener, the HUD, the mic for the wake word."""
+    global _WIN_CALL
+    call.end()
+    with _WIN_LOCK:
+        last = _WIN_CALL is call
+        if last:
+            _WIN_CALL = None
+    if link.pop("claimed", False):
+        try:
+            from .listen import release_mic
+            release_mic()
+        except Exception:
+            pass
+    if last:
+        _WIN_ASK.clear()
+        try:
+            from . import voice_overlay as _vo
+            _vo.stop()
+            if _voice:
+                _voice.set_voice_state("idle")
+        except Exception:
+            pass
+
+
 def _serve_window_call(ws) -> None:
-    """One window's voice call, until its page closes the socket."""
+    """One window's voice call, for as long as its page keeps it. A socket that
+    drops (a page reloading its connection, something on the PC cutting local
+    traffic) doesn't end the call: the page reconnects and takes the same call
+    back, with its listener still warm and the reply still being spoken."""
     global _WIN_CALL
     from .call import Call
-    mine: Dict[str, Any] = {"call": None}
+    link: Dict[str, Any] = {"ws": ws, "ready": False}
+    mine: Dict[str, Any] = {"call": None, "link": link}
 
-    def send(obj: Dict[str, Any]) -> None:
-        if obj.get("type") == "call.state" and obj.get("state") == "listening":
-            mine["ready"] = True
-        _window_hud(obj)
-        ws.send(json.dumps(obj, ensure_ascii=False))
+    def sender(lk):
+        def send(obj: Dict[str, Any]) -> None:
+            if obj.get("type") == "call.state" and obj.get("state") == "listening":
+                lk["ready"] = True
+            _window_hud(obj)
+            lk["ws"].send(json.dumps(obj, ensure_ascii=False))
+        return send
+
+    send = sender(link)
 
     def save(changed: Dict[str, Any]) -> None:
         _save_settings(changed)
 
-    def warming(call) -> None:
+    def warming(call, lk) -> None:
         """Until the call first listens: how far a first-run speech model download is,
         and a word if starting takes long (a missing part, a stalled download)."""
+        out = sender(lk)
         t0, last = time.time(), -1
         try:
             fetching = not _rt_voice.model_downloaded()
         except Exception:
             fetching = False
         if fetching:
-            send({"type": "call.warming", "detail": "downloading the speech model, first time only (a minute or two)…"})
+            out({"type": "call.warming", "detail": "downloading the speech model, first time only (a minute or two)…"})
         told = False
-        while not call.ended and not mine.get("ready") and time.time() - t0 < 1200:
+        while not call.ended and not lk.get("ready") and time.time() - t0 < 1200:
             if fetching:
                 pct = _rt_voice.download_progress()
                 if pct is not None and pct != last:
                     last = pct
-                    send({"type": "call.warming", "pct": pct,
-                          "detail": f"downloading the speech model, first time only · {pct}%"})
+                    out({"type": "call.warming", "pct": pct,
+                         "detail": f"downloading the speech model, first time only · {pct}%"})
             if not told and time.time() - t0 > 45:
                 told = True
-                send({"type": "call.slow", "message":
-                      "Voice is still starting. First run downloads a small speech model, which can take a "
-                      "minute. If it never starts, a voice component may be missing from this build - check "
-                      "hearth_window.log."})
+                out({"type": "call.slow", "message":
+                     "Voice is still starting. First run downloads a small speech model, which can take a "
+                     "minute. If it never starts, a voice component may be missing from this build - check "
+                     "hearth_window.log."})
             time.sleep(0.5)
 
     # Which mic the page should open: the one picked in Settings, never system sound.
@@ -2114,6 +2152,7 @@ def _serve_window_call(ws) -> None:
     hello["page_mic"] = sys.platform != "darwin"
     hello["windows"] = sys.platform == "win32"
     ws.send(json.dumps(hello, ensure_ascii=False))
+    left = False                        # the page ended the call, rather than its socket dropping
     try:
         while True:
             raw = ws.recv()
@@ -2134,18 +2173,48 @@ def _serve_window_call(ws) -> None:
                         except Exception:
                             pass
                 continue
+            if kind == "call.resume":
+                # The same page, back on a new socket: the call it had carries on.
+                ref = str(m.get("ref") or "")[:40]
+                cur = window_call()
+                if cur is not None and ref and cur.ref == ref:
+                    lk = cur._link
+                    lk["ws"] = ws
+                    mine["call"], mine["link"] = cur, lk
+                    link = lk
+                    send({"type": "call.resumed", "ref": ref})
+                    if lk.get("ready"):
+                        send({"type": "call.state", "state": "speaking" if cur.speaker.busy() else "listening"})
+                else:
+                    ws.send(json.dumps({"type": "call.gone", "ref": ref}))
+                continue
             if kind == "call.start":
                 call = Call(send, _window_said, cid=re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80],
                             save=save, ref=str(m.get("ref") or "")[:40])
+                call.quick = True               # speech starts at the first clause, as voice mode always has
+                call._link = link
                 with _WIN_LOCK:
                     old, _WIN_CALL = _WIN_CALL, call
                 for c in (old, mine["call"]):
                     if c is not None and c is not call:
-                        threading.Thread(target=c.end, daemon=True).start()
-                mine["call"], mine["ready"] = call, False
+                        threading.Thread(target=_window_call_over, args=(c, getattr(c, "_link", {})),
+                                         daemon=True).start()
+                mine["call"] = call
+                link["ready"] = False
                 _WIN_ASK.clear()
-                threading.Thread(target=call.start, daemon=True, name="window-call").start()
-                threading.Thread(target=warming, args=(call,), daemon=True, name="window-call-warm").start()
+
+                def begin(call=call, lk=link):
+                    # The wake word's listener lets go of the PC's mic while voice mode is on,
+                    # as it does for the PC's own listener.
+                    try:
+                        from .listen import claim_mic
+                        claim_mic(0.0)
+                        lk["claimed"] = True
+                    except Exception:
+                        pass
+                    call.start()
+                threading.Thread(target=begin, daemon=True, name="window-call").start()
+                threading.Thread(target=warming, args=(call, link), daemon=True, name="window-call-warm").start()
                 try:
                     from . import voice_overlay as _vo
                     _vo.start()                 # the HUD shows when the window isn't in front
@@ -2155,6 +2224,7 @@ def _serve_window_call(ws) -> None:
             if call is None:
                 continue
             if kind == "call.end":
+                left = True
                 break
             if kind == "call.hush":
                 threading.Thread(target=call.hush, daemon=True).start()
@@ -2164,22 +2234,21 @@ def _serve_window_call(ws) -> None:
                                                         str(lang) if lang is not None else None),
                                  daemon=True).start()
     finally:
-        call = mine["call"]
-        if call is not None:
-            call.end()
-            with _WIN_LOCK:
-                last = _WIN_CALL is call
-                if last:
-                    _WIN_CALL = None
-            if last:
-                _WIN_ASK.clear()
-                try:
-                    from . import voice_overlay as _vo
-                    _vo.stop()
-                    if _voice:
-                        _voice.set_voice_state("idle")
-                except Exception:
-                    pass
+        call, lk = mine["call"], mine["link"]
+        if call is not None and lk.get("ws") is ws:
+            if left:
+                _window_call_over(call, lk)
+            else:
+                print("[hearth.voice] voice mode's socket dropped; waiting for the page to come back", flush=True)
+
+                def away(call=call, lk=lk, gone=ws):
+                    end = time.time() + _WIN_AWAY_S
+                    while time.time() < end and lk.get("ws") is gone and not call.ended:
+                        time.sleep(0.25)
+                    if lk.get("ws") is gone and not call.ended:
+                        print("[hearth.voice] voice mode's page didn't come back; the call ends", flush=True)
+                        _window_call_over(call, lk)
+                threading.Thread(target=away, daemon=True, name="window-call-away").start()
         ws.close()
 
 

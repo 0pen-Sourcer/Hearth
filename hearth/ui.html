@@ -4694,6 +4694,13 @@
         </div>
         <div class="field">
           <div class="label">
+            <div class="name">Voice mode hears through the window</div>
+            <div class="hint">The window listens and speaks itself and cancels its own echo, so you can talk over it on speakers. Off: voice mode uses this PC's mic and speakers directly.</div>
+          </div>
+          <div class="switch" data-key="voice_window_call"></div>
+        </div>
+        <div class="field">
+          <div class="label">
             <div class="name">Speakers mode</div>
             <div class="hint">For voice in the terminal (/listen). Voice mode in the window cancels its own echo and doesn't need it. Turn it on if you use speakers and the terminal hears itself talking: it stops listening while it speaks, and to cut in you start with its name, like "<span data-agent-name>JARVIS</span>, stop".</div>
           </div>
@@ -17152,6 +17159,7 @@ $('voice-mode').addEventListener('keydown', (e) => {
 let winCall = null;
 
 function winCallCan() {
+  if (STATE.settings && STATE.settings.voice_window_call === false) return false;   // Settings > Voice
   return typeof CallAudio !== 'undefined' && CallAudio.can() && !!window.WebSocket && !!window.RTCPeerConnection;
 }
 
@@ -17221,7 +17229,7 @@ async function startWindowCall(A) {
   const hello = new Promise((res, rej) => {
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m.type === 'call.mic') res(m); else winCallFrame(c, m); };
     ws.onerror = () => rej(new Error('the PC did not answer'));
-    ws.onclose = () => { rej(new Error('the PC did not answer')); winCallClosed(c); };
+    ws.onclose = () => { rej(new Error('the PC did not answer')); winCallClosed(c, ws); };
   });
   let mic;
   try { mic = await hello; }
@@ -17342,14 +17350,34 @@ function winCallStop(c) {
   }
 }
 
-function winCallClosed(c) {
-  const was = winCall === c && c.live;
-  winCallStop(c);
-  // Dropped, not left: start again, the way the PC's own listener does.
-  if (was && voiceModeOn && !_rtUserStop && !_rtFailed) {
-    setVoiceStatus('restarting voice…');
-    setTimeout(() => { if (voiceModeOn && !winCall && !rtVoiceActive && !_rtUserStop) startRealtimeVoice().catch(() => {}); }, 700);
-  }
+function winCallClosed(c, ws) {
+  if (winCall !== c || c.ws !== ws || c.ended) return;     // an old socket, or the call already over
+  if (!c.live || !voiceModeOn || _rtUserStop) { winCallStop(c); return; }
+  // Dropped, not left (something on the PC can cut local connections): the same
+  // call again on a new socket. The PC keeps it, its listener warm, for a while.
+  winCallReconnect(c, 0);
+}
+
+function winCallReconnect(c, tries) {
+  if (winCall !== c || c.ended) return;
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/voice/call');
+  c.ws = ws;
+  ws.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'call.mic') { ws.send(JSON.stringify({ type: 'call.resume', ref: c.ref })); return; }
+    if (m.type === 'call.resumed') return;
+    if (m.type === 'call.gone') {                     // the PC let it go: a new call
+      winCallStop(c);
+      if (voiceModeOn && !_rtUserStop) startRealtimeVoice().catch(() => {});
+      return;
+    }
+    winCallFrame(c, m);
+  };
+  ws.onclose = () => {
+    if (winCall !== c || c.ws !== ws || c.ended) return;
+    if (tries < 30) setTimeout(() => winCallReconnect(c, tries + 1), 400);
+    else { winCallStop(c); setVoiceStatus('voice stopped'); }
+  };
 }
 
 function endWindowCall() {
