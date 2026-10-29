@@ -158,6 +158,7 @@ def forget_phone(pid: str) -> Dict[str, Any]:
 LIVE_EVERY = 0.1
 THINK_EVERY = 0.25
 PART = 150_000
+ICONS_WAIT_S = 8.0              # an icons answer waits this long; the rest go in "later"
 
 
 def split_message(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -305,24 +306,30 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         return memory_cards.act(str(m.get("kind") or ""), str(m.get("item") or ""), str(m.get("action") or ""))
     if what == "icons":
         # Brands' own marks by key and sites' icons by domain, as the window shows them.
+        # Fetched side by side; whatever isn't in within ICONS_WAIT_S is named in "later"
+        # and keeps fetching here (it is kept on disk), so one slow site can't make the
+        # phone's ask time out and lose the whole batch.
+        from concurrent.futures import ThreadPoolExecutor, wait
         from .web import _favicon
         from .brand_icons import brand_icon
-        out = {}
-        for key in [str(x) for x in (m.get("keys") or [])][:40]:
+        jobs = [("brand:" + k, brand_icon, k) for k in [str(x) for x in (m.get("keys") or [])][:40]]
+        jobs += [(d, _favicon, d) for d in [str(x) for x in (m.get("sites") or [])][:24]]
+        pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="icons")
+        futs = {pool.submit(fn, arg): name for name, fn, arg in jobs}
+        done, _ = wait(futs, timeout=ICONS_WAIT_S)
+        pool.shutdown(wait=False)
+        out, later = {}, []
+        for f, name in futs.items():
+            if f not in done:
+                later.append(name)
+                continue
             try:
-                icon = brand_icon(key)
+                icon = f.result()
             except Exception:
                 icon = None
             if icon:
-                out["brand:" + key] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
-        for site in [str(x) for x in (m.get("sites") or [])][:24]:
-            try:
-                icon = _favicon(site)
-            except Exception:
-                icon = None
-            if icon:
-                out[site] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
-        return {"icons": out}
+                out[name] = f"data:{icon[1]};base64,{base64.b64encode(icon[0]).decode()}"
+        return {"icons": out, "later": later}
     if what == "provider_models":
         # One saved provider's models, asked with its saved key, as the window's menu lists them.
         out = _window("POST", "/api/providers/models", {"id": str(m.get("id") or "")}, timeout=20)
