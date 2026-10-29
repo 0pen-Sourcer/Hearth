@@ -8041,6 +8041,22 @@ const _OFFER_ICO = {
   chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
   idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
 };
+// A change to the empty screen (its line, the rows under it) moves the mark in
+// the middle; it glides there with one spring instead of jumping in a frame.
+function _emptyKeepPlace(wrap, change) {
+  const parts = [...wrap.querySelectorAll(':scope > .empty-mark, :scope > .empty-title, :scope > .empty-sub')];
+  const before = parts.map(p => p.getBoundingClientRect().top);
+  change();
+  if (_reduceMotion() || !wrap.isConnected) return;
+  const sp = springEasing(0.8, 0.95);
+  parts.forEach((p, i) => {
+    if (!p.isConnected || !p.getClientRects().length) return;
+    const dy = before[i] - p.getBoundingClientRect().top;
+    if (Math.abs(dy) < 0.5) return;
+    p.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }],
+      { duration: sp.duration, easing: sp.easing, composite: 'add' });
+  });
+}
 let _offerRows = null, _offerAt = 0;
 async function drawOffers(wrap) {
   const box = wrap && wrap.querySelector('.empty-offers');
@@ -8051,9 +8067,11 @@ async function drawOffers(wrap) {
     catch { _offerRows = _offerRows || []; }
   }
   if (!box.isConnected || wrap.className !== 'empty') return;
-  box.innerHTML = _offerRows.slice(0, 3).map((r, i) =>
-    `<button type="button" class="empty-offer" data-i="${i}"><span class="eo-ico">${_OFFER_ICO[r.kind] || _OFFER_ICO.idea}</span>`
-    + `<span class="eo-text">${esc(r.text || '')}</span></button>`).join('');
+  _emptyKeepPlace(wrap, () => {
+    box.innerHTML = _offerRows.slice(0, 3).map((r, i) =>
+      `<button type="button" class="empty-offer" data-i="${i}"><span class="eo-ico">${_OFFER_ICO[r.kind] || _OFFER_ICO.idea}</span>`
+      + `<span class="eo-text">${esc(r.text || '')}</span></button>`).join('');
+  });
   box.querySelectorAll('.empty-offer').forEach(b => b.onclick = () => {
     const r = _offerRows[+b.dataset.i];
     if (!r) return;
@@ -14047,14 +14065,16 @@ function _refreshEmptyIfShown() {
       // The dot's breathing starts dim; it eases there from how bright it was.
       const dot = existing.querySelector('.empty-mark .hm-dot');
       const was = dot && getComputedStyle(dot).opacity;
-      existing.className = st.cls;
+      _emptyKeepPlace(existing, () => {
+        existing.className = st.cls;
+        const t = existing.querySelector('.empty-title');
+        const s = existing.querySelector('.empty-sub');
+        if (t) t.innerHTML = st.title;
+        if (s) s.innerHTML = st.sub;
+      });
       const now = dot && getComputedStyle(dot).opacity;
       if (dot && !_reduceMotion() && Math.abs(was - now) > 0.05)
         dot.animate([{ opacity: was }, { opacity: now }], { duration: 600, easing: 'cubic-bezier(.3, 0, .2, 1)' });
-      const t = existing.querySelector('.empty-title');
-      const s = existing.querySelector('.empty-sub');
-      if (t) t.innerHTML = st.title;
-      if (s) s.innerHTML = st.sub;
       drawOffers(existing);
     }
     return;

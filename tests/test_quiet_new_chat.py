@@ -49,9 +49,17 @@ port = srv.server_address[1]
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 with sync_playwright() as pw:
-    b = pw.chromium.launch()
+    # Edge on Windows, as the other window tests; the bundled Chromium elsewhere.
+    b = (pw.chromium.launch(channel="msedge", args=["--disable-gpu"]) if os.name == "nt"
+         else pw.chromium.launch())
     pg = b.new_page(viewport={"width": 1280, "height": 800})
-    pg.goto(f"http://127.0.0.1:{port}/")
+    for attempt in range(4):     # the first request on a fresh page can stall on Windows loopback
+        try:
+            pg.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded", timeout=15000)
+            break
+        except Exception:
+            if attempt == 3:
+                raise
     pg.wait_for_selector(".empty .empty-offer", timeout=30000)
     time.sleep(0.5)
     title = pg.inner_text(".empty .empty-title")
