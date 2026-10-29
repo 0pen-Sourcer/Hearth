@@ -280,6 +280,115 @@ def uninstall() -> int:
     return 0
 
 
+# ---- Linux: an XDG autostart entry ------------------------------------------
+# The desktop starts every entry in ~/.config/autostart at login (GNOME, KDE,
+# Xfce and the rest follow the freedesktop Desktop Application Autostart spec).
+
+def _autostart_desktop_path() -> str:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "autostart", "inglen.desktop")
+
+
+def linux_launch_command() -> list:
+    """What starts Inglen in the tray: the AppImage file itself (the running copy
+    is a temporary mount), else the installed program (.deb), else this checkout."""
+    appimage = os.environ.get("APPIMAGE", "")
+    if appimage and os.path.isfile(appimage):
+        return [appimage, "--background"]
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--background"]
+    return [sys.executable, "-m", "hearth.tray", "--background"]
+
+
+def _exec_quote(arg: str) -> str:
+    """One Exec argument as the Desktop Entry spec writes it: quoted where it
+    needs to be, with the quoting rule's escapes, then the string rule's (so a
+    literal backslash is four in the file)."""
+    if arg and not any(c in arg for c in ' \t\n"\'\\><~|&;$*?#()`%='):
+        return arg
+    out = ""
+    for c in arg:
+        out += "\\" + c if c in '"`$\\' else c
+    return ('"' + out + '"').replace("\\", "\\\\").replace("%", "%%")
+
+
+_STRING_ESCAPES = {"s": " ", "n": "\n", "t": "\t", "r": "\r", "\\": "\\"}
+
+
+def _exec_args(line: str) -> list:
+    """The arguments of an Exec line, read back the way a desktop reads them."""
+    import re
+    text = re.sub(r"\\(.)", lambda m: _STRING_ESCAPES.get(m.group(1), "\\" + m.group(1)), line)
+    args, cur, quoted, have, i = [], "", False, False, 0
+    while i < len(text):
+        c = text[i]
+        if quoted and c == "\\" and i + 1 < len(text) and text[i + 1] in '"`$\\':
+            cur += text[i + 1]
+            i += 2
+            continue
+        if c == '"':
+            quoted, have = not quoted, True
+        elif c in " \t" and not quoted:
+            if have:
+                args.append(cur)
+            cur, have = "", False
+        else:
+            cur += c
+            have = True
+        i += 1
+    if quoted:
+        return []
+    if have:
+        args.append(cur)
+    return [x.replace("%%", "%") for x in args]
+
+
+def _linux_entry() -> dict:
+    out = {}
+    try:
+        with open(_autostart_desktop_path(), encoding="utf-8") as f:
+            for ln in f:
+                k, sep, v = ln.strip().partition("=")
+                if sep and k not in out:
+                    out[k] = v
+    except OSError:
+        return {}
+    return out
+
+
+def _linux_autostart_enabled() -> bool:
+    e = _linux_entry()
+    if not e or e.get("Hidden", "").lower() == "true" or e.get("X-GNOME-Autostart-enabled", "").lower() == "false":
+        return False
+    args = _exec_args(e.get("Exec", ""))
+    # Truthful: an entry whose program has moved (an AppImage dragged elsewhere) starts nothing.
+    return bool(args) and os.path.isfile(args[0])
+
+
+def _linux_set_autostart(enabled: bool) -> bool:
+    path = _autostart_desktop_path()
+    if not enabled:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return _linux_autostart_enabled()
+    cmd = linux_launch_command()
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    lines = ["[Desktop Entry]", "Type=Application", "Name=Inglen",
+             "Exec=" + " ".join(_exec_quote(a) for a in cmd),
+             "Icon=inglen", "Terminal=false", "NoDisplay=true",
+             "X-GNOME-Autostart-enabled=true"]
+    if cmd[1:2] == ["-m"]:
+        lines.append("Path=" + here)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+    return _linux_autostart_enabled()
+
+
 def _startup_lnk_path() -> Optional[str]:
     _, startup = _windows_paths()
     return os.path.join(startup, "Hearth.lnk") if startup else None
@@ -287,6 +396,8 @@ def _startup_lnk_path() -> Optional[str]:
 
 def is_autostart_enabled() -> bool:
     """True if the tray is set to launch at login (Startup-folder shortcut present)."""
+    if sys.platform.startswith("linux"):
+        return _linux_autostart_enabled()
     p = _startup_lnk_path()
     return bool(p and os.path.isfile(p))
 
@@ -297,7 +408,10 @@ def set_autostart(enabled: bool) -> bool:
     Mirrors the target resolution in install(): prefer the packaged Hearth.exe,
     fall back to the dev venv `pythonw -m hearth.tray`. Disabling just removes the
     Startup-folder shortcut (this is the same entry Task Manager > Startup shows).
+    On Linux it is an XDG autostart entry.
     """
+    if sys.platform.startswith("linux"):
+        return _linux_set_autostart(enabled)
     p = _startup_lnk_path()
     if not p:
         return False
