@@ -6043,11 +6043,24 @@ def _start_memory_maintenance_loop(interval_s: int = 1800) -> None:
     threading.Thread(target=_loop, daemon=True).start()
 
 
+def _warm_imports() -> None:
+    """Load the cloud clients in the background, so the first turn doesn't wait
+    seconds for the import."""
+    def go():
+        for mod in ("openai", "anthropic", "hearth.anthropic_chat"):
+            try:
+                __import__(mod)
+            except Exception:
+                pass
+    threading.Thread(target=go, daemon=True, name="warm-imports").start()
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     """Start the server (non-blocking) and return the server instance.
     Used by hearth.desktop to embed the same backend in a PyWebView window."""
     server = _QuietHTTPServer((host, port), HearthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    _warm_imports()
     try:
         from . import claude_brain
         claude_brain.set_bridge_url(f"http://127.0.0.1:{server.server_address[1]}")

@@ -708,7 +708,9 @@ def resolve_context_tokens(model_id: str) -> tuple:
                 return int(_pi["ctx"]), "built-in server (loaded ctx)"
     except Exception:
         pass
-    probed = autodetect_context(model_id)
+    # A model server on this machine says what it loaded; a cloud provider doesn't,
+    # and asking the local server, the card and the disk for it cost a second a turn.
+    probed = autodetect_context(model_id) if provider_for(LOCAL_API_BASE) in ("local", "") else None
     if probed:
         return probed, "endpoint probe"
     # The provider's own model list, where it says (Anthropic, OpenRouter).

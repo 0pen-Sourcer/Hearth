@@ -211,9 +211,30 @@ def _is_the_program(path: str) -> bool:
     return _ANSWERS[key]
 
 
+# Where each agent was found, kept half a minute: every turn's instructions name
+# the installed agents, and looking all of them up on PATH took over a second.
+_FOUND: Dict[str, Any] = {}
+
+
+def forget_found() -> None:
+    """After an install or update, look again."""
+    _FOUND.clear()
+
+
 def find(aid: str) -> Optional[str]:
     """Where an agent's CLI is: on PATH, or where its installer or desktop app
     keeps it. With more than one, the first that answers as the program."""
+    import time as _t
+    key = (aid, os.environ.get("PATH") or "")
+    hit = _FOUND.get(aid)
+    if hit and hit[0] == key and _t.time() - hit[1] < 30:
+        return hit[2]
+    path = _find(aid)
+    _FOUND[aid] = (key, _t.time(), path)
+    return path
+
+
+def _find(aid: str) -> Optional[str]:
     spec = AGENTS.get(aid) or {}
     hits = _which_all(spec.get("exe") or [])
     if not hits:
@@ -448,6 +469,14 @@ def _end_job(aid: str, ok: bool, error: str = "", version: str = "") -> None:
 
 
 def update(aid: str) -> Dict[str, Any]:
+    forget_found()
+    try:
+        return _update(aid)
+    finally:
+        forget_found()
+
+
+def _update(aid: str) -> Dict[str, Any]:
     """Update one agent CLI through npm. Returns {ok, version} or {ok: False, error}."""
     package = NPM_PACKAGES.get(aid)
     if not package or aid not in AGENTS or not find(aid):
@@ -541,6 +570,14 @@ def missing() -> List[Dict[str, Any]]:
 
 
 def install(aid: str) -> Dict[str, Any]:
+    forget_found()
+    try:
+        return _install(aid)
+    finally:
+        forget_found()
+
+
+def _install(aid: str) -> Dict[str, Any]:
     """Install an agent with its maker's installer. Asked for by the person,
     from the setup dialog; never on its own."""
     how = SETUP.get(aid) or ({"npm": NPM_PACKAGES[aid]} if aid in NPM_PACKAGES and aid in AGENTS else None)
