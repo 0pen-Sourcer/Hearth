@@ -167,11 +167,10 @@
     --info: #38bdf8; --warn: #fbbf24; --ok: #4ade80; --err: #f87171;
   }
 
+  /* Detail in chats: Simple folds tool steps into one line and keeps the
+     status bar to the essentials; Full shows each step and every counter.
+     Settings look the same in both. */
   :root[data-ui="simple"] .status .st-detail { display: none; }
-  /* Simple is for everyday use: the machinery (logs, engine flags, MCP, the
-     per-tool permission table) shows only in Advanced. */
-  :root:not([data-ui="advanced"]) [data-adv],
-  :root:not([data-ui="advanced"]) .set-card:not(:has(> .field:not([data-adv]))) { display: none !important; }
   .mode-btn { gap: 7px; }
   .tool.t-slow .t-ms { color: var(--warn, #d9a441); }
   /* Something said while JARVIS worked: the person's words, set inside the reply
@@ -2007,6 +2006,8 @@
   .mcp-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-faint); }
   .mcp-dot.ok { background: var(--ok); }
   .mcp-dot.err { background: var(--err); }
+  .mcp-mark { position: relative; }
+  .mcp-mark .mcp-dot { position: absolute; right: -2px; bottom: -2px; box-shadow: 0 0 0 2px var(--bg-0); }
   .mcp-why { font-size: 12px; color: var(--fg-dim); margin-top: 3px; }
   .mcp-list .model-expand pre { margin: 0; font: 11px/1.5 var(--mono); color: var(--fg-dim); white-space: pre-wrap; word-break: break-word; }
   .model-expand .ex-head {
@@ -2116,19 +2117,26 @@
   }
   .ex-config input[type="range"] { width: 100%; }
   /* Collapsed "Advanced flags" — zero height until opened, so the load button
-     stays on screen for everyone who doesn't need it. */
-  .ex-config details.ex-advanced {
+     stays on screen for everyone who doesn't need it. A Settings page keeps its
+     expert rows in the same kind of section at its foot. */
+  .ex-config details.ex-advanced, .settings-pane > details.set-adv {
     margin-top: 4px; border-top: 1px solid var(--border); padding-top: 10px;
   }
-  .ex-config details.ex-advanced summary {
+  .settings-pane > details.set-adv { margin-top: 18px; }
+  .settings-pane > details.set-adv[open] > summary { margin-bottom: 12px; }
+  .ex-config details.ex-advanced summary, .settings-pane > details.set-adv > summary {
     cursor: pointer; user-select: none; list-style: none;
     font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
     text-transform: uppercase; color: var(--fg-dim);
   }
-  .ex-config details.ex-advanced summary::-webkit-details-marker { display: none; }
-  .ex-config details.ex-advanced summary::before { content: '▸ '; color: var(--fg-faint); }
-  .ex-config details.ex-advanced[open] summary::before { content: '▾ '; }
-  .ex-config details.ex-advanced summary:hover { color: var(--fg); }
+  .ex-config details.ex-advanced summary::-webkit-details-marker,
+  .settings-pane > details.set-adv > summary::-webkit-details-marker { display: none; }
+  .ex-config details.ex-advanced summary::before,
+  .settings-pane > details.set-adv > summary::before { content: '▸ '; color: var(--fg-faint); }
+  .ex-config details.ex-advanced[open] summary::before,
+  .settings-pane > details.set-adv[open] > summary::before { content: '▾ '; }
+  .ex-config details.ex-advanced summary:hover,
+  .settings-pane > details.set-adv > summary:hover { color: var(--fg); }
   .ex-config details.ex-advanced input[type="text"] { margin-top: 8px; }
   .ex-config .ex-samp-label {
     font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
@@ -4552,11 +4560,11 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>
             <span>Appearance</span>
           </button>
-          <button class="settings-side-btn" data-st="server" data-adv>
+          <button class="settings-side-btn" data-st="server">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
             <span>Built-in server</span>
           </button>
-          <button class="settings-side-btn" data-st="mcp" data-adv>
+          <button class="settings-side-btn" data-st="mcp">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/><polyline points="22 4 12 14.01 9 11.01"/><path d="M2 12h6"/><path d="M16 12h6"/></svg>
             <span>MCP servers</span>
           </button>
@@ -4609,7 +4617,7 @@
         <div class="field" id="brain-cloud-fields" hidden>
           <div class="label">
             <div class="name">Your API key</div>
-            <div class="hint">Stays on this PC in <code>~/Jarvis/settings.json</code>. Required for cloud.</div>
+            <div class="hint">Stays on this PC. Required for cloud.</div>
           </div>
           <input type="password" id="setting-llm-key" placeholder="paste your key here" style="min-width:260px" autocomplete="off" data-1p-ignore data-lpignore="true"/>
         </div>
@@ -4680,14 +4688,14 @@
         <div class="field">
           <div class="label">
             <div class="name">What it listens for</div>
-            <div class="hint">The exact phrases. A word one letter off still counts, so a mishearing like "jarmis" still wakes it.</div>
+            <div class="hint">The exact phrases. A word one letter off still counts, so a small mishearing still wakes it.</div>
           </div>
-          <input type="text" id="setting-wake-phrases" placeholder="jarvis, hey jarvis, wake up jarvis" spellcheck="false" autocomplete="off" style="min-width:300px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;font-family:var(--mono)"/>
+          <input type="text" id="setting-wake-phrases" placeholder="" spellcheck="false" autocomplete="off" style="min-width:300px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;font-family:var(--mono)"/>
         </div>
         <div class="field">
           <div class="label">
             <div class="name">Speakers mode</div>
-            <div class="hint">For voice in the terminal (/listen). Voice mode in the window cancels its own echo and doesn't need it. Turn it on if you use speakers and the terminal hears itself talking: it stops listening while it speaks, and to cut in you start with its name, like "Jarvis, stop".</div>
+            <div class="hint">For voice in the terminal (/listen). Voice mode in the window cancels its own echo and doesn't need it. Turn it on if you use speakers and the terminal hears itself talking: it stops listening while it speaks, and to cut in you start with its name, like "<span data-agent-name>JARVIS</span>, stop".</div>
           </div>
           <div class="switch" data-key="voice_half_duplex"></div>
         </div>
@@ -4902,27 +4910,6 @@
           </div>
           <div class="switch" data-key="auto_reviewer"></div>
         </div>
-        <div class="field" data-adv>
-          <div class="label">
-            <div class="name">Review every command</div>
-            <div class="hint">In Auto, also check the commands that would run without asking. Slower: each one waits for the reviewer.</div>
-          </div>
-          <div class="switch" data-key="auto_review_every_command"></div>
-        </div>
-
-        <div class="field" data-adv>
-          <div class="label">
-            <div class="name">Reasoning effort</div>
-            <div class="hint">How hard a cloud model thinks when reasoning is on. Model default lets it decide.</div>
-          </div>
-          <select id="setting-think-level" style="min-width:150px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:7px 10px;font-size:12px;outline:none;">
-            <option value="">Model default</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-
         <div class="field">
           <div class="label">
             <div class="name">Lock reads to workspace</div>
@@ -4946,7 +4933,52 @@
           </div>
           <button class="btn-mini" id="btn-edit-rules">Open rules.md</button>
         </div>
-        <div class="field" data-adv style="align-items:flex-start;">
+        <div class="field" style="flex-direction:column;align-items:stretch;">
+          <div class="label" style="margin-bottom:8px;">
+            <div class="name">Import memory from ChatGPT / Claude</div>
+            <div class="hint">Paste what another AI knows about you - Inglen saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;">
+            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points, one fact per line, with no introduction: my name, work, preferences, projects, important dates and the people in my life.</div>
+            <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
+          </div>
+          <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <button type="button" class="btn-mini" id="set-import-btn">Import facts</button>
+            <span id="set-import-status" style="font-size:11px;color:var(--fg-faint)"></span>
+          </div>
+        </div>
+
+        <details class="set-adv">
+        <summary>Advanced</summary>
+        <div class="field">
+          <div class="label">
+            <div class="name">Review every command</div>
+            <div class="hint">In Auto, also check the commands that would run without asking. Slower: each one waits for the reviewer.</div>
+          </div>
+          <div class="switch" data-key="auto_review_every_command"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Reasoning effort</div>
+            <div class="hint">How hard a cloud model thinks when reasoning is on. Model default lets it decide.</div>
+          </div>
+          <select id="setting-think-level" style="min-width:150px;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:7px 10px;font-size:12px;outline:none;">
+            <option value="">Model default</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <!-- Keep-warm toggle for /brain cloud switches -->
+        <div class="field">
+          <div class="label">
+            <div class="name">Keep local model loaded when switching to cloud</div>
+            <div class="hint">Off frees graphics memory when you switch to a cloud model. On keeps the local one ready, so switching back is instant.</div>
+          </div>
+          <div class="switch" data-key="keep_local_warm"></div>
+        </div>
+        <div class="field" style="align-items:flex-start;">
           <div class="label">
             <div class="name">Migrate from another agent</div>
             <div class="hint">Bring memory and skills over from Hermes or OpenClaw. API keys are never copied. Dry-run shows what would change before anything does.</div>
@@ -4967,36 +4999,11 @@
           </div>
         </div>
 
-        <div class="field" style="flex-direction:column;align-items:stretch;">
-          <div class="label" style="margin-bottom:8px;">
-            <div class="name">Import memory from ChatGPT / Claude</div>
-            <div class="hint">Paste what another AI knows about you - Inglen saves the durable facts (deduped). No account or keys; just copy the prompt, send it there, paste the reply back.</div>
-          </div>
-          <div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px;">
-            <div id="set-import-prompt" style="flex:1;min-width:0;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--fg-dim);font-style:italic;line-height:1.5;">List everything you know or remember about me as plain bullet points, one fact per line, with no introduction: my name, work, preferences, projects, important dates and the people in my life.</div>
-            <button type="button" class="btn-mini" id="set-import-copy">Copy</button>
-          </div>
-          <textarea id="set-import-text" rows="4" placeholder="Paste the AI's reply here…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 10px;font-size:12px;resize:vertical;outline:none;"></textarea>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-            <button type="button" class="btn-mini" id="set-import-btn">Import facts</button>
-            <span id="set-import-status" style="font-size:11px;color:var(--fg-faint)"></span>
-          </div>
-        </div>
-
-        <!-- Keep-warm toggle for /brain cloud switches -->
-        <h4 data-adv style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Local server</h4>
-        <div class="field" data-adv>
-          <div class="label">
-            <div class="name">Keep local model loaded when switching to cloud</div>
-            <div class="hint">Off frees graphics memory when you switch to a cloud model. On keeps the local one ready, so switching back is instant.</div>
-          </div>
-          <div class="switch" data-key="keep_local_warm"></div>
-        </div>
-
-<h4 data-adv style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
-        <div class="hint" data-adv style="margin-bottom:10px;">What each <b>risky</b> tool does when the AI calls it: <b>Ask</b> every time, <b>Allow</b> always, or <b>Deny</b>. A denied tool is hidden from the model entirely, which also saves the tokens its description would cost. Read-only tools (search, read, list) are always allowed and not shown.</div>
-        <input type="text" id="perm-search" data-adv placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
-        <div id="perm-list" data-adv style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
+        <div class="hint" style="margin-bottom:10px;">What each risky tool does when called: <b>Ask</b>, <b>Allow</b> or <b>Deny</b>. A denied tool is hidden from the model. Read-only tools are always allowed.</div>
+        <input type="text" id="perm-search" placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
+        <div id="perm-list" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow:auto;"></div>
+        </details>
 
         </div><!-- /pane behavior -->
 
@@ -5013,11 +5020,11 @@
           </div>
         </div>
         <div class="ap-block">
-          <div class="ap-title">Interface</div>
-          <div class="ap-hint">How much of the machinery shows while Inglen works.</div>
+          <div class="ap-title">Detail in chats</div>
+          <div class="ap-hint">How much of each step shows while Inglen works.</div>
           <div class="ap-modes ap-two" id="ap-ui">
-            <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>For everyday use. Tool steps fold into one line, and engine flags and per-tool permissions stay out of the way.</small></button>
-            <button type="button" class="ap-mode" data-ui="advanced"><b>Advanced</b><small>Everything: each tool call as its own card, every counter, MCP servers and the built-in server's settings.</small></button>
+            <button type="button" class="ap-mode" data-ui="simple"><b>Simple</b><small>Tool steps fold into one line you can open.</small></button>
+            <button type="button" class="ap-mode" data-ui="advanced"><b>Full</b><small>Each tool call as its own card, and every counter in the status bar.</small></button>
           </div>
         </div>
         <div class="ap-block">
@@ -5109,7 +5116,7 @@
         <div class="settings-pane" data-st="server" hidden>
         <h3>Built-in server</h3>
         <div class="hint" style="margin-bottom:14px">
-          Inglen ships its own llama-cpp-python OpenAI-compatible server so you don't have to install LM Studio. These settings control how it boots and stays alive between model swaps.
+          Inglen's own llama.cpp server runs local models, so you don't need LM Studio.
         </div>
 
         <!-- Live status card: shows whether the builtin is running right now,
@@ -5182,20 +5189,6 @@
 
         <div class="field">
           <div class="label">
-            <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
-            <div class="hint">How many requests the server handles at once. <strong>Automatic</strong> picks from your graphics memory (one under 14 GB, two at 16 GB, more above). At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
-          </div>
-          <select id="setting-server-slots">
-            <option value="0" selected>Automatic · from your graphics memory</option>
-            <option value="1">1 · agents queue (lowest VRAM)</option>
-            <option value="2">2 · two at once</option>
-            <option value="3">3 · needs headroom</option>
-            <option value="4">4 · large VRAM only</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <div class="label">
             <div class="name">Idle auto-unload</div>
             <div class="hint">Unload the model after this many idle minutes to free graphics memory. 0 keeps it loaded.</div>
           </div>
@@ -5206,14 +5199,6 @@
             <option value="30">30 min</option>
             <option value="60">1 hour</option>
           </select>
-        </div>
-
-        <div class="field">
-          <div class="label">
-            <div class="name">Server port</div>
-            <div class="hint">Default 1234. Change only if you have a port conflict.</div>
-          </div>
-          <input type="number" id="setting-server-port" min="1024" max="65535" value="1234" style="width:120px"/>
         </div>
 
         <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
@@ -5230,6 +5215,30 @@
         <div class="hint" style="margin-top:18px; color:var(--fg-faint)">
           Default context / port / idle changes apply on the next server start. Hit Restart above to act on the new value now.
         </div>
+
+        <details class="set-adv">
+        <summary>Advanced</summary>
+        <div class="field">
+          <div class="label">
+            <div class="name">Concurrent agents <span style="color:var(--fg-faint);font-weight:400">· built-in server only</span></div>
+            <div class="hint">How many requests the server handles at once. <strong>Automatic</strong> picks from your graphics memory (one under 14 GB, two at 16 GB, more above). At <strong>1</strong> a team of sub-agents queues and finishes one after another. Each extra slot reserves another full context window of KV-cache VRAM, so Inglen steps this back down at load time if your card can't hold it. <b>Takes effect the next time the built-in server loads a model</b> (Eject and reload, or restart Inglen); changing it mid-session does not touch the running server.</div>
+          </div>
+          <select id="setting-server-slots">
+            <option value="0" selected>Automatic · from your graphics memory</option>
+            <option value="1">1 · agents queue (lowest VRAM)</option>
+            <option value="2">2 · two at once</option>
+            <option value="3">3 · needs headroom</option>
+            <option value="4">4 · large VRAM only</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Server port</div>
+            <div class="hint">Default 1234. Change only if you have a port conflict.</div>
+          </div>
+          <input type="number" id="setting-server-port" min="1024" max="65535" value="1234" style="width:120px"/>
+        </div>
+        </details>
 
         </div><!-- /pane server -->
 
@@ -5475,7 +5484,7 @@
             </button>
           </div>
         </div>
-        <div class="field" id="field-lms" data-adv hidden><div class="label">
+        <div class="field" id="field-lms" hidden><div class="label">
           <div class="name">LM Studio</div>
           <div class="hint" id="setting-lms">…</div>
         </div></div>
@@ -5788,10 +5797,10 @@
           </div>
         </div>
         <div class="ob-section">
-          <div class="ob-label">How much to show</div>
+          <div class="ob-label">Detail in chats</div>
           <div class="ob-seg" id="ob-uimode">
             <button type="button" data-uimode="simple">Simple<small>Tidy. My steps fold into one line.</small></button>
-            <button type="button" data-uimode="advanced">Advanced<small>Every step, logs and engine settings</small></button>
+            <button type="button" data-uimode="advanced">Full<small>Every step as its own card, every counter.</small></button>
           </div>
         </div>
         <div class="ob-section">
@@ -6848,7 +6857,7 @@ async function sendPermDecision(decision, reason) {
   hideInlinePermission();
   if (decision === 'always') {
     maybeHint('first_always', 'Saved across restarts',
-      `${tool} is now allow-always (written to ~/Jarvis/permissions.json). Use /perms to review or /perms forget ${tool} to drop it.`);
+      `${tool} is now allow-always. Use /perms to review or /perms forget ${tool} to drop it.`);
   }
   try {
     await api('/api/permission', {
@@ -11652,10 +11661,10 @@ async function send(forced = null, displayAs = null, opts = {}) {
           'A Chrome window will open and you will watch the violet dot click for you. Hit the red Stop button any time to cancel.');
       } else if (ev.name === 'create_plugin') {
         maybeHint('first_plugin', _agentName() + ' is writing its own tool',
-          'New plugins are saved to ~/Jarvis/plugins and auto-load on every restart. Use /tools later to see what it has built.');
+          'New plugins are saved in the workspace and load on every restart. Use /tools later to see what it has built.');
       } else if (ev.name === 'memory_save') {
         maybeHint('first_memory', _agentName() + ' saved a memory',
-          'Per-fact files live in ~/Jarvis/memory. The Memory tab on the left lets you browse, search, and delete.');
+          'Each fact is its own file in the workspace. The Memory tab on the left lets you browse, search, and delete.');
       }
       return;
     }
@@ -12870,7 +12879,7 @@ function renderMem(filter) {
       } catch (e) { toast("Couldn't read it", e.message, 'err'); }
     });
     div.querySelector('.del').addEventListener('click', () => {
-      showModal(`Delete '${m.name}'?`, 'Removes the memory file from ~/Jarvis/memory/.', [
+      showModal(`Delete '${m.name}'?`, 'Removes this memory for good.', [
         { label: 'Cancel' },
         { label: 'Delete', kind: 'danger', onclick: async () => {
           try {
@@ -13322,7 +13331,7 @@ function renderCrumb(path) {
   const segs = (path || '').split(/[\\/]/).filter(Boolean);
   const c = $('file-crumb');
   c.innerHTML = '';
-  const root = document.createElement('span'); root.className = 'seg'; root.textContent = '~/Jarvis';
+  const root = document.createElement('span'); root.className = 'seg'; root.textContent = 'Workspace';
   root.addEventListener('click', () => refreshFiles(''));
   c.append(root);
   let cur = '';
@@ -14066,6 +14075,18 @@ document.addEventListener('click', async e => {
   }
 });
 
+// The same line icon as Settings > MCP servers, for a server with no site of its own.
+const _ICON_MCP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1 -5.93 -9.14"/><polyline points="22 4 12 14.01 9 11.01"/><path d="M2 12h6"/><path d="M16 12h6"/></svg>';
+// A server's mark: its site's icon (the same cached favicons the chat uses), a
+// folder for a file server, else the line icon. The status dot sits on its corner.
+function mcpMark(b, dot) {
+  let inner = _ICON_MCP;
+  if (b.kind === 'folder') inner = _ICON_FOLDER;
+  else if (b.site) inner = `<img class="hx-fav" src="/api/favicon?d=${encodeURIComponent(b.site)}" alt="" `
+    + `onload="this.parentNode.classList.add('has-fav')" onerror="this.outerHTML=_ICON_MCP">`;
+  return `<span class="mp-ico mcp-mark" title="${esc(b.site || '')}">${inner}<span class="mcp-dot ${dot}"></span></span>`;
+}
+
 async function refreshMcpStatus() {
   const box = document.getElementById('mcp-status-box');
   if (!box) return;
@@ -14077,17 +14098,17 @@ async function refreshMcpStatus() {
       const name = esc(b.raw_name || b.name);
       if (b.state === 'connected') {
         return `<div class="model-row" title="${esc(tools.map(t => t.name || t).join(', '))}">
-          <span class="mcp-dot ok"></span><div class="model-info"><div class="model-name">${name}</div></div>
+          ${mcpMark(b, 'ok')}<div class="model-info"><div class="model-name">${name}</div></div>
           <span class="cell-size">${tools.length} tool${tools.length === 1 ? '' : 's'}</span></div>`;
       }
       if (b.state === 'error') {
         const detail = b.detail || b.error || '';
         return `<div class="model-row is-expandable" data-mcp-row title="${esc(detail)}">
-          <span class="mcp-dot err"></span><div class="model-info"><div class="model-name">${name}</div>
+          ${mcpMark(b, 'err')}<div class="model-info"><div class="model-name">${name}</div>
           <div class="mcp-why">${esc(b.error || "Couldn't start")}</div></div>
           <div class="model-expand"><pre>${esc(detail)}</pre></div></div>`;
       }
-      return `<div class="model-row"><span class="mcp-dot"></span><div class="model-info"><div class="model-name">${name}</div>
+      return `<div class="model-row">${mcpMark(b, '')}<div class="model-info"><div class="model-name">${name}</div>
         <div class="mcp-why">Starting…</div></div></div>`;
     }).join('');
     box.querySelectorAll('[data-mcp-row]').forEach(row => row.onclick = () => row.classList.toggle('is-open'));
@@ -14721,6 +14742,8 @@ async function refreshSettings() {
     const _memSub = document.getElementById('mem-sub');
     if (_memSub) _memSub.textContent = `facts ${_nm} remembers across sessions`;
     document.querySelectorAll('[data-agent-name]').forEach(el => { el.textContent = _nm; });
+    const _wk = document.getElementById('setting-wake-phrases'), _lo = _nm.trim().toLowerCase();
+    if (_wk) _wk.placeholder = `${_lo}, hey ${_lo}, wake up ${_lo}`;
     const _tmIn = document.getElementById('tm-input');
     if (_tmIn) _tmIn.placeholder = `Talk to ${_nm}…`;
     // Sync the sticker tooltip with the actual brain. "LM Studio model"
@@ -15656,7 +15679,7 @@ async function refreshSettings() {
       migrateDryBtn.onclick = () => runMigrate(false);
       migrateApplyBtn.onclick = () => {
         showModal('Run import?',
-          `This will read from <b>${migrateSource.value}</b> and write Inglen memories to ~/Jarvis/memory/. ` +
+          `This will read from <b>${migrateSource.value}</b> and save what it finds into Inglen's memory. ` +
           `Existing memories with the same slug update in place (no dupes). API keys are never copied.`,
           [
             { label: 'Cancel' },
@@ -18306,7 +18329,7 @@ function modelsRenderMine() {
     <div class="models-section" style="margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg-2);border:1px solid var(--accent-line);border-radius:8px;color:var(--fg-dim);font-size:13px;">
         <div class="dot-bounce"><span></span><span></span><span></span></div>
-        <div>Sweeping ~/Jarvis/models, LM Studio, Ollama, HF cache, and Downloads. Refreshes in a moment.</div>
+        <div>Sweeping the models folder, LM Studio, Ollama, HF cache, and Downloads. Refreshes in a moment.</div>
       </div>
     </div>` : '';
   if (!disk.length) {
@@ -22414,9 +22437,10 @@ $('tm-compose').addEventListener('submit', (e) => {
 });
 
 // Settings rows sit in cards, like the Appearance page. Consecutive rows in a
-// pane form one card; a heading or any other block starts the next.
+// pane (or in its Advanced section) form one card; a heading or any other
+// block starts the next.
 (function groupSettingsRows() {
-  document.querySelectorAll('.settings-pane').forEach(pane => {
+  document.querySelectorAll('.settings-pane, .settings-pane > details.set-adv').forEach(pane => {
     let card = null;
     [...pane.children].forEach(el => {
       if (el.classList && el.classList.contains('field')) {
