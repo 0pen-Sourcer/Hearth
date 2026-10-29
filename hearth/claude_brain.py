@@ -327,6 +327,46 @@ def out_of_usage(agent: str, fields: Dict[str, Any]) -> Dict[str, Any]:
                 message=f"{name} is out of usage: {said.rstrip('.')}.")
 
 
+def _chosen_row(agent: str) -> str:
+    """The model row the agent was asked to use (the id the model menu shows)."""
+    chosen = chosen_model(agent)
+    if agent == "cursor-agent" and chosen:
+        from . import cursor_brain
+        row = cursor_brain.row_for(chosen)
+        chosen = row["id"] if row else chosen
+    return chosen
+
+
+def not_on_plan(agent: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    """An agent refusing the picked model because the plan doesn't include it says
+    so in a line, with the models it names and a one-tap way back to its default,
+    and the refusal is kept so the model menu marks that model."""
+    from . import plan_refusals
+    got = plan_refusals.parse(str(fields.get("message") or ""))
+    if not got:
+        return fields
+    chosen = _chosen_row(agent)
+    if chosen:
+        plan_refusals.remember(agent, chosen, got.get("plan") or "")
+    if not got.get("model") and chosen:
+        rows = {m.get("id"): m for m in (agent_models(agent).get("models") or [])}
+        got["model"] = (rows.get(chosen) or {}).get("label") or ""
+    default = "Auto" if any(n.lower() == "auto" for n in got.get("included") or []) else "Default"
+    return dict(fields, category="plan", message=plan_refusals.say(BRAINS.get(agent, "The agent"), got),
+                switch={"provider": agent, "model": "", "label": f"Use {default}"} if chosen else None)
+
+
+def _plan_answered(agent: str) -> None:
+    """A model that answered is on the plan now: its mark goes."""
+    try:
+        from . import plan_refusals
+        chosen = _chosen_row(agent)
+        if chosen and chosen in plan_refusals.refused(agent):
+            plan_refusals.forget(agent, chosen)
+    except Exception:
+        pass
+
+
 def note_claude_limits(ev: Dict[str, Any]) -> None:
     """Keep what a Claude Code rate_limit_event says about the plan's windows."""
     info = ev.get("rate_limit_info") or {}
@@ -496,6 +536,10 @@ def agent_models(provider: str) -> Dict[str, Any]:
         from . import cursor_brain
         row = cursor_brain.row_for(chosen, models)
         chosen = row["id"] if row else chosen
+    from . import plan_refusals
+    refused = plan_refusals.refused(provider)
+    if refused:
+        models = [dict(m, refused=refused[m.get("id")]) if m.get("id") in refused else m for m in models]
     return {"provider": provider, "label": BRAINS.get(provider, provider), "models": models,
             "model": chosen, "effort": chosen_effort(), "fast_on": fast_on(provider)}
 
@@ -1040,7 +1084,10 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         if kind == "done":
             fields["stats"] = priced(agent, fields.get("stats"))
         elif kind == "error":
-            fields = out_of_usage(agent, fields)
+            fields = not_on_plan(agent, out_of_usage(agent, fields))
+            heard["refused"] = heard.get("refused") or fields.get("category") == "plan"
+        if kind == "done" and not heard.get("refused") and fields.get("reason") == "finished":
+            _plan_answered(agent)
         _emit(kind, **fields)
 
     full = used_up(agent)
