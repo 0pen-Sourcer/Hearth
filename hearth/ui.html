@@ -2420,6 +2420,8 @@
   .mem-fact .mf-text p { margin: 0 0 8px; }
   .mem-fact .mf-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
                        margin-top: 14px; color: var(--fg-faint); font-size: 12px; }
+  .mem-fact .mf-meta .mf-src { color: var(--fg-dim); text-decoration: underline; text-underline-offset: 2px; }
+  .mem-fact .mf-meta .mf-src:hover { color: var(--accent); }
   .mem-fact .mf-meta .tag { font-size: 10px; padding: 2px 6px; border-radius: var(--r-sm); text-transform: uppercase;
                             letter-spacing: 0.5px; font-weight: 600; font-family: var(--mono); }
   /* Memory list row gets a left-border stripe matching its type. Makes
@@ -12709,11 +12711,25 @@ function memFactHTML(raw) {
                       return /^(Today|Yesterday|Tomorrow)$/.test(d) ? d.toLowerCase() : d; };
   const n = parseInt(fm.recall_count || '0', 10) || 0;
   const meta = [`<span class="tag ${tcls}">${esc(fm.type || 'fact')}</span>`];
-  if (when(fm.updated)) meta.push(`<span>Saved ${esc(when(fm.updated))}</span>`);
+  // Who saved it: noticed in a chat by the memory pass, or saved on purpose.
+  const noticed = /\bauto-extracted\b/.test(fm.tags || '');
+  const saved = when(fm.updated);
+  meta.push(`<span>${noticed ? 'Noticed on its own' : 'Saved on purpose'}${saved ? ', ' + esc(saved) : ''}</span>`);
   const lastUsed = fm.last_used || fm.last_recalled_at;
   meta.push(`<span>${n ? `Recalled ${n === 1 ? 'once' : n + ' times'}` : 'Not recalled yet'}${n && when(lastUsed) ? `, last ${esc(when(lastUsed))}` : ''}</span>`);
+  // The chat it came from, when that chat is still here: a link that opens it.
+  const src = (fm.source_chat || '').trim();
+  const chat = src && (STATE.conversations || []).find(c => c.id === src);
+  if (chat) meta.push(`<span>From <a href="#" class="mf-src" data-chat="${esc(src)}">${esc(chat.title || 'a chat')}</a></span>`);
   return `<div class="mem-fact"><div class="mf-text">${renderMD(text || '(empty)')}</div><div class="mf-meta">${meta.join('')}</div></div>`;
 }
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('.mf-src');
+  if (!a) return;
+  e.preventDefault();
+  $('modal').classList.remove('open');
+  openChatFromTray(a.dataset.chat).catch(() => {});
+});
 // "Going on": each chat's card that is still open, above the facts. The newest
 // go along with a new chat's first message. Each can be marked done or forgotten.
 let _latelySeq = 0;
