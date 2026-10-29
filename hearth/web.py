@@ -3725,7 +3725,10 @@ class HearthHandler(BaseHTTPRequestHandler):
                 if r.get("ok"):
                     import segno
                     buf = io.BytesIO()
-                    segno.make(r["link"], error="m").save(buf, kind="svg", scale=5, border=2, dark="#111", light="#fff")
+                    # A viewBox and no fixed size, so the code scales into its box whole, with
+                    # the quiet zone of four modules that scanners need.
+                    segno.make(r["link"], error="m").save(buf, kind="svg", scale=5, border=4, dark="#111",
+                                                          light="#fff", omitsize=True, xmldecl=False)
                     r["qr"] = buf.getvalue().decode("utf-8")
                     running, err = _spawn_bridge("relay")
                     if not running:

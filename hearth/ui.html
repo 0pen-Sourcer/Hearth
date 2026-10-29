@@ -5366,9 +5366,7 @@
         <div class="settings-pane" data-st="plus" hidden>
         <h3>Plus</h3>
         <p class="settings-sub" style="color:var(--fg-faint);font-size:12px;margin:-4px 0 14px;">
-          <span data-agent-name>JARVIS</span> on your phone through Inglen's relay: an app on your home screen, no bot to set up, risky steps
-          asked with Allow and Deny. Everything between this PC and the phone is end to end encrypted; the relay
-          only passes it along.
+          <span data-agent-name>JARVIS</span> on your phone, end to end encrypted.
         </p>
         <div id="plus-body"><div class="models-empty">Checking…</div></div>
         <div id="callme" hidden>
@@ -18540,9 +18538,8 @@ async function renderPlus() {
     } else if (p.state === 'waiting' && _plusQR) {
       html += `<div class="server-card" style="display:flex;gap:18px;align-items:center;padding:16px">
         <div class="plus-qr" style="background:#fff;border-radius:10px;padding:6px;line-height:0;width:220px;flex:none">${_plusQR.qr}</div>
-        <div><div style="font-weight:600;margin-bottom:6px">Scan this with your phone's camera</div>
-          <div style="color:var(--fg-dim);font-size:12.5px;line-height:1.5">The page that opens pairs your phone with this PC. Then both screens
-          show six numbers to compare. Add it to your home screen to keep it like an app.</div>
+        <div><div style="font-weight:600;margin-bottom:6px">Scan with your phone's camera</div>
+          <div style="color:var(--fg-dim);font-size:12.5px;line-height:1.5">Then check both screens show the same six numbers.</div>
           <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-mini" id="plus-copy">Copy the link</button>
           <button class="btn-mini" data-plus-cancel>Cancel</button></div></div></div>`;
     } else if (s.relay) {

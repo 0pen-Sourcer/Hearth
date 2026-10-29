@@ -124,6 +124,12 @@ with sync_playwright() as pw:
     pg.wait_for_selector("#plus-body svg", timeout=10000)
     pending = json.load(open(RB.STATE_FILE))["pending"]
     check("Pair a phone shows a QR code and starts the relay bridge", spawned == ["relay"] and pending.get("room"))
+    fit = pg.evaluate("""() => { const box = document.querySelector('.plus-qr'), svg = box.querySelector('svg');
+      const b = box.getBoundingClientRect(), d = svg.querySelector('path').getBoundingClientRect();
+      return { inside: d.left >= b.left && d.top >= b.top && d.right <= b.right + 0.5 && d.bottom <= b.bottom + 0.5,
+               square: Math.abs(d.width - d.height) < 1, view: !!svg.getAttribute('viewBox') }; }""")
+    check(f"the whole QR code is drawn inside its box, all three corner squares ({fit})",
+          fit["inside"] and fit["square"] and fit["view"])
     pg.screenshot(path=os.path.join(home, "plus_qr.png"))
 
     # A phone scans it: the PC learns its key and the six digits (as the relay bridge records them).
