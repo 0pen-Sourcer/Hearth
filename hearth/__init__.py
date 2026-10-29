@@ -1,7 +1,7 @@
 """Hearth — local-only tool layer for a personal AI assistant.
 
-Designed for use with LM Studio / Ollama / any OpenAI-compatible local API.
-No paid APIs, no cloud calls (except DuckDuckGo HTML for web search).
+Runs on its own built-in engine first; other local servers (LM Studio, Ollama,
+llama.cpp) and cloud providers work too.
 """
 
 # ---------------------------------------------------------------------------

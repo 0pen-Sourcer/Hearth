@@ -20,6 +20,7 @@ import os
 import subprocess
 import urllib.request
 from typing import Dict, List, Optional
+from .local_engine import local_base as _local_base
 
 # Hide the console flash on Windows subprocess calls (same flag the rest of the
 # codebase uses for nvidia-smi/tasklist).
@@ -82,7 +83,7 @@ def _vram_guidance(vram_gb: Optional[float]) -> str:
 
 def detect_models(endpoint: Optional[str] = None) -> List[str]:
     """Query the OpenAI-compatible server for its model ids. [] if unreachable."""
-    base = (endpoint or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    base = (endpoint or os.getenv("LOCAL_API_BASE", _local_base())).rstrip("/")
     _key = os.environ.get("LOCAL_API_KEY") or ""
     _hdr = {"Authorization": f"Bearer {_key}"} if _key else {}
     try:
@@ -204,7 +205,7 @@ def learn_environment(endpoint: Optional[str] = None, write: bool = True, detail
     if gpu.get("vram_gb"):
         gpu_str += f" ({gpu['vram_gb']:g}GB VRAM)"
     summary_bits.append(f"hardware ({gpu_str}, {ram_gb}GB RAM)")
-    base = (endpoint or os.getenv("LOCAL_API_BASE", "http://localhost:1234/v1")).rstrip("/")
+    base = (endpoint or os.getenv("LOCAL_API_BASE", _local_base())).rstrip("/")
     summary_bits.append(f"{len(models)} model(s)" if models else "no model server reachable")
     if write:
         try:

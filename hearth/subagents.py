@@ -35,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from .chat_call import chat_create
+from .local_engine import local_base as _local_base
 
 # Personas live as markdown files under hearth/subagents/<slug>.md. The
 # YAML-style frontmatter declares allowed_tools, cost_class, and a short
@@ -675,7 +676,7 @@ def route_for(on: str, model: str = "") -> Tuple[Optional[Tuple[str, str, str]],
                 return (hs["url"], "hearth-builtin", ""), ""
         except Exception:
             pass
-        return ("http://localhost:1234/v1", "hearth-builtin", ""), ""
+        return (_local_base(), "hearth-builtin", ""), ""
     from .headless import PROVIDERS, settle_model
     from .web import _provider_key, _saved_providers
     saved = [p["id"] for p in _saved_providers()]
@@ -721,8 +722,8 @@ def _route_for_cost_class(cost_class: str) -> Tuple[str, str, str]:
                         "anthropic.com", "openrouter.ai", "api.groq.com"))
         # Only divert a cloud parent to local when local is genuinely ready.
         # Otherwise keep the parent's cloud brain so the subagent still runs.
-        if is_cloud and _local_server_has_model("http://localhost:1234/v1"):
-            base = "http://localhost:1234/v1"
+        if is_cloud and _local_server_has_model(_local_base()):
+            base = _local_base()
             key = "hearth-builtin"
             model = ""  # let probe pick the loaded one
     return base, key, model
@@ -1455,7 +1456,7 @@ def _agent_for_helpers() -> Optional[str]:
             return None
     except Exception:
         pass
-    base = os.environ.get("LOCAL_API_BASE", "") or "http://localhost:1234/v1"
+    base = os.environ.get("LOCAL_API_BASE", "") or _local_base()
     try:
         from .headless import port_reachable
         if port_reachable(base) and _local_server_has_model(base):

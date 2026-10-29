@@ -5245,7 +5245,7 @@
             <div class="name">Server port</div>
             <div class="hint">Default 1234. Change only if you have a port conflict.</div>
           </div>
-          <input type="number" id="setting-server-port" min="1024" max="65535" value="1234" style="width:120px"/>
+          <input type="number" id="setting-server-port" min="1024" max="65535" value="8790" style="width:120px"/>
         </div>
         </details>
 
@@ -15781,8 +15781,9 @@ async function refreshSettings() {
       }; }
     if (idleSel) { idleSel.value = String(s.server_idle_min ?? 15);
       idleSel.onchange = (e) => saveSetting('server_idle_min', parseInt(e.target.value, 10)); }
-    if (portInput) { portInput.value = String(s.server_port || 1234);
-      portInput.onchange = (e) => saveSetting('server_port', parseInt(e.target.value, 10) || 1234); }
+    // 1234 was the engine's port before it had its own; it reads as the default now.
+    if (portInput) { portInput.value = String(s.server_port && s.server_port !== 1234 ? s.server_port : 8790);
+      portInput.onchange = (e) => saveSetting('server_port', parseInt(e.target.value, 10) || 8790); }
 
     // Voice status
     try {
