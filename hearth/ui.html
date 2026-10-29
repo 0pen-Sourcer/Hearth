@@ -812,6 +812,18 @@
     color: var(--fg-dim);
     animation: emptyFade .5s ease both;
   }
+  /* Ready: the mark and its line in the middle, the suggestions down by the box. */
+  .chat-body .empty::before { content: ''; flex: 1; }
+  .chat-body .empty .empty-offers { flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
+    gap: 2px; width: min(560px, 100%); }
+  .chat-body .empty .empty-sub:empty { display: none; }
+  .empty-offer { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0;
+    border-radius: 8px; background: transparent; color: var(--fg-dim); font: inherit; font-size: 13.5px;
+    text-align: left; cursor: pointer; }
+  .empty-offer:hover { background: var(--bg-2); color: var(--fg); }
+  .empty-offer .eo-ico { width: 16px; height: 16px; flex: none; color: var(--fg-faint); display: grid; place-items: center; }
+  .empty-offer .eo-ico svg { width: 15px; height: 15px; }
+  .empty-offer .eo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes emptyFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   /* The mark is the Nook: a bracket with a dot at home in it, drawn in three
      states. No model: a faint bracket and the dot as an empty ring, breathing
@@ -860,7 +872,7 @@
     .empty.idle-nomodel .empty-mark .hm-dot { opacity: .55; }
     .empty.booting .empty-mark:not(.has-pct) .hm-trace { stroke-dasharray: 100 300; stroke-dashoffset: 0; }
   }
-  .empty-title { color: var(--fg); font-size: 16px; font-weight: 500; }
+  .empty-title { color: var(--fg); font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
   .empty-sub { font-size: 13px; max-width: 480px; text-align: center; color: var(--fg-dim); }
   .examples {
     display: grid; grid-template-columns: repeat(2, 1fr);
@@ -7878,8 +7890,9 @@ function _computeEmptyState() {
   const cls = 'empty' + (ready ? '' : (loading ? ' booting loading' : (busy ? ' booting' : ' idle-nomodel')));
   let title, sub;
   if (ready) {
-    title = 'Inglen is ready.';
-    sub = 'AI agents that use your computer and work together, while you watch and steer.';
+    // One quiet line, in the name the assistant goes by here.
+    title = `What can ${esc(_agentName())} do for you?`;
+    sub = '';
   } else if (busy) {
     title = 'Getting Inglen ready…';
     sub = 'Starting up and finding your models. Just a moment.';
@@ -7936,8 +7949,40 @@ function emptyState() {
     <div class="empty-mark${_markPct == null ? '' : ' has-pct'}"><span class="hm-h"><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><path class="hm-trace" d="M16 40V22a6 6 0 0 1 6-6h18" pathLength="100" stroke="currentColor" stroke-width="6" stroke-linecap="round"${_markPctAttr()}/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg></div>
     <div class="empty-title">${st.title}</div>
     <div class="empty-sub">${st.sub}</div>
+    <div class="empty-offers" aria-label="Suggestions"></div>
   `;
+  drawOffers(wrap);
   return wrap;
+}
+
+// Under the empty chat, by the box: at most three rows, one line each, the chats
+// still going on first and then the reminder ideas (hearth/offers.py). Only
+// once something can think; nothing while it gets ready.
+const _OFFER_ICO = {
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
+  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+};
+let _offerRows = null, _offerAt = 0;
+async function drawOffers(wrap) {
+  const box = wrap && wrap.querySelector('.empty-offers');
+  if (!box) return;
+  if (wrap.className !== 'empty') { box.innerHTML = ''; return; }
+  if (!_offerRows || Date.now() - _offerAt > 60000) {
+    try { _offerRows = ((await api('/api/new-chat/offers')) || {}).rows || []; _offerAt = Date.now(); }
+    catch { _offerRows = _offerRows || []; }
+  }
+  if (!box.isConnected || wrap.className !== 'empty') return;
+  box.innerHTML = _offerRows.slice(0, 3).map((r, i) =>
+    `<button type="button" class="empty-offer" data-i="${i}"><span class="eo-ico">${_OFFER_ICO[r.kind] || _OFFER_ICO.idea}</span>`
+    + `<span class="eo-text">${esc(r.text || '')}</span></button>`).join('');
+  box.querySelectorAll('.empty-offer').forEach(b => b.onclick = () => {
+    const r = _offerRows[+b.dataset.i];
+    if (!r) return;
+    if (r.kind === 'chat' && r.chat) { _openChatById(r.chat); return; }
+    input.value = r.ask || r.text || '';
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+  });
 }
 
 // Track which subagent agent_ids we've already announced in-chat so the
@@ -13903,8 +13948,9 @@ function _refreshEmptyIfShown() {
         dot.animate([{ opacity: was }, { opacity: now }], { duration: 600, easing: 'cubic-bezier(.3, 0, .2, 1)' });
       const t = existing.querySelector('.empty-title');
       const s = existing.querySelector('.empty-sub');
-      if (t) t.textContent = st.title;
+      if (t) t.innerHTML = st.title;
       if (s) s.innerHTML = st.sub;
+      drawOffers(existing);
     }
     return;
   }
