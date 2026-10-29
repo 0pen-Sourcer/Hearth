@@ -457,10 +457,9 @@ def _did_you_mean(word: str, choices) -> str:
 
 
 def _read_brain_key(provider: str) -> str:
-    """Look up a saved cloud key: ~/Jarvis/brain_keys.json first (what /brain
-    writes, shaped {"<provider>": {"url": ..., "key": "<api-key>", "model": ...}}),
-    then the keys the window keeps in settings.json, so a key entered in either
-    place works in both. Returns '' if there is none for that provider."""
+    """Look up a saved cloud key: the keys kept in settings.json first (the window
+    and /brain both write there), then ~/Jarvis/brain_keys.json from before, so a
+    key replaced in either place is the one used in both. '' if there is none."""
     if not provider or provider in ("local", "lmstudio", "builtin"):
         return ""
     import json as _json
@@ -471,12 +470,10 @@ def _read_brain_key(provider: str) -> str:
                 return _json.load(f) or {}
         except Exception:
             return {}
-    key = (_file("brain_keys.json").get(provider) or {}).get("key", "")
-    if not key:
-        s = _file("settings.json")
-        if (s.get("llm_provider") or "").strip().lower() == provider:
-            key = s.get("llm_key") or ""
-        key = key or (s.get("provider_keys") or {}).get(provider, "")
+    s = _file("settings.json")
+    key = s.get("llm_key") or "" if (s.get("llm_provider") or "").strip().lower() == provider else ""
+    key = key or (s.get("provider_keys") or {}).get(provider, "")
+    key = key or (_file("brain_keys.json").get(provider) or {}).get("key", "")
     return str(key or "").strip()
 
 
@@ -2947,11 +2944,30 @@ class JarvisCLI:
                 except (OSError, _json.JSONDecodeError):
                     return {}
             def _save_keys(d: dict) -> None:
+                before = _load_keys()
                 try:
                     os.makedirs(WORKSPACE, exist_ok=True)
                     with open(keys_path, "w", encoding="utf-8") as f:
                         _json.dump(d, f, indent=2)
                 except OSError:
+                    pass
+                # The window keeps the same keys in settings.json: one set of keys,
+                # so a key replaced here isn't shadowed by the old one there.
+                try:
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        st = _json.load(f) or {}
+                    vault = dict(st.get("provider_keys") or {})
+                    for p, v in d.items():
+                        if isinstance(v, dict) and v.get("key"):
+                            vault[p] = v["key"]
+                    for p in set(before) - set(d):
+                        vault.pop(p, None)
+                    st["provider_keys"] = vault
+                    tmp = settings_path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        _json.dump(st, f, indent=2)
+                    os.replace(tmp, settings_path)
+                except (OSError, ValueError):
                     pass
 
             parts = cmd.split(None, 2)
