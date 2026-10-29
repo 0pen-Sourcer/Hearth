@@ -4136,6 +4136,8 @@
   .voice-ask button:hover { color: var(--fg); border-color: var(--fg-faint); }
   .voice-ask button.yes { color: var(--accent); border-color: var(--accent-line); }
   .voice-ask button.yes:hover { border-color: var(--accent); }
+  .voice-ask.quiet { gap: 6px; }
+  .voice-ask.quiet button { font-size: 11px; padding: 4px 10px; border-radius: 6px; background: transparent; opacity: .85; }
   .voice-bottom-text {
     color: var(--fg-faint);
     font-size: 11px;
@@ -4148,7 +4150,8 @@
   .voice-mode .vset-btn:hover, .voice-mode .vset-btn.on { color: var(--fg); border-color: var(--border-strong); }
   .vset { position: absolute; top: 64px; right: 18px; width: 340px; max-height: calc(100vh - 96px); overflow-y: auto;
     background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: 14px; padding: 6px 10px 12px;
-    box-shadow: 0 12px 40px rgba(0,0,0,.28); z-index: 2; animation: vsetIn .18s var(--ease); scrollbar-width: thin; }
+    box-shadow: 0 12px 40px rgba(0,0,0,.28); z-index: 2; animation: vsetIn .18s var(--ease); scrollbar-width: thin;
+    font-family: var(--sans); text-align: left; }
   @keyframes vsetIn { from { opacity: 0; transform: translateY(-4px); } }
   .vset .sec { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-faint);
     margin: 14px 4px 6px; }
@@ -4168,7 +4171,7 @@
     color: var(--fg-dim); font: inherit; font-size: 12.5px; cursor: pointer; }
   .vset .seg button:hover { color: var(--fg); }
   .vset .seg button.on { background: var(--accent-bg); border-color: var(--accent-line); color: var(--fg); }
-  .vset .meta { font-size: 12.5px; color: var(--fg-dim); padding: 4px 4px 6px; line-height: 1.4; }
+  .vset .meta { font: 12.5px/1.4 var(--sans); text-align: left; color: var(--fg-dim); padding: 4px 4px 6px; }
 </style>
 </head>
 <body>
@@ -5984,7 +5987,7 @@
   <div class="voice-status-text" id="voice-status-text">idle</div>
   <div class="voice-transcript" id="voice-transcript"></div>
   <div class="voice-ask" id="voice-fix" hidden><button id="voice-fix-open" class="yes">Open microphone settings</button></div>
-  <div class="voice-ask" id="voice-ask" hidden>
+  <div class="voice-ask quiet" id="voice-ask" hidden>
     <button id="voice-ask-yes" class="yes">Allow</button>
     <button id="voice-ask-no">Deny</button>
   </div>
@@ -6919,8 +6922,11 @@ function showInlinePermission(reqId, toolName, args, why, aloud, tap) {
   // the minimal grid+text aesthetic, and a spoken yes/no answers it.
   // Voice mode: the agent asks in its own words (its reply is spoken), so nothing is
   // read out here. Allow and Deny stay on screen; a clear spoken yes or no answers.
+  // Voice mode is for talking: no buttons for what a clear spoken yes or no answers.
+  // Only a step that needs a click (a misheard yes could delete or send something)
+  // gets a small, quiet Allow and Deny.
   if (voiceModeOn) {
-    $('voice-ask').hidden = false;
+    $('voice-ask').hidden = !tap;
     if (!pendingPermAloud) {
       setVoiceStatus('needs permission');
       setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?' + (tap ? '  This one needs a click on Allow.' : ''));
@@ -17173,6 +17179,20 @@ async function vsetDraw() {
       + (v.languages || []).map(l => `<button data-lang="${esc(l.code)}" class="${l.code === (v.language || '') ? 'on' : ''}">${esc(l.name)}</button>`).join('')
       + '</div>';
   }
+  if (v) {
+    // Where it listens and with which model: changed live, it listens again at once.
+    const dev = v.stt_device || 'cpu', mdl = v.stt_model || '';
+    const en = mdl.endsWith('.en');
+    html += '<div class="sec">Listening runs on</div><div class="seg">'
+      + [['cuda', 'Auto'], ['gpu', 'Graphics card'], ['cpu', 'Processor']].map(([k, n]) =>
+          `<button data-dev="${k}" class="${dev === k ? 'on' : ''}">${n}</button>`).join('') + '</div>';
+    html += `<div class="meta">${dev === 'cuda' ? 'The graphics card when it has room, else the processor with a quicker model.' : dev === 'gpu' ? 'Always the graphics card, even beside a local model.' : 'Always the processor.'}${v.listening ? ' Now: ' + esc(v.listening.replace(' cuda', ' on the graphics card').replace(' cpu', ' on the processor')) + '.' : ''}</div>`;
+    html += '<div class="sec">Speech model</div><div class="seg">'
+      + [['tiny', 'Tiny'], ['base', 'Base'], ['small', 'Small']].map(([k, n]) => {
+          const id = en ? k + '.en' : k;
+          return `<button data-mdl="${id}" class="${mdl === id ? 'on' : ''}">${n}</button>`;
+        }).join('') + '</div>';
+  }
   html += '<div class="sec">Sound</div>';
   const outs = await _vsetOutputs();
   if (outs) {
@@ -17191,6 +17211,8 @@ async function vsetDraw() {
   if (vb) vb.onclick = () => { _vsetVoicesOpen = !_vsetVoicesOpen; vsetDraw(); };
   body.querySelectorAll('[data-voice]').forEach(b => b.onclick = () => vsetPick({ voice: b.dataset.voice }));
   body.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => vsetPick({ language: b.dataset.lang }));
+  body.querySelectorAll('[data-dev]').forEach(b => b.onclick = () => vsetPick({ stt_device: b.dataset.dev }));
+  body.querySelectorAll('[data-mdl]').forEach(b => b.onclick = () => vsetPick({ stt_model: b.dataset.mdl }));
   body.querySelectorAll('[data-out]').forEach(b => b.onclick = async () => {
     try { await winCall.A.loop.el.setSinkId(b.dataset.out); } catch { toast("That speaker can't be used from here", '', 'warn'); }
     vsetDraw();
@@ -17198,23 +17220,29 @@ async function vsetDraw() {
   $('vs-tones').onclick = async () => { await saveSetting('voice_tones', !tones); vsetDraw(); };
 }
 
-// A voice or a language picked here: in a call the PC changes it (and listens again
-// in a new language); without one it is saved and the listener reloads.
+// Something picked here, applied without leaving voice mode: in the window's call the
+// PC changes it and listens again; on the PC's own mic it is saved and listening
+// starts again with it.
 async function vsetPick(change) {
   const v = (winCall && winCall.voice) || _vsetChoices;
   if (v) {
     if (change.voice) { v.voice = change.voice; _vsetVoicesOpen = false; }
-    if (change.language !== undefined) v.language = change.language;
+    for (const k of ['language', 'stt_device', 'stt_model']) if (change[k] !== undefined) v[k] = change[k];
   }
   vsetDraw();
   if (change.voice) STATE.settings.voice_name = change.voice;
   if (change.language !== undefined) STATE.settings.stt_language = change.language;
+  if (change.stt_device) STATE.settings.stt_device = change.stt_device;
+  if (change.stt_model) STATE.settings.stt_model = change.stt_model;
   if (winCall && winCall.ws && winCall.ws.readyState === 1) { winCallSend({ type: 'call.set', ...change }); return; }
   try {
     if (change.voice) await saveSetting('voice_name', change.voice);
-    if (change.language !== undefined) {
-      await saveSetting('stt_language', change.language);
-      if (voiceModeOn) await api('/api/voice/reload', { method: 'POST' });
+    if (change.language !== undefined) await saveSetting('stt_language', change.language);
+    if (change.stt_device) await saveSetting('stt_device', change.stt_device);
+    if (change.stt_model) await saveSetting('stt_model', change.stt_model);
+    if (voiceModeOn && (change.language !== undefined || change.stt_device || change.stt_model)) {
+      await stopRealtimeVoice().catch(() => {});
+      if (voiceModeOn) startRealtimeVoice().catch(() => {});
     }
   } catch (e) { toast('Voice', e.message, 'err'); }
 }

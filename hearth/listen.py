@@ -559,7 +559,7 @@ def set_device(device: str) -> str:
     to whatever device it loaded on at import."""
     global DEVICE, _model
     device = (device or "cpu").strip().lower()
-    if device not in ("cpu", "cuda"):
+    if device not in ("cpu", "cuda", "gpu"):
         return f"STT device must be 'cpu' or 'cuda' (got {device!r})"
     with _load_lock:
         DEVICE = device
@@ -626,6 +626,8 @@ def _try_load_model():
         _explicit = _env.get("STT_DEVICE")
         if _explicit:
             _device_now = _explicit.strip().lower()
+            if _device_now == "gpu":            # "always the card" in voice mode's own setting
+                _device_now = "cuda"
         elif cuda_available():
             _device_now = "cuda"
         else:

@@ -298,7 +298,7 @@ def _stt_device() -> tuple:
     processor with 8-bit weights, which is several times faster there than the
     float32 the model falls back to on its own."""
     want = (_env.get("STT_DEVICE") or "cpu").lower()
-    if want == "cuda" and _cudnn_present():
+    if want in ("cuda", "gpu") and _cudnn_present():
         try:
             import ctranslate2  # type: ignore
             if ctranslate2.get_cuda_device_count() > 0:
@@ -355,9 +355,12 @@ def stt_plan() -> Dict[str, str]:
     tiny 0.7 s, tiny.en 0.45 s, and the local model kept its speed."""
     size = _model_size()
     device, compute = _stt_device()
+    want = (_env.get("STT_DEVICE") or "cpu").lower()
     if device != "cuda":
         return {"model": size, "device": device, "compute": compute, "why": "chosen" if
-                (_env.get("STT_DEVICE") or "cpu").lower() != "cuda" else "no usable graphics card"}
+                want not in ("cuda", "gpu") else "no usable graphics card"}
+    if want == "gpu":                           # the card, whatever else is on it
+        return {"model": size, "device": "cuda", "compute": compute, "why": "chosen"}
     free = _free_vram_mib()
     need = GPU_MIB.get(_family(size), 900) + GPU_MIB["tiny"] + GPU_SPARE_MIB
     if free is None or free >= need:

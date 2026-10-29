@@ -141,7 +141,7 @@ async def fake_run_once(prompt, emit=None, should_cancel=None, **kw):
 
 web.run_once = fake_run_once
 web._detect_loaded = lambda: {"id": "stand-in"}
-web._save_settings(dict(web._load_settings(), onboarded=True, voice_mic_hint_dismissed=True, ui_theme="dark", ui_accent="sage",
+web._save_settings(dict(web._load_settings(), onboarded=True, voice_mic_hint_dismissed=True, voice_window_call=True, ui_theme="dark", ui_accent="sage",
                         voice_input_name="Fake Default Audio Input", voice_half_duplex=True))
 os.environ["HEARTH_VOICE_INPUT_NAME"] = "Fake Default Audio Input"
 

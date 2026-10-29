@@ -244,7 +244,7 @@ c2.begin()
 c2.live("Mount Everest is the tallest mountain above sea level — its summit sits at about 8,849 metres "
         "(29,032 feet), a figure confirmed by China and Nepal in 2020.\n\nIf you mean")
 check(f"a long opening sentence starts with its first part ({pieces[:1]})",
-      bool(pieces) and len(pieces[0]) <= 70)
+      bool(pieces) and len(pieces[0]) <= 40)
 pieces.clear()
 c2.begin()
 c2.live("Sure thing. ")

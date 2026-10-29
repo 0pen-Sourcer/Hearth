@@ -58,7 +58,9 @@ class Recorder:
 
 rv._REALTIME_AVAILABLE = True
 rv.model_downloaded = lambda size="": True
-rv._build_recorder = lambda sess=None: Recorder()
+BUILT: list = []
+rv._build_recorder = lambda sess=None: BUILT.append(sess) or Recorder()
+rv._mic_index = lambda: None
 VO.start = VO.stop = lambda: None
 V.list_voices = lambda: ["af_heart", "am_michael", "bf_emma", "hf_alpha"]
 web._save_settings(dict(web._load_settings(), onboarded=True, voice_mic_hint_dismissed=True,
@@ -99,7 +101,7 @@ with sync_playwright() as pw:
     pg.wait_for_function("() => !!document.querySelector('#voice-set-body [data-lang]')", timeout=10000)
     secs = pg.eval_on_selector_all("#voice-set-body .sec", "els => els.map(e => e.textContent)")
     check(f"the sheet has the call sheet's sections ({secs})",
-          secs == ["Voice", "Language you speak", "Sound", "Tones"])
+          secs == ["Voice", "Language you speak", "Listening runs on", "Speech model", "Sound", "Tones"])
     check("it shows the voice picked on the PC", "Heart" in pg.inner_text("#vs-voice"))
     for theme in ("dark", "light"):
         pg.evaluate(f"() => {{ document.documentElement.dataset.theme = '{theme}'; }}")
@@ -127,10 +129,41 @@ with sync_playwright() as pw:
     while time.time() < end and saved("voice_tones") is not False:
         time.sleep(0.1)
     check("the tones can be turned off", saved("voice_tones") is False)
+    # Where it listens and with which model: changed live, it listens again without leaving voice mode.
+    n0 = len(BUILT)
+    pg.click("#voice-set-body [data-dev='cpu']")
+    end = time.time() + 15
+    while time.time() < end and not (saved("stt_device") == "cpu" and len(BUILT) > n0):
+        time.sleep(0.1)
+    check(f"listening moved to the processor live ({saved('stt_device')}, listener rebuilt {len(BUILT) - n0}x)",
+          saved("stt_device") == "cpu" and len(BUILT) > n0 and pg.evaluate("() => voiceModeOn"))
+    n0 = len(BUILT)
+    pg.click("#voice-set-body [data-mdl^='tiny']")
+    end = time.time() + 15
+    while time.time() < end and not (str(saved("stt_model")).startswith("tiny") and len(BUILT) > n0):
+        time.sleep(0.1)
+    check(f"and to the tiny model ({saved('stt_model')})", str(saved("stt_model")).startswith("tiny") and len(BUILT) > n0)
+    pg.click("#voice-set-body [data-dev='cuda']")
+    pg.wait_for_timeout(800)
+    if SHOTS:
+        pg.screenshot(path=os.path.join(SHOTS, "voice_sheet_listening_dark.png"))
     pg.keyboard.press("Escape")
     pg.wait_for_timeout(300)
     check("Esc closes the sheet and stays in voice mode",
           pg.evaluate("() => document.getElementById('voice-set-sheet').hidden && voiceModeOn"))
+    # Approvals in voice mode: no buttons for what a spoken yes or no answers; a small quiet
+    # pair only for a step that needs a click.
+    pg.evaluate("() => showInlinePermission('p1', 'run_command', {command: 'nvidia-smi'}, '', true, false)")
+    check("a step a spoken yes may answer shows no buttons", pg.evaluate("() => document.getElementById('voice-ask').hidden"))
+    pg.evaluate("() => hideInlinePermission()")
+    pg.evaluate("() => showInlinePermission('p2', 'delete_path', {path: 'C:/x/notes'}, '', true, true)")
+    check("one that needs a click shows a small quiet Allow and Deny",
+          pg.evaluate("() => !document.getElementById('voice-ask').hidden && document.getElementById('voice-ask').classList.contains('quiet')"))
+    for theme in ("dark", "light"):
+        pg.evaluate(f"() => {{ document.documentElement.dataset.theme = '{theme}'; }}")
+        pg.wait_for_timeout(300)
+        if SHOTS:
+            pg.screenshot(path=os.path.join(SHOTS, f"voice_tap_{theme}.png"))
     b.close()
 srv.shutdown()
 

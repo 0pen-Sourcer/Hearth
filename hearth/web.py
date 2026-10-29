@@ -1619,7 +1619,7 @@ def _load_settings() -> Dict:
         "voice_stt": False,
         "sounds": True,        # a soft cue when a turn finishes, a low one on an error
         "voice_mic_hint_dismissed": False,  # first-voice mic tip, "don't show again"
-        "voice_window_call": True,   # window voice mode listens and speaks in the page (echo cancelled)
+        "voice_window_call": False,  # True: voice mode listens and speaks in the page (echo cancelled)
         "voice_half_duplex": False,  # hold the mic closed while speaking, for speakers
         "voice_tones": True,         # two soft notes when voice mode is ready, and when it ends
         "stt_device": "cpu",   # cpu / cuda
@@ -2406,8 +2406,10 @@ def _serve_window_call(ws) -> None:
                 threading.Thread(target=call.hush, daemon=True).start()
             elif kind == "call.set":
                 voice, lang = m.get("voice"), m.get("language")
+                dev, mdl = m.get("stt_device"), m.get("stt_model")
                 threading.Thread(target=call.set, args=(str(voice) if voice else None,
-                                                        str(lang) if lang is not None else None),
+                                                        str(lang) if lang is not None else None,
+                                                        str(dev) if dev else None, str(mdl) if mdl else None),
                                  daemon=True).start()
     finally:
         call, lk = mine["call"], mine["link"]
@@ -3256,9 +3258,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             from .call import languages, voices
             from . import voice as _vc
             st = _load_settings()
+            sess = getattr(_rt_voice, "_session", None) if _rt_voice else None
             return self._send_json(200, {"voice": st.get("voice_name") or _vc.current_voice(), "voices": voices(),
                                          "language": (st.get("stt_language") or "").strip().lower(),
-                                         "languages": languages(), "tones": st.get("voice_tones", True) is not False})
+                                         "languages": languages(), "tones": st.get("voice_tones", True) is not False,
+                                         "stt_device": (st.get("stt_device") or "cpu").lower(),
+                                         "stt_model": st.get("stt_model") or "",
+                                         "listening": getattr(sess, "stt", "") if sess is not None else ""})
         if path == "/api/voice/sample":
             # The line a voice reads when it is tried, in its own language.
             from . import voice as _vc

@@ -32,12 +32,14 @@ _CLAUSE = re.compile(r"[,;:]\s|\s[—–-]\s|—")
 _BREAK = re.compile(r"[,;:–-]\s|\s[—–-]\s|—")
 FIRST_CLAUSE = 24
 QUICK_START = 12
-# A first piece with no break in it yet is cut at a space once it is this long: the
-# voice takes about a second per 50 letters, so a long opening sentence held back
-# whole kept the reply silent for seconds after it began.
-LONG_FIRST = 70
+# A first piece with no break in it yet is cut at a space once it is this long. With a
+# local model on the card the voice takes about 25 ms a letter, so a 60-letter opening
+# took 1.5-3 s to make before anything was heard; the rest is made while it plays.
+LONG_FIRST = 40
 
 TAP_LINE = "That one needs a tap on Allow."
+# Speech model sizes voice mode's sheet offers (and their English-only kind).
+STT_MODELS = ("tiny", "base", "small", "tiny.en", "base.en", "small.en")
 
 
 def _brain_label() -> str:
@@ -204,11 +206,17 @@ class Call:
 
     # ---------------------------------------------------------------- settings
     def voice_info(self) -> Dict[str, Any]:
+        sess = _rv.session_for(self.lease)
         return {"type": "call.voice", "voice": _voice.current_voice(), "voices": voices(),
-                "language": (_env.get("STT_LANGUAGE", "") or "").strip().lower(), "languages": languages()}
+                "language": (_env.get("STT_LANGUAGE", "") or "").strip().lower(), "languages": languages(),
+                "stt_device": (_env.get("STT_DEVICE", "") or "cpu").strip().lower(),
+                "stt_model": (_env.get("STT_MODEL", "") or "").strip(),
+                "listening": getattr(sess, "stt", "") if sess is not None else ""}
 
-    def set(self, voice: Optional[str] = None, language: Optional[str] = None) -> None:
-        """The voice it answers in or the language it listens in, changed from the call."""
+    def set(self, voice: Optional[str] = None, language: Optional[str] = None,
+            stt_device: Optional[str] = None, stt_model: Optional[str] = None) -> None:
+        """The voice it answers in, the language it listens in, or where and with which
+        model it listens, changed from the call; listening starts again for the last three."""
         changed: Dict[str, Any] = {}
         if voice and voice in _voice.list_voices() and voice != _voice.current_voice():
             _voice.set_default_voice(voice)
@@ -218,14 +226,20 @@ class Call:
         if language is not None and language in codes and language != (_env.get("STT_LANGUAGE", "") or "").strip().lower():
             _env.set("STT_LANGUAGE", language)
             changed["stt_language"] = language
+        if stt_device in ("cuda", "gpu", "cpu") and stt_device != (_env.get("STT_DEVICE", "") or "cpu").lower():
+            _env.set("STT_DEVICE", stt_device)
+            changed["stt_device"] = stt_device
+        if stt_model in STT_MODELS and stt_model != (_env.get("STT_MODEL", "") or ""):
+            _env.set("STT_MODEL", stt_model)
+            changed["stt_model"] = stt_model
         if changed and self.save is not None:
             try:
                 self.save(changed)
             except Exception:
                 pass
         self.send(self.voice_info())
-        if "stt_language" in changed and self.lease is not None and not self.ended:
-            # The recognizer is built for one language: listen again in the new one.
+        if ({"stt_language", "stt_device", "stt_model"} & set(changed)) and self.lease is not None and not self.ended:
+            # The recognizer is built for one language, model and device: listen again with the new one.
             _rv.stop_continuous(self.lease)
             self.send({"type": "call.state", "state": "connecting"})
             self._listen()
@@ -243,6 +257,7 @@ class Call:
 
     def _ready(self) -> None:
         first, self.ready = not self.ready, True
+        self.send(self.voice_info())            # what listens now, for the settings sheet
         if first and self.opener:
             self._open()
             return
@@ -354,7 +369,7 @@ class Call:
                 if not cut and first and self.quick and len(rest) >= QUICK_START:
                     # The first break past a dozen letters: a reply that arrives in one
                     # piece starts with its opening clause, not with all of it.
-                    ends = [c.end() for c in _BREAK.finditer(rest) if c.end() >= QUICK_START]
+                    ends = [c.end() for c in _BREAK.finditer(rest) if QUICK_START <= c.end() <= LONG_FIRST]
                     cut = ends[0] if ends else 0
                 if not cut and first and len(rest) >= LONG_FIRST:
                     sp = rest.rfind(" ", QUICK_START, LONG_FIRST)
