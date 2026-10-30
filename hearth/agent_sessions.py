@@ -439,10 +439,15 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
         if o.get("type") == "custom-title" and o.get("customTitle"):
             named = str(o["customTitle"])          # the name they gave it (/rename): the newest wins
             continue
-        if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
-            continue
         m = o.get("message") or {}
         content, at = m.get("content"), _ms(o.get("timestamp"))
+        sent = from_phone(o)
+        if sent:
+            title = title or _title(sent)
+            msgs.append(_msg("user", sent, at))
+            continue
+        if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
+            continue
         if o["type"] == "user":
             for b in content if isinstance(content, list) else []:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
@@ -823,6 +828,52 @@ def _known_folders() -> List[str]:
     return seen
 
 
+# What Inglen writes into a live Claude Code session for the person, and how Claude Code wraps a
+# message that came in through its messaging inbox (a peer's, as far as it knows).
+PHONE_MARK = "Sent by the user from their phone, through Inglen:"
+
+
+def from_phone(o: Dict[str, Any]) -> str:
+    """The words of a message Inglen delivered into a live session for the person, or ''."""
+    if not (o.get("type") == "user" and (o.get("origin") or {}).get("kind") == "peer"):
+        return ""
+    text = _text_of((o.get("message") or {}).get("content"))
+    i = text.find(PHONE_MARK)
+    if i < 0:
+        return ""
+    said = text[i + len(PHONE_MARK):]
+    end = said.find("\n\nThis came from another Claude session")
+    return (said[:end] if end >= 0 else said).strip()
+
+
+def claude_inbox(sid: str) -> Dict[str, Any]:
+    """The messaging inbox of a Claude Code session running right now: {pid, pipe, token, busy}, or {}.
+    Each live session lists its pipe in ~/.claude/sessions/<pid>.json and the token peers present
+    in <pid>.<hash>.key beside it (both readable only by this user)."""
+    try:
+        import psutil
+    except ImportError:
+        return {}
+    d = os.path.join(_home(), ".claude", "sessions")
+    for p in glob.glob(os.path.join(d, "*.json")):
+        try:
+            with open(p, encoding="utf-8") as f:
+                rec = json.load(f)
+            pid = int(rec.get("pid") or 0)
+            if str(rec.get("sessionId") or "") != sid or not rec.get("messagingSocketPath") or not psutil.pid_exists(pid):
+                continue
+            for k in glob.glob(os.path.join(d, f"{pid}.*.key")):
+                with open(k, encoding="utf-8") as f:
+                    key = json.load(f)
+                # A key left by an earlier process with the same pid is not this one's.
+                if key.get("peerToken") and str(key.get("procStartFt") or rec.get("procStart")) == str(rec.get("procStart")):
+                    return {"pid": pid, "pipe": str(rec["messagingSocketPath"]), "token": str(key["peerToken"]),
+                            "busy": rec.get("status") == "busy"}
+        except (OSError, ValueError, TypeError):
+            continue
+    return {}
+
+
 def _claude_live() -> Dict[str, int]:
     """Claude Code sessions open right now: each running one writes ~/.claude/sessions/<pid>.json."""
     out: Dict[str, int] = {}
@@ -1155,6 +1206,19 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
     state = live_state(agent, sid, d.get("path") or "")
     if state == "recent" and _RAN_HERE.get((agent, sid)) == _mtime(d.get("path") or ""):
         state = ""
+    if agent == "claude-code" and state:
+        # Claude Code lists every session it is running: one that isn't is free to carry on here,
+        # and one that is takes the message in its own inbox, shown there as it runs.
+        inbox = claude_inbox(sid)
+        if inbox:
+            from . import claude_sessions
+            return await claude_sessions.live(dict(inbox, sid=sid), d.get("path") or "", text, emit, drain=drain)
+        if sid not in _claude_live():
+            state = ""
+        else:
+            emit("error", message=f"This session is open in {name} on your PC, and that {name} doesn't take messages "
+                                  f"from outside it. Update {name} there, or send this from the PC.")
+            return 3
     if state and agent == "codex" and _exe(agent):
         # Codex takes a message for a session its app holds (codex queue): the app runs it
         # when that session is free, and the reply shows here.
