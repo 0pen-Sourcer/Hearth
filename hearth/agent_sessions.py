@@ -42,6 +42,9 @@ TAIL_BYTES = 4 * 1024 * 1024         # how much of its end is read for the trans
 RECENT_S = 90                        # a session written this recently may be in use right now
 _CACHE: Dict[Tuple[str, float, int], Dict[str, Any]] = {}
 _OC: Dict[str, Any] = {}
+# Sessions Inglen carried on itself, with their file's time as its run left it: a session written in
+# the last minute and a half and not since is Inglen's own write, not another program holding it.
+_RAN_HERE: Dict[Tuple[str, str], float] = {}
 
 
 def _home() -> str:
@@ -490,6 +493,9 @@ def _codex_spawn(meta: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(src, dict):
         sub = src.get("subagent") or src.get("SubAgent") or {}
         spawn = (sub.get("thread_spawn") or sub.get("ThreadSpawn") or {}) if isinstance(sub, dict) else {}
+    # Only an explicit thread spawn is a helper. Internal runs also carry a parent.
+    if not spawn:
+        return {}
     parent = spawn.get("parent_thread_id") or meta.get("parent_thread_id")
     if not parent:
         return {}
@@ -956,8 +962,8 @@ def _said_in(o: Dict[str, Any]) -> str:
     m = o.get("message") if isinstance(o.get("message"), dict) else {}
     if m.get("role") in ("user", "assistant"):
         return _clean(_text_of(m.get("content"))) or _text_of(m.get("content"))
-    if p.get("type") == "message":
-        return _text_of(p.get("content"))
+    if p.get("type") == "message" and p.get("role") in ("user", "assistant"):
+        return _clean(_text_of(p.get("content")))
     return ""
 
 
@@ -1062,11 +1068,14 @@ def read(agent: str, sid: str) -> Dict[str, Any]:
                 h = _head(agent, p, st.st_mtime, st.st_size)
             except OSError:
                 h = {}
+            # The tail may not include metadata. Enforce privacy from the head too.
+            if h.get("hidden") and not h.get("spawn"):
+                return {}
             for k in ("id", "cwd"):
                 d[k] = d.get(k) or h.get(k) or ""
             d["title"] = h.get("title") or d.get("title") or ""   # what it began with, not the tail's first question
             d["path"] = p
-    return d if d and d.get("id") == sid else {}
+    return d if d and d.get("id") == sid and not d.get("hidden") else {}
 
 
 def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
@@ -1111,31 +1120,46 @@ def _mode() -> str:
         return "ask"
 
 
-async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
-    """Send `text` into a session: its agent program resumes it in the session's
-    own folder and answers. Risky steps follow Hearth's Before acting setting:
-    what the agent would ask about comes to `ask` where it can ask (the ACP
-    agents); Claude Code and Codex run with their own safe defaults, which
-    edit only with Auto-edit or Auto and never run what they'd need to ask about."""
+async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
+    """Send `text` into a session: its agent program carries it on in the session's own
+    folder, with the session's own model and permissions. What the agent asks about
+    comes to `ask`; what `drain` gives while it works reaches the turn it is on (Codex
+    steers it, Claude Code takes it next). A session its own app has open is never run
+    a second time beside it: Codex takes the message in its own queue, the others say so."""
     got = parse_chat(cid)
     if not got:
         emit("error", message="That isn't an agent's session.")
         return 2
     agent, sid = got
+    name = label(agent)
+    outer, ran = emit, []
+
+    def emit(kind: str, **fields: Any) -> None:
+        if kind == "session":
+            ran.append((str(fields.get("agent") or agent), str(fields.get("id") or "")))
+        outer(kind, **fields)
+
+    from . import agent_launch
+    draft = agent_launch.DRAFTS.pop(cid, None)
+    if draft:
+        try:
+            return await agent_launch.start(draft, text, emit, ask, drain=drain)
+        finally:
+            _remember(ran)
     d = read(agent, sid)
     cwd = d.get("cwd") or ""
-    name = label(agent)
     if not d or not cwd or not os.path.isdir(cwd):
         emit("error", message=f"{name} can't carry this session on: its project folder isn't on this PC.")
         return 2
     # A second program writing into a session that is open on the PC would tangle both.
     state = live_state(agent, sid, d.get("path") or "")
-    if state == "open" and agent == "codex" and _exe(agent):
-        # Codex takes a message for a session open in its own app (codex queue, as Shed
-        # does): the app that owns the session runs it, and its reply shows here.
+    if state == "recent" and _RAN_HERE.get((agent, sid)) == _mtime(d.get("path") or ""):
+        state = ""
+    if state and agent == "codex" and _exe(agent):
+        # Codex takes a message for a session its app holds (codex queue): the app runs it
+        # when that session is free, and the reply shows here.
         if await _queue_codex(_exe(agent), sid, cwd, text):
-            # Inglen's own note about what it did, not the agent speaking (shown muted).
-            emit("note", text=f"Sent to {name} on your PC, where this session is open. Its reply will show here.")
+            emit("note", text=f"Sent to {name} on your PC, where this session is open. It goes in when {name} is free.")
             return 0
     if state == "open":
         emit("error", message=f"This session is open in {name} on your PC right now. Send it there, or close it "
@@ -1150,135 +1174,60 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask) -> int:
         emit("error", message=f"{name} isn't installed on this PC any more.")
         return 2
     try:
+        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain)
+    finally:
+        _remember(ran)
+
+
+def _mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path) if path else 0.0
+    except OSError:
+        return 0.0
+
+
+def _remember(ran: List[Tuple[str, str]]) -> None:
+    for agent, sid in ran:
+        when = _mtime(_find(agent, sid) or "") if sid else 0.0
+        if when:
+            _RAN_HERE[(agent, sid)] = when
+
+
+async def run_in(agent: str, exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ask, *,
+                 drain=None) -> int:
+    """Run `text` in the agent's own harness: session `sid`, or a new one in `cwd` when sid is empty."""
+    try:
         if agent == "claude-code":
-            return await _say_claude(exe, sid, cwd, text, emit)
+            from . import claude_sessions
+            return await claude_sessions.run(exe, sid, cwd, text, emit, ask,
+                                             mode="acceptEdits" if _mode() in ("edits", "auto") else "default",
+                                             drain=drain)
         if agent == "codex":
-            return await _say_codex(exe, sid, cwd, text, emit)
+            from . import codex_sessions
+            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain)
         return await _say_acp(agent, sid, cwd, text, emit, ask)
     except Exception as e:
-        emit("error", message=f"{name} didn't run: {type(e).__name__}: {e}")
+        emit("error", message=f"{label(agent)} didn't run: {type(e).__name__}: {e}")
         return 1
 
 
 async def _queue_codex(exe: List[str], sid: str, cwd: str, text: str) -> bool:
     """`codex queue --thread <id> --message <text>`. False when this Codex has no
     queue command (older builds) or it refused, so the caller says why as before."""
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *exe, "queue", "--thread", sid, "--message", text, cwd=cwd,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            creationflags=0x08000000 if sys.platform == "win32" else 0)
         await asyncio.wait_for(proc.communicate(), timeout=30)
         return proc.returncode == 0
     except Exception:
         return False
-
-
-async def _lines(args: List[str], cwd: str, text: str):
-    proc = await asyncio.create_subprocess_exec(
-        *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
-        creationflags=0x08000000 if sys.platform == "win32" else 0)
-    try:                                        # one that exits before reading what it was sent
-        proc.stdin.write(text.encode("utf-8"))
-        await proc.stdin.drain()
-        proc.stdin.close()
-    except (BrokenPipeError, ConnectionResetError):
-        pass
-    while True:
-        line = await proc.stdout.readline()
-        if not line:
-            break
-        try:
-            ev = json.loads(line.decode("utf-8", "replace"))
-        except ValueError:
-            continue
-        if isinstance(ev, dict):
-            yield ev
-    await proc.wait()
-    err = (await proc.stderr.read()).decode("utf-8", "replace").strip()
-    yield {"type": "_exit", "code": proc.returncode, "err": err}
-
-
-async def _say_claude(exe: List[str], sid: str, cwd: str, text: str, emit: Emit) -> int:
-    from .claude_brain import hearth_view, _QUIET_TOOLS
-    # Always said outright: a default mode in the person's own Claude settings (even one that skips
-    # every permission) must not decide what a run from the phone may do.
-    args = exe + ["-p", "--resume", sid, "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                  "--permission-mode", "acceptEdits" if _mode() in ("edits", "auto") else "default"]
-    parts: List[str] = []
-    final, failed = "", ""
-    async for ev in _lines(args, cwd, text):
-        t = ev.get("type")
-        if ev.get("parent_tool_use_id"):
-            continue
-        if t == "stream_event":
-            d = ((ev.get("event") or {}).get("delta") or {})
-            if d.get("type") == "text_delta" and d.get("text"):
-                parts.append(d["text"])
-                emit("live", text="".join(parts))
-            elif d.get("type") == "thinking_delta" and d.get("thinking"):
-                emit("think", text=d["thinking"])
-        elif t == "assistant":
-            for b in (ev.get("message") or {}).get("content") or []:
-                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") not in _QUIET_TOOLS:
-                    _in = b.get("input") if isinstance(b.get("input"), dict) else {}
-                    for st in _steps_of(*hearth_view(str(b.get("name") or ""), _in), _in.get("description")):
-                        emit("step", words=st["w"], tool=st["tool"], cmd=st.get("cmd", ""))
-                    if parts:
-                        parts.append("\n\n")
-        elif t == "user":
-            for b in (ev.get("message") or {}).get("content") or []:
-                if isinstance(b, dict) and b.get("type") == "tool_result":
-                    from .channel_core import out_of
-                    emit("step_out", out=out_of(_result_text(b.get("content"))))
-        elif t == "result":
-            final = str(ev.get("result") or "")
-            if ev.get("is_error"):
-                failed = final or str(ev.get("subtype") or "error")
-        elif t == "_exit" and ev.get("code") and not final and not parts:
-            failed = ev.get("err", "")[-400:] or f"it stopped (exit {ev.get('code')})"
-    # A failed run's result is its error; said once, as an error, not again as a reply.
-    reply = "".join(parts).strip() or ("" if failed else final.strip())
-    if failed:
-        emit("error", message=f"Claude Code stopped: {failed}"[:600])
-    if reply:
-        emit("text", text=reply)
-    return 0 if reply else 1
-
-
-async def _say_codex(exe: List[str], sid: str, cwd: str, text: str, emit: Emit) -> int:
-    sandbox = 'sandbox_mode="read-only"' if _mode() == "ask" else 'sandbox_mode="workspace-write"'
-    args = exe + ["exec", "resume", sid, "--json", "--skip-git-repo-check", "-c", 'approval_policy="never"',
-                  "-c", sandbox, "-"]
-    replies: List[str] = []
-    failed = ""
-    async for ev in _lines(args, cwd, text):
-        t, item = ev.get("type"), ev.get("item") or {}
-        kind = item.get("type")
-        if t == "item.started" and kind == "command_execution":
-            st = _step("shell", {"command": item.get("command", "")})
-            emit("step", words=st["w"], tool=st["tool"], cmd=st.get("cmd", ""))
-        elif t == "item.completed" and kind == "command_execution" and item.get("aggregated_output") is not None:
-            from .channel_core import out_of
-            emit("step_out", out=out_of(item.get("aggregated_output")))
-        elif t == "item.completed":
-            if kind == "agent_message" and item.get("text"):
-                replies.append(str(item["text"]))
-                emit("live", text="\n\n".join(replies))
-            elif kind == "reasoning" and item.get("text"):
-                emit("think", text=str(item["text"]))
-            elif kind == "file_change":
-                for c in item.get("changes") or []:
-                    emit("step", words=f"Changed {os.path.basename(str(c.get('path') or ''))}", tool="edit_file")
-        elif t in ("turn.failed", "error"):
-            failed = str((ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else ev.get("message") or "error")
-        elif t == "_exit" and ev.get("code") and not replies:
-            failed = failed or ev.get("err", "")[-400:] or f"it stopped (exit {ev.get('code')})"
-    if failed:
-        emit("error", message=f"Codex stopped: {failed}"[:600])
-    if replies:
-        emit("text", text="\n\n".join(replies))
-    return 0 if replies else 1
+    finally:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
 
 
 async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: Ask) -> int:
@@ -1292,14 +1241,23 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
     reader = asyncio.ensure_future(rpc.read())
     parts: List[str] = []
     shown: set = set()
+    stderr = asyncio.create_task(proc.stderr.read())
+    turn = None
     try:
         caps = (await A._hello(rpc)).get("agentCapabilities") or {}
-        how = ("session/resume" if "resume" in (caps.get("sessionCapabilities") or {})
-               else "session/load" if caps.get("loadSession") else "")
-        if not how:
-            emit("error", message=f"{name} can't reopen a session from outside it.")
-            return 2
-        await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": []}, 120)
+        if sid:
+            how = ("session/resume" if "resume" in (caps.get("sessionCapabilities") or {})
+                   else "session/load" if caps.get("loadSession") else "")
+            if not how:
+                emit("error", message=f"{name} can't reopen a session from outside it.")
+                return 2
+            await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": []}, 120)
+        else:
+            opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
+            sid = str(opened.get("sessionId") or "")
+            if not sid:
+                raise RuntimeError(f"{name} did not return a session ID")
+        emit("session", agent=agent, id=sid)
         while not rpc.inbox.empty():           # loading replays the old messages: already shown
             m = rpc.inbox.get_nowait()
             if m and "id" in m and "method" in m:
@@ -1350,9 +1308,17 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
         if turn.done() and turn.exception():
             emit("error", message=f"{name} stopped: {turn.exception()}"[:600])
     finally:
+        if turn is not None and not turn.done():
+            turn.cancel()
+            await asyncio.gather(turn, return_exceptions=True)
         reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
         try:
-            proc.kill()
+            proc.stdin.close()
+            if proc.returncode is None: proc.kill()
+            await proc.wait()
+            await proc.stdout.read()
+            await stderr
         except ProcessLookupError:
             pass
     reply = "".join(parts).strip()

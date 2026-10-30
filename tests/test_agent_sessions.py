@@ -119,7 +119,12 @@ BIN = os.path.join(HOME, "bin")
 RAN = os.path.join(HOME, "ran.jsonl")
 write(os.path.join(BIN, "fake_claude.py"), f'''
 import json, os, sys
-text = sys.stdin.read()
+text = ""
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") == "user":
+        text = msg["message"]["content"]
+        break
 open({RAN!r}, "a").write(json.dumps({{"who": "claude", "argv": sys.argv[1:], "cwd": os.getcwd(), "text": text}}) + "\\n")
 out = lambda o: print(json.dumps(o), flush=True)
 out({{"type": "system", "subtype": "init", "session_id": sys.argv[sys.argv.index("--resume") + 1]}})
@@ -130,13 +135,20 @@ out({{"type": "result", "result": "Done: the total rounds once.", "is_error": Fa
 ''')
 write(os.path.join(BIN, "fake_codex.py"), f'''
 import json, os, sys
-text = sys.stdin.read()
-open({RAN!r}, "a").write(json.dumps({{"who": "codex", "argv": sys.argv[1:], "cwd": os.getcwd(), "text": text}}) + "\\n")
+if sys.argv[1:] == ["queue"] or "--thread" in sys.argv: sys.exit(2)
 out = lambda o: print(json.dumps(o), flush=True)
-out({{"type": "thread.started", "thread_id": sys.argv[3]}})
-out({{"type": "item.started", "item": {{"id": "1", "type": "command_execution", "command": "cat feed.xml"}}}})
-out({{"type": "item.completed", "item": {{"id": "2", "type": "agent_message", "text": "The feed has 12 posts."}}}})
-out({{"type": "turn.completed"}})
+for line in sys.stdin:
+    m = json.loads(line)
+    method, p = m.get("method"), m.get("params") or {{}}
+    if "id" not in m: continue
+    result = {{"thread":{{"id":p.get("threadId", "new-session")}}}} if method in ("thread/start", "thread/resume") else {{"turn":{{"id":"turn1"}}}} if method == "turn/start" else {{}}
+    out({{"id":m["id"], "result":result}})
+    if method == "turn/start":
+        open({RAN!r}, "a").write(json.dumps({{"who":"codex", "argv":sys.argv[1:], "cwd":os.getcwd(), "text":p["input"][0]["text"]}}) + "\\n")
+        if p.get("threadId") == {CX!r}: os.utime({cx_path!r})      # it writes to the session as it works
+        out({{"method":"item/started", "params":{{"item":{{"id":"cmd", "type":"commandExecution", "command":"cat feed.xml"}}}}}})
+        out({{"method":"item/completed", "params":{{"item":{{"id":"reply", "type":"agentMessage", "text":"The feed has 12 posts."}}}}}})
+        out({{"method":"turn/completed", "params":{{"turn":{{"status":"completed"}}}}}})
 ''')
 write(os.path.join(BIN, "fake_opencode.py"), f'''
 import json, os, sys
@@ -258,9 +270,12 @@ def ran(who):
 rc, got, _ = say(by["claude-code"]["chat"], "does it handle refunds?")
 c = ran("claude")[-1]
 check(f"Claude Code resumes that session, in its project folder ({c['argv'][:3]}, {c['cwd']})",
-      c["argv"][:3] == ["-p", "--resume", CL] and os.path.samefile(c["cwd"], PA) and c["text"] == "does it handle refunds?")
+      "--resume" in c["argv"] and c["argv"][c["argv"].index("--resume") + 1] == CL and os.path.samefile(c["cwd"], PA) and c["text"] == "does it handle refunds?")
 check(f"with Before acting on Ask, the permission mode is said outright, so the person's own default can't skip it ({c['argv']})",
       c["argv"][c["argv"].index("--permission-mode") + 1] == "default" if "--permission-mode" in c["argv"] else False)
+check("and what it would ask about comes back over its own stream (stdio permission prompts)",
+      "--input-format" in c["argv"] and c["argv"][c["argv"].index("--permission-prompt-tool") + 1] == "stdio"
+      if "--permission-prompt-tool" in c["argv"] else False)
 check(f"its steps and words come back as they happen, then the reply ({[k for k, _ in got]})",
       any(k == "step" and f.get("words") == "Read cart.js" and f.get("tool") == "read_file" and f.get("cmd") == "cart.js"
           for k, f in got) and any(k == "live" for k, _ in got)
@@ -268,9 +283,12 @@ check(f"its steps and words come back as they happen, then the reply ({[k for k,
 
 rc, got, _ = say(by["codex"]["chat"], "how many posts?")
 c = ran("codex")[-1]
-check(f"Codex resumes that session in its folder ({c['argv'][:3]})", c["argv"][:3] == ["exec", "resume", CX]
-      and os.path.samefile(c["cwd"], PB) and c["text"] == "how many posts?" and "--json" in c["argv"])
+check(f"Codex resumes that session in its folder ({c['argv'][:3]})", c["argv"] == ["app-server"]
+      and os.path.samefile(c["cwd"], PB) and c["text"] == "how many posts?" and "exec" not in c["argv"])
 check("and answers", got[-1] == ("text", {"text": "The feed has 12 posts."}) and any(k == "step" for k, _ in got))
+rc, got, _ = say(by["codex"]["chat"], "and the newest one?")
+check(f"a follow-up right after its own run carries on: that write was Inglen's, not another program's ({got[-1:]})",
+      rc == 0 and got[-1] == ("text", {"text": "The feed has 12 posts."}))
 
 rc, got, asked = say(by["opencode"]["chat"], "clean the build")
 c = [x for x in ran("opencode") if "load" in x][-1]
