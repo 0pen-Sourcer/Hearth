@@ -1390,7 +1390,13 @@ class Room:
                 if self.peer_up and self.chan is not None:
                     adapter._push(chat, obj)
 
+            from . import agent_sessions
+
             def say(text):
+                if agent_sessions.parse_chat(cid):
+                    # A call from a coding agent's session talks to that agent, in that session.
+                    self.bridge.agent_say(self, {"chat": cid, "text": text, "spoken": True})
+                    return "ran"
                 return self.bridge.hub.receive(chat, "phone", text, name="Phone", cid=cid, spoken=True)
 
             def save(changed):
@@ -1635,9 +1641,21 @@ class Bridge:
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
 
+        def on_call():
+            c = getattr(room, "call", None)
+            return c if c is not None and not c.ended and c.cid == cid else None
+
         def emit(kind: str, **f: Any) -> None:
             nonlocal cid
             now = time.time()
+            call = on_call()
+            if call is not None:
+                if kind == "live":
+                    call.live(f.get("text") or "")
+                elif kind == "step":
+                    call.step(f.get("words") or "")
+                elif kind in ("text", "error"):
+                    call.done(f.get("text") or f.get("message") or "")
             if kind == "session":
                 # A new session's own id: the phone moves the chat it opened onto it.
                 real = agent_sessions.chat_id(str(f.get("agent") or agent), str(f.get("id") or ""))
@@ -1693,6 +1711,9 @@ class Bridge:
 
         def go() -> None:
             try:
+                call = on_call()
+                if call is not None:
+                    call.begin()                     # its reply is spoken on the call
                 push({"type": "typing"})
                 asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain))
             finally:
