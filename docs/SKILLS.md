@@ -68,7 +68,7 @@ The fastest way is to let Inglen scaffold it:
 ```
 
 That drops a `clean-downloads/` folder with a filled-in `SKILL.md` template under
-`~/Jarvis/skills/`. Edit the body, drop any helper scripts in `scripts/`, and
+your workspace's `skills/` folder. Edit the body, drop any helper scripts in `scripts/`, and
 it's live immediately (`/skill list`, or the Skills tab in the window, to confirm). You can
 also just ask Inglen in chat; when it notices you doing the same multi-step thing twice,
 it can write a skill for you.
@@ -116,7 +116,7 @@ What protects you:
   is actually used, and *running them still goes through `run_command`'s
   permission prompt*, so you get a second look before any code executes.
 - Prefer skills from the curated index or authors you trust. Read the `SKILL.md`
-  (`~/Jarvis/skills/<name>/SKILL.md`) if unsure.
+  (`skills/<name>/SKILL.md` in your workspace) if unsure.
 
 ---
 
@@ -125,7 +125,7 @@ What protects you:
 ```
 /skill                       list installed skills (bundled + yours)
 /skill install <src>         install from owner/repo, a github URL, or ./path
-/skill new <name>            scaffold a new skill under ~/Jarvis/skills/
+/skill new <name>            scaffold a new skill in the workspace's skills/
 /skill remove <name>         uninstall a skill you added
 ```
 

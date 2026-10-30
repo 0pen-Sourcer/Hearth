@@ -281,10 +281,7 @@ _MCP_ALL_TOOLS = os.environ.get("HEARTH_MCP_ALL_TOOLS", "") in ("1", "true", "ye
 #   - ask_user: renders numbered options in Hearth's UI; a host can't show them.
 #   - spawn_subagent / launch_team: results come back through Hearth's OWN
 #     turn-notification loop, which an external host never sees — it just hangs.
-#   - forge_generate: needs a local Stable-Diffusion (Forge) install + env; it's
-#     non-deferred (surfaces for weak local models when Forge is detected), so it
-#     leaks onto the MCP surface where it's setup-specific noise. Keep it off.
-_MCP_NEVER = {"ask_user", "spawn_subagent", "launch_team", "forge_generate"}
+_MCP_NEVER = {"ask_user", "spawn_subagent", "launch_team"}
 # Low-level computer-use PRIMITIVES: redundant on MCP with smart_click (fused
 # vision + accessibility) and desktop_snapshot/click/type + screenshot, which are
 # the reliable interface. Hidden by default to keep the host's tool list clean;

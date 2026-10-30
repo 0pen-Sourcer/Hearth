@@ -1,7 +1,7 @@
 # Support Inglen
 
 Inglen is free, open source (MIT) and built by one person in their spare time. There's no
-company behind it and no cloud bill to cover, just someone who wanted a local JARVIS and
+company behind it and no cloud bill to cover, just someone who wanted the assistant from the films on their own PC and
 decided to share it.
 
 ## Ways to help

@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something Hearth does that it shouldn't, or doesn't do that it should
+about: Something Inglen does that it shouldn't, or doesn't do that it should
 title: '[bug] '
 labels: bug
 assignees: ''
@@ -8,7 +8,7 @@ assignees: ''
 
 ## What happened
 
-<!-- A clear, concrete description. "Jarvis tried to open Brave but launched Edge instead" beats "browser stuff is broken". -->
+<!-- A clear, concrete description. "It tried to open Brave but launched Edge instead" beats "browser stuff is broken". -->
 
 ## What you expected
 
@@ -26,7 +26,7 @@ assignees: ''
 
 ```
 ❯ <what you typed>
-> <what Hearth said / did>
+> <what Inglen said / did>
 ```
 
 ## Activity log
@@ -34,16 +34,17 @@ assignees: ''
 <!-- Tail your activity log if the bug involves a tool call -->
 
 ```
-type: /log 20  in the Hearth CLI, or:
-Get-Content "$HOME\Jarvis\logs\activity.jsonl" -Tail 20
+type: /log 20  in the Inglen terminal, or:
+Get-Content "$HOME\Inglen\logs\activity.jsonl" -Tail 20
+(an install from before the rename keeps $HOME\Jarvis instead)
 ```
 
 ## Environment
 
-- Hearth version (Settings, About) or commit:
+- Inglen version (Settings, About) or commit:
 - Installer (Full or Lite) or from source:
 - OS:
-- Brain (this PC's model with LM Studio / Ollama / Hearth's engine, a cloud provider, or an agent like Claude Code or Codex):
+- Brain (this PC's model with LM Studio / Ollama / Inglen's engine, a cloud provider, or an agent like Claude Code or Codex):
 - Model:
 - Approval mode (Ask, Auto-edit, Auto):
 

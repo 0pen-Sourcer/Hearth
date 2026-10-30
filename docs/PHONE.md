@@ -13,7 +13,7 @@ A connected app runs alongside Inglen, starts again on every launch, and stops w
 
 ## Connect an app
 
-Open **Settings, Connectors**, or just ask JARVIS to "connect my Telegram" and it walks you through
+Open **Settings, Connectors**, or just ask Inglen to "connect my Telegram" and it walks you through
 it in the chat.
 
 **Telegram.** Message **@BotFather** in Telegram, send `/newbot`, follow the prompts and copy the
@@ -31,7 +31,7 @@ yourself on that number to reach Inglen.
 
 The first time you message your bot, it replies with an 8-character code. Let yourself in with
 that code under **Settings, Connectors** (it lists everyone asking), with `/pair <code>` in the
-terminal, or by telling JARVIS on the PC. A code lasts an hour. Anyone else who finds your bot gets
+terminal, or by telling Inglen on the PC. A code lasts an hour. Anyone else who finds your bot gets
 a code too, and nothing runs for them unless you let them in. You can remove anyone later from
 the same list.
 
@@ -63,7 +63,7 @@ in the window.
 ## Reminders on your phone
 
 Turn on **Send reminders to my phone too** in Connectors and every reminder also goes to the
-Telegram or Discord you connected. JARVIS can also send you something on request ("send this to my
+Telegram or Discord you connected. Inglen can also send you something on request ("send this to my
 Telegram").
 
 ## Running a bot without the window

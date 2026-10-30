@@ -17,7 +17,7 @@ The core is stable and I use it every day.
 - Memory that persists across sessions, notes lasting facts on its own, looks up what
   a message needs, and records it when something about you changes.
 - Claude Code, Codex, Cursor, OpenCode and other agents as its brain, on your own plan,
-  still using Inglen's tools and asking before anything risky.
+  still using Inglen's tools and asking before risky steps.
 - Helpers and whole teams you can watch in a little pixel room. They run on your PC's
   model, a cloud model or another agent, message each other, work on their own copy
   of a git repository, and their changes wait for you to bring them in or undo them.
@@ -31,7 +31,7 @@ The core is stable and I use it every day.
   expose their controls.
 - Voice in eight languages, local listen (Whisper) and speak (Kokoro), hands-free,
   with a wake word. Interrupting by voice works on headphones, and on speakers by
-  starting with its name ("Jarvis, stop").
+  starting with its name ("Inglen, stop").
 - Your phone through Telegram, Discord or WhatsApp, running the full agent on your PC,
   with pairing codes for anyone new and approvals asked in the chat.
 - An optional bundled llama.cpp engine. If you already run LM Studio or Ollama,
@@ -39,7 +39,7 @@ The core is stable and I use it every day.
 - Pictures and short videos made on your own graphics card with stable-diffusion.cpp,
   which Inglen installs and runs itself, reading a ComfyUI or WebUI models folder in
   place. Cloud image models work from any brain too.
-- Desktop actions you can watch, with an edge round the screen while JARVIS works and
+- Desktop actions you can watch, with an edge round the screen while Inglen works and
   your window handed back when it's done.
 
 There are over a hundred tools, and they aren't equal. About forty are core. The rest
