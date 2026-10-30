@@ -1,6 +1,6 @@
 # Inglen user guide
 
-For when you've just installed Inglen and want to know what it does and where things are. The assistant inside it is called Inglen on a new install (an install from before keeps JARVIS) unless you give it another name in Settings, Behavior, Agent name; this guide uses JARVIS in its examples.
+For when you've just installed Inglen and want to know what it does and where things are. The assistant inside it is called Inglen on a new install unless you give it another name in Settings, Behavior, Agent name. An older install keeps the name and the `~/Jarvis` folder it already had. This guide says Inglen.
 
 ---
 
@@ -10,7 +10,7 @@ For when you've just installed Inglen and want to know what it does and where th
 2. **Pick a brain.** Setup finds what you already have: an agent like Claude Code or Codex, a model file on your disk, or a running LM Studio or Ollama. Pick one, or download a model from the Models tab later, or paste a cloud key.
 3. **Talk to it.** Type, or press the mic and speak.
 
-Setup is eight short steps. Besides the brain it asks the language you speak and the voice, headphones or speakers, your name and how JARVIS should talk, how much may run without asking, the look and how much detail chats show, and offers to bring over what ChatGPT or Claude knows about you. It ends with a six-stop tour of the window, which you can take again from Settings, About.
+Setup is eight short steps. Besides the brain it asks the language you speak and the voice, headphones or speakers, your name and how Inglen should talk, how much may run without asking, the look and how much detail chats show, and offers to bring over what ChatGPT or Claude knows about you. It ends with a six-stop tour of the window, which you can take again from Settings, About.
 
 Running from source instead? See "Install from source" in the [README](../README.md).
 
@@ -18,24 +18,24 @@ Running from source instead? See "Install from source" in the [README](../README
 
 ## The window at a glance
 
-1. **Top bar.** The model menu on the left picks what JARVIS thinks with. The GPU chip shows your graphics card, and the mic on the right starts voice mode.
+1. **Top bar.** The model menu on the left picks what Inglen thinks with. The GPU chip shows your graphics card, and the mic on the right starts voice mode.
 2. **Sidebar.** New chat and your chats, each with when it was last used (a chat started in the terminal has a prompt mark, a reminder's chat a clock), then Team, Memory, Reminders, Skills, Files, Logs, Models and Settings.
 3. **Sticker.** The model menu button shows the brain in use and its loading progress, and a local model kept for helpers if you turned that on.
 4. **Chat bar.** Think sets how hard the model reasons, the mic talks instead of typing, + attaches a file, and the switch beside Send sets what runs without asking (Ask, Auto-edit or Auto).
 5. **The mark on an empty chat.** In every look but Classic it shows the model's state, with an empty ring when none is loaded, a line running along it while one loads, and a filled dot when it's ready.
-6. **Tray icon.** Opens your pinned and recent chats, a new chat or voice mode, and turns on listening for JARVIS's name.
+6. **Tray icon.** Opens your pinned and recent chats, a new chat or voice mode, and turns on listening for Inglen's name.
 
 ---
 
 ## Brains
 
-JARVIS can think with any of these, switched from the model menu at any time:
+Inglen can think with any of these, switched from the model menu at any time:
 
 - **A model on this PC**, through Inglen's own engine, LM Studio, Ollama or any OpenAI-compatible server. Private, free, and offline.
 - **A cloud model** with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq.
 - **An agent you already pay for**: Claude Code, Codex or Cursor, on your plan and with no key. Other agents that speak the Agent Client Protocol work too once installed, such as OpenCode, Copilot CLI, Goose and Grok Build.
 
-Whatever the brain, JARVIS keeps Inglen's tools, memory and voice, and asks before anything risky. The Think menu lists the effort levels the chosen model has; on Codex and Claude Code it also has a Fast switch. With a cloud brain, a model on this PC can stay loaded (a switch in the model menu) to run helpers for free.
+Whatever the brain, Inglen keeps its tools, memory and voice, and the approval switch decides what asks first. The Think menu lists the effort levels the chosen model has; on Codex and Claude Code it also has a Fast switch. With a cloud brain, a model on this PC can stay loaded (a switch in the model menu) to run helpers for free.
 
 **Which local model?** Any model of about 7B or larger trained for tool calling. The Models tab marks each file by whether it fits your graphics card. Small models handle everyday work well and can lose the thread on long multi-step jobs; for those, a cloud model or an agent brain is the better pick.
 
@@ -45,9 +45,9 @@ Whatever the brain, JARVIS keeps Inglen's tools, memory and voice, and asks befo
 
 Bigger jobs go to helpers. Ask for them in plain words ("have Codex write the tests while a helper on Claude Haiku looks up the API"), or press **New helper** in the Team tab.
 
-- **Where they run.** One of Inglen's own helpers runs on JARVIS's brain, this PC's model, or a cloud model you name. Agent programs (Claude Code, Codex, Cursor, OpenCode and more) run on your own install and account.
+- **Where they run.** One of Inglen's own helpers runs on the assistant's brain, this PC's model, or a cloud model you name. Agent programs (Claude Code, Codex, Cursor, OpenCode and more) run on your own install and account.
 - **Watching them.** The Team room shows each helper at a desk; past eight, the next room opens. Click anyone to see who asked, the task, every step, and what it changed.
-- **Talking to them.** Type in a working helper's panel to tell it something part-way. Helpers also message each other and JARVIS as they work; in the room, the sender walks over and says it.
+- **Talking to them.** Type in a working helper's panel to tell it something part-way. Helpers also message each other and Inglen as they work; in the room, the sender walks over and says it.
 - **Their changes.** An agent program working in a git repository gets its own copy of it. Its changes wait in its panel to be brought in, discarded or undone. Inglen's own helpers write directly, and what they changed can be undone.
 - **Stopping one.** The Stop button in its panel, or `/team stop <n>` in the terminal.
 - **Racing.** Ask for the same task from two agents ("have Codex and Claude Code both fix this bug and run the tests") and you get one comparison to choose from.
@@ -58,14 +58,14 @@ Bigger jobs go to helpers. Ask for them in plain words ("have Codex write the te
 
 Press the mic in the top bar. The window turns into a dot grid that listens and speaks; press Esc to leave.
 
-- Speak, pause, and JARVIS answers out loud. The mic opens again for your reply.
+- Speak, pause, and Inglen answers out loud. The mic opens again for your reply.
 - **Interrupting.** Talk over a reply and it stops on your first word, then answers what you said instead. This works on speakers too: the window cancels the echo of its own voice the way a video call does, so it doesn't hear itself. The first few seconds on speakers it is still learning the room.
 - **Approvals.** A step that needs your OK is asked out loud, with Allow and Deny under it. Saying "yes" is enough for what Auto mode would run anyway; deleting, moving, sending and the like take a click on Allow, and it says so.
 - **The desktop HUD.** When Inglen isn't the focused window, a small dot grid floats over your other apps. Clicks pass through it; hold Ctrl to drag it.
 - **The microphone.** Voice mode uses the mic picked in Settings, Voice. Windows' microphone privacy setting decides whether apps may use it; if it's blocking the mic, voice mode says so and has a button that opens that setting.
-- **Wake word.** Right-click the tray icon and turn on **Listen for "Jarvis"** (it follows the agent's name). Saying the name opens voice mode.
+- **Wake word.** Right-click the tray icon and turn on **Listen for "Inglen"** (it follows the agent's name). Saying the name opens voice mode.
 - Voices, speed, the mic and the listening model are in Settings, Voice.
-- **In the terminal**, `/listen` uses the PC's own mic and speakers, with no echo cancelling: there, use headphones, or turn on Speakers mode in Settings, Voice, which stops listening while it talks (start with its name, "Jarvis, stop", to cut in).
+- **In the terminal**, `/listen` uses the PC's own mic and speakers, with no echo cancelling: there, use headphones, or turn on Speakers mode in Settings, Voice, which stops listening while it talks (start with its name, "Inglen, stop", to cut in).
 
 ---
 
@@ -81,7 +81,7 @@ In Auto, a reviewer reads your own messages in the chat and lets a step through 
 
 **Undo.** Before a file is written, edited, deleted or moved, Inglen keeps a copy of what was there. Type `/undo` in the window for a list of recent changes to put back; in the terminal `/undo` lists them and `/undo <n>` puts one back. Because of that, Auto deletes or moves things Inglen made itself in the past week without asking.
 
-When something needs your OK, a strip above the chat box asks: **Yes (once)**, **No**, **Always** or **Never** for that tool, or type what to do instead. Writes stay inside the workspace (`~/Jarvis`) unless you allow another folder. In the terminal, `/mode` sets the switch and `/perms` shows saved answers (`/perms forget <tool>`, `/perms reset`).
+When something needs your OK, a strip above the chat box asks: **Yes (once)**, **No**, **Always** or **Never** for that tool, or type what to do instead. Writes stay inside the workspace (`~/Inglen`, or `~/Jarvis` on an older install) unless you allow another folder. In the terminal, `/mode` sets the switch and `/perms` shows saved answers (`/perms forget <tool>`, `/perms reset`).
 
 ---
 
@@ -113,13 +113,13 @@ Say it however you like. Inglen works out the exact time and reads back the day 
 | `next monday at 10am` | the coming Monday, 10:00 |
 | `every weekday at 9am` | a recurring reminder |
 
-When it's time you get a Windows notification, and JARVIS says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone too** on (Settings, Connectors), it reaches your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what JARVIS knows about you.
+When it's time you get a Windows notification, and Inglen says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone too** on (Settings, Connectors), it reaches your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what Inglen knows about you.
 
 ---
 
 ## Your phone
 
-Message JARVIS from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, with voice notes, photos and files going both ways. Set it up in **Settings, Connectors**, or ask JARVIS to connect it. Someone new who messages your bot gets a short code, and nothing runs for them until you approve it in Connectors or with `/pair`. A step that would ask for your OK on the PC asks in the chat, and each phone conversation shows in the window's chat list with a title the brain gives it. Full steps in [PHONE.md](PHONE.md); writing your own connector is in [CONNECTORS.md](CONNECTORS.md).
+Message Inglen from Telegram, Discord or (experimentally) WhatsApp, and it runs on your PC and replies, with voice notes, photos and files going both ways. Set it up in **Settings, Connectors**, or ask Inglen to connect it. Someone new who messages your bot gets a short code, and nothing runs for them until you approve it in Connectors or with `/pair`. A step that would ask for your OK on the PC asks in the chat, and each phone conversation shows in the window's chat list with a title the brain gives it. Full steps in [PHONE.md](PHONE.md); writing your own connector is in [CONNECTORS.md](CONNECTORS.md).
 
 ### Inglen Plus
 
@@ -128,15 +128,15 @@ Plus is a paid add-on with a phone app of its own, no bot needed. In **Settings,
 - **On the phone.** Your chats, the window's included, with each reply's steps as they happen; Allow and Deny for risky steps; the brain and the approval mode; files and pictures from the PC; the Team room; recent file changes with Undo; and the sessions of Claude Code, Codex and other coding agents on the PC, which you can read and carry on. Changes on the phone show in the window at once, and the other way round.
 - **Notifications.** A question waiting (with Allow and Deny right on it), a finished reply, and a coding agent finishing on the PC.
 - **Calls.** Press the call button and talk. Both sides' words show as they're said, the timer starts when the PC is listening, and a soft tone says it's ready. Put the app away and the call carries on, with Mute and End in the notification. A spoken yes is enough for what Auto would run; anything riskier asks for a tap. The call's settings change the voice and the language, and turn the tones off. If the phone goes quiet, the PC ends the call.
-- **JARVIS calls you.** Off until you turn on **Let JARVIS call me** under Plus. Then pick the reasons (a reminder coming due, background work that finished or needs you, a question waiting for a few minutes), how long a question waits, and quiet hours (10 pm to 8 am to start with). It never calls while you're using the PC, and waits a while after a call you declined or missed. An unanswered call shows as missed.
+- **Inglen calls you.** Off until you turn on **Let Inglen call me** under Plus. Then pick the reasons (a reminder coming due, background work that finished or needs you, a question waiting for a few minutes), how long a question waits, and quiet hours (10 pm to 8 am to start with). It never calls while you're using the PC, and waits a while after a call you declined or missed. An unanswered call shows as missed.
 
 ---
 
 ## Memory and chats
 
-- **Memory.** Every fact JARVIS learns is a small file in `~/Jarvis/memory`. It keeps an index of them in view and looks up what a message needs, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
-- **Saving on its own.** Once a chat goes quiet, JARVIS notes lasting facts from it, on a model loaded on this PC when there is one and otherwise on the brain you use. Turn that off in Settings, Behavior, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
-- **What's going on.** When a chat goes quiet for a few minutes, JARVIS notes where it stands: the goal, what you settled on (a budget, a shortlist) and what's still left, like the phone you haven't bought yet or the form waiting on a payment. The newest of those come along with the first message of a new chat, so "guess what, I got it" gets a real guess. The **in mind** button under a reply lists each thing it used, with the chat it came from, and lets you forget one or mark it done. The Memory tab lists them under **Going on**. The same switch turns this off.
+- **Memory.** Every fact Inglen learns is a small file in the workspace's `memory` folder. It keeps an index of them in view and looks up what a message needs, and ones never used are archived rather than deleted. Read, change or delete them in the Memory tab.
+- **Saving on its own.** Once a chat goes quiet, Inglen notes lasting facts from it, on a model loaded on this PC when there is one and otherwise on the brain you use. Turn that off in Settings, Behavior, Remember things on its own, and it saves only when you ask. Telling it in a chat not to save something works too.
+- **What's going on.** When a chat goes quiet for a few minutes, Inglen notes where it stands: the goal, what you settled on (a budget, a shortlist) and what's still left, like the phone you haven't bought yet or the form waiting on a payment. The newest of those come along with the first message of a new chat, so "guess what, I got it" gets a real guess. The **in mind** button under a reply lists each thing it used, with the chat it came from, and lets you forget one or mark it done. The Memory tab lists them under **Going on**. The same switch turns this off.
 - **Past chats.** Every chat is searchable by words and by time, so "what did we decide about X last week" works.
 - **Shared with your coding agents.** The Memory tab's **Share with agents** has a switch for each of Claude Code, Codex, Cursor and OpenCode that you have installed. One that's on can use your memory as a tool, with your facts, past chats and what's going on, and nothing else of Inglen's.
 - **One set of chats.** A chat from the terminal shows in the window and can be carried on there, and `/chats` and `/chat <n>` open any chat in the terminal.
@@ -159,19 +159,19 @@ Ask for a picture or a short video in plain words. **Models, My Models** lists i
 
 ## Watching it use your desktop
 
-When JARVIS clicks and types in your apps, a soft edge in your accent colour breathes round the screen and a small pill says what it's doing. Move the mouse or type and it stops to let you have the screen. When it's done the edge fades, a short chime plays, and the window you were in comes back to the front.
+When Inglen clicks and types in your apps, a soft edge in your accent colour breathes round the screen and a small pill says what it's doing. Move the mouse or type and it stops to let you have the screen. When it's done the edge fades, a short chime plays, and the window you were in comes back to the front.
 
 ---
 
 ## Skills
 
-A skill is a folder that teaches JARVIS a workflow, like making a PDF or a slide deck. Built-in ones cover documents and diagrams. Skills use the Agent Skills format that Claude and Codex read too, so most skills on GitHub work here: paste a link or `owner/repo` in the Skills tab, ask in chat, or run `/skill install owner/repo`. Each one has a switch; one that's off stays on disk but JARVIS won't use it. Writing and sharing your own: [SKILLS.md](SKILLS.md).
+A skill is a folder that teaches Inglen a workflow, like making a PDF or a slide deck. Built-in ones cover documents and diagrams. Skills use the Agent Skills format that Claude and Codex read too, so most skills on GitHub work here: paste a link or `owner/repo` in the Skills tab, ask in chat, or run `/skill install owner/repo`. Each one has a switch; one that's off stays on disk but Inglen won't use it. Writing and sharing your own: [SKILLS.md](SKILLS.md).
 
 ---
 
 ## The terminal
 
-The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while JARVIS replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
+The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while Inglen replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
 
 ```
 /help            every command
@@ -229,12 +229,12 @@ The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the wi
 
 ## Settings
 
-- **Chat brain**: what JARVIS thinks with, as cards grouped by where it runs.
+- **Chat brain**: what Inglen thinks with, as cards grouped by where it runs.
 - **Voice**: voice, speed, microphone, speakers or headphones, the listening model.
 - **Behavior**: the agent's name, reasoning, house rules, Auto's reviewer, saving memories on its own, reading only inside the workspace, bringing memory over, the local server and per-tool permissions.
 - **Appearance**: Classic, Light, Dark or System, the accent, **Detail in chats** (Simple folds a reply's steps into one line you can open; Full shows each as its own card, with every counter in the status bar), the Team room, and how the chat looks (stats, diffs, bubbles, sounds, pop-ups).
 - **Connectors**: Telegram, Discord, WhatsApp, who is let in, and email.
-- **Plus**: the licence, pairing a phone, the phones you've paired, and whether JARVIS may call you.
+- **Plus**: the licence, pairing a phone, the phones you've paired, and whether Inglen may call you.
 - **Built-in server**: the engine's settings.
 - **MCP servers**: servers whose tools Inglen uses, each with its service's icon and a status dot (a failed one says why in a sentence; click it for the full error), and the config for using Inglen's tools from other apps.
 - **About**: version, updates, repair, start at login, and the tour.
@@ -246,7 +246,7 @@ Every page shows the same whichever detail you picked. Rows only an expert needs
 ## Where things live
 
 ```
-~/Jarvis/                  the assistant's home (HEARTH_WORKSPACE moves it)
+~/Inglen/                  the assistant's home (~/Jarvis on an older install; HEARTH_WORKSPACE moves it)
 ├── memory/                one file per fact, MEMORY.md as the index
 ├── conversations/         every chat, window and terminal
 ├── reminders.json         reminders
@@ -265,7 +265,7 @@ Reads default to your whole disk; writes, deletes and moves stay in the workspac
 
 ## When something goes wrong
 
-- **The app won't open**: check `~/Jarvis/logs/hearth_tray.log`. If Windows Defender quarantined `Hearth.exe`, restore it from Windows Security, Protection history.
+- **The app won't open**: check `logs/hearth_tray.log` in the workspace (`~/Inglen`, or `~/Jarvis` on an older install). If Windows Defender quarantined `Hearth.exe`, restore it from Windows Security, Protection history.
 - **A model won't load**: the error says why (too big for the card, a newer model than the engine, a format the engine can't read). Update the engine in Models, Engine, or pick a smaller file. A model made for another build of llama.cpp (its page says which) loads once you add that build under Models, Engine, Add an engine.
 - **An agent brain goes quiet**: after 90 seconds with no word from it, the chat says it may still be thinking, and Stop ends the turn. When the agent wrote an error to its own log (a used-up free limit, say), the turn ends with those words. Otherwise check it's signed in (`claude auth status`, `codex login status`, `cursor-agent status`), or open `/agents` in the terminal.
 - **Voice talks over itself on speakers**: in the window it cancels its own echo; if it still hears itself, headphones fix it. In the terminal's `/listen`, turn on Speakers mode in Settings, Voice.

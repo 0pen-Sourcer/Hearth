@@ -55,10 +55,12 @@ def main() -> int:
     out.append("# Tools\n")
     out.append(
         f"Inglen gives the model **{total} tools** to operate your machine. "
-        f"Everything runs locally, and the only outbound calls are web searches "
-        f"and fetches the model itself makes. Tools that act on your machine "
-        f"(shell, file writes, app launch, clicking and typing) ask permission "
-        f"before they run.\n"
+        f"Most work is local, but tools that are explicitly about the network "
+        f"(for example web search/fetch, email, phone/connectors, or configured "
+        f"cloud generation services) make the requests needed for that feature. "
+        f"Actions that change the machine or have external side effects follow "
+        f"Inglen's permission rules; see `SECURITY.md` for the threat model and "
+        f"known sharp edges.\n"
     )
     out.append(
         f"To keep the prompt small, **{n_default}** core tools load with their "

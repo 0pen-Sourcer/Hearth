@@ -1,8 +1,8 @@
 # Tools
 
-Inglen gives the model **112 tools** to operate your machine. Everything runs locally, and the only outbound calls are web searches and fetches the model itself makes. Tools that act on your machine (shell, file writes, app launch, clicking and typing) ask permission before they run.
+Inglen gives the model **109 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
 
-To keep the prompt small, **36** core tools load with their full description and **76** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **73** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -76,7 +76,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `get_time` † | Current local datetime, weekday, timezone offset |
 | `learn_environment` † | This machine as it is now: GPU/VRAM, RAM, OS and the models the local server has |
 | `list_installed_apps` † | Installed applications (Windows registry uninstall keys) |
-| `list_models` † | List the models the connected server or provider offers (LM Studio, Ollama, a cloud provider), from its API |
+| `list_models` † | List the models the current brain offers (Inglen's built-in engine, another local server, a cloud provider), from its API |
 | `list_processes` † | List running processes (top by memory) |
 | `load_model` † | Load a model file from this PC on Inglen's built-in engine |
 | `network_info` † | Local IP address, hostname, network adapters, wifi |
@@ -168,9 +168,6 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | Tool | What it does |
 |---|---|
 | `check_video_task` † | Check a video once, without waiting: pending, done, failed or expired |
-| `forge_generate` † | Make an image on this PC with the local Stable Diffusion install (Forge WebUI) |
-| `forge_shutdown` † | Kill the Forge process to free VRAM back to the LLM |
-| `forge_status` † | Check if Forge WebUI is running and reachable |
 | `generate_image` † | Make an image (picture, photo, artwork, illustration) from a text prompt, or change one (pass its path as image) |
 | `generate_video` † | Start making a video: on this PC when a video model is set up under Models, else with xAI Grok (a saved Grok key) |
 | `list_generations` † | List the 10 most recent image/video generation tasks (live + finished) |

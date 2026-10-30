@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: An idea for something Hearth should be able to do
+about: An idea for something Inglen should be able to do
 title: '[feature] '
 labels: enhancement
 assignees: ''

@@ -8999,6 +8999,7 @@ function makeSubagentCard(notif) {
 }
 
 const _ICON_MAKER = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 2.1 3.2-.3.9 3.1 2.8 1.6-1.2 3 1.2 3-2.8 1.6-.9 3.1-3.2-.3L12 22l-2.4-2.1-3.2.3-.9-3.1-2.8-1.6 1.2-3-1.2-3 2.8-1.6.9-3.1 3.2.3z"/><path d="m8.5 12 2.4 2.4 4.6-4.8"/></svg>';
+// forge_generate is gone as a tool; older chats that used it still show their pictures.
 const MEDIA_MAKERS = new Set(['generate_image', 'generate_video', 'check_video_task', 'forge_generate']);
 const _ICON_FOLDER = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 // A picture or video a tool names on a line of its own (tools.media_line):
@@ -11953,8 +11954,8 @@ async function send(forced = null, displayAs = null, opts = {}) {
       // cloud providers (Grok / OpenAI / Gemini) return the finished image
       // in ONE shot, no intermediate frames. So instead of faking
       // progress we just keep the user company with motion that matches
-      // the Inglen palette. Forge could show real diffusion steps in v0.7.
-      if (ev.name === 'generate_image' || ev.name === 'generate_video' || ev.name === 'forge_generate') {
+      // the Inglen palette.
+      if (ev.name === 'generate_image' || ev.name === 'generate_video') {
         const isVid = ev.name === 'generate_video';
         const beats = isVid
           ? ['Sketching the scene…', 'Choreographing motion…', 'Lighting the set…',

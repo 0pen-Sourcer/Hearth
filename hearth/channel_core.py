@@ -987,7 +987,7 @@ def _what(name: str, args: Dict[str, Any]) -> str:
     if name in ("delegate", "launch_team"):
         who = a.get("agent") or a.get("runtime") or "another agent"
         return f"hand this to {who}" + (f": \"{cut(a.get('task') or a.get('prompt'), 80)}\"" if a.get("task") or a.get("prompt") else "")
-    if name in ("generate_image", "generate_video", "forge_generate"):
+    if name in ("generate_image", "generate_video"):
         return f"make {'a video' if 'video' in name else 'an image'}" + (f" of \"{cut(a.get('prompt'), 80)}\"" if a.get("prompt") else "")
     if name == "load_model":
         return f"load {a.get('model') or a.get('name') or 'another model'}"

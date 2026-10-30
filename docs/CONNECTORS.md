@@ -2,13 +2,13 @@
 
 Inglen answers on Telegram, Discord and WhatsApp out of the box ([PHONE.md](PHONE.md)). Any other
 chat app can be added with one small Python file in your workspace's `connectors` folder
-(`~/Jarvis/connectors/`). You write how messages come in and go out. Inglen brings the rest, the
+(`~/Inglen/connectors/`, or `~/Jarvis/connectors/` on an older install). You write how messages come in and go out. Inglen brings the rest, the
 same as for Telegram: who may talk (pairing codes), each conversation kept as an Inglen chat, the
 "may I" question before a risky step, voice notes written down, files and pictures both ways, and
 messages sent mid-reply joining it.
 
 A connector shows up under **Settings, Connectors, Your own connectors**, where **Start** runs it.
-From a terminal it runs with `python -m hearth.custom_connector <file name>`. JARVIS can write one
+From a terminal it runs with `python -m hearth.custom_connector <file name>`. Inglen can write one
 for you too.
 
 ## The shape of one
@@ -66,6 +66,6 @@ class Folder(Adapter):
             time.sleep(2)
 ```
 
-Save it as `~/Jarvis/connectors/folder.py`, press **Start** next to it in Connectors, and drop
+Save it as `connectors/folder.py` in your workspace, press **Start** next to it in Connectors, and drop
 `groceries.txt` with "what's on my list for tomorrow?" in the folder. The answer lands in
 `groceries.reply.txt`, and the conversation is in Inglen's chats as "Inbox folder".

@@ -98,7 +98,7 @@ MUTATING_TOOLS = frozenset({
     "run_command", "open_app", "open_url", "open_in_browser",
     "memory_save", "memory_forget", "set_reminder", "cancel_reminder",
     "extract_archive_file", "set_voice", "clipboard_write",
-    "forge_generate", "forge_shutdown", "end_session",
+    "end_session",
     "create_plugin", "delete_plugin",
     "browse_click", "browse_type",
     "learn_environment",

@@ -1595,45 +1595,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
 
-    # ---- IMAGE GENERATION (Forge / SD WebUI orchestration) ----
-    {
-        "name": "forge_generate",
-        "description": (
-            "Make an image on this PC with the local Stable Diffusion install "
-            "(Forge WebUI). Frees the GPU from the chat model first, starts Forge "
-            "if needed, saves the image in the workspace's generated folder and "
-            "shows it in the chat; Forge stays up for follow-ups and frees the GPU "
-            "after a while idle (forge_shutdown frees it now). Write the prompt the "
-            "way the loaded checkpoint expects (forge_status names it): "
-            "comma-separated tags for Pony and other anime-trained models, a plain "
-            "description for SDXL, Flux and most others."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "positive": {"type": "string", "description": "What to draw, in the style the checkpoint expects."},
-                "negative": {"type": "string", "description": "What to keep out. Default: 'low quality, blurry, deformed, extra limbs, bad anatomy'."},
-                "width": {"type": "integer", "description": "Default 1024."},
-                "height": {"type": "integer", "description": "Default 1024."},
-                "steps": {"type": "integer", "description": "Default 25."},
-                "cfg_scale": {"type": "number", "description": "Default 6."},
-                "sampler": {"type": "string", "description": "Default 'Euler a'."},
-                "seed": {"type": "integer", "description": "Default -1 (random)."},
-            },
-            "required": ["positive"],
-        },
-    },
-    {
-        "name": "forge_status",
-        "description": "Check if Forge WebUI is running and reachable. Returns url + status.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "forge_shutdown",
-        "description": "Kill the Forge process to free VRAM back to the LLM. Use after you're done generating images.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-
     # ---- VOICE ----
     {
         "name": "set_voice",
@@ -1688,12 +1649,6 @@ def _filter_unavailable_tools() -> None:
     # Windows-only registry probe
     if sys.platform != "win32":
         drop.add("list_installed_apps")
-
-    # NOTE: the Forge / SD-WebUI local-image tools used to be dropped here
-    # behind HEARTH_ENABLE_FORGE=1. They're now handled AFTER FORGE_DIR is
-    # auto-detected (see the forge section), so a detected install lights them
-    # up automatically. They're in _DEFERRED_TOOLS, so they cost ~0 prompt
-    # tokens until the model calls load_tools('image').
 
     if drop:
         NOT_ON_THIS_PC.update(drop)
@@ -5884,9 +5839,9 @@ def _memory_forget(p: Dict) -> str:
 # ============================================================
 
 # --------------------------------------------------------------------------
-# Forge WebUI orchestration (Stable Diffusion image generation).
-# Point HEARTH_FORGE_DIR at your local Forge / SD-WebUI install (e.g.
-# D:\AI\sd-webui-forge). We boot it with --api so /sdapi/v1/* is exposed.
+# A Forge / Stable Diffusion WebUI install on this PC. The image engine reads its
+# model folders where they are (sdserver.forge_models). The forge_dir setting or
+# HEARTH_FORGE_DIR names one; otherwise common places are searched.
 # --------------------------------------------------------------------------
 
 def _autodetect_forge_dir() -> str:
@@ -6014,333 +5969,6 @@ def _looks_like_forge(path: str) -> bool:
 
 
 FORGE_DIR = _autodetect_forge_dir()
-FORGE_URL = _env.get("FORGE_URL", "http://127.0.0.1:7860")
-FORGE_BOOT_TIMEOUT = int(_env.get("FORGE_BOOT_TIMEOUT", "180"))
-
-# Light up the local Forge image-gen tools when an install is actually present
-# (or HEARTH_ENABLE_FORGE=1 forces them). They're deferred, so they don't bloat
-# the prompt — the model reveals them with load_tools('image') and the user's
-# local SD model (e.g. a Pony checkpoint) becomes usable. With no install and no
-# flag, drop them so a normal user's toolset stays clean.
-if not (os.environ.get("HEARTH_ENABLE_FORGE", "0") == "1"
-        or (FORGE_DIR and os.path.isdir(FORGE_DIR))):
-    NOT_ON_THIS_PC.update({"forge_generate", "forge_status", "forge_shutdown"})
-    TOOL_DEFINITIONS[:] = [t for t in TOOL_DEFINITIONS
-                           if t["name"] not in {"forge_generate", "forge_status", "forge_shutdown"}]
-
-# Track the subprocess so we can shut it down later. Module-level so it
-# survives across tool calls within a single Hearth session.
-_forge_proc: Optional[subprocess.Popen] = None
-
-# Auto-deload: Forge holds the whole SDXL checkpoint in VRAM (~6.5 GB) the entire
-# time it's up. After a stretch with no generation we shut it down so the GPU
-# isn't hoarded — the LLM (or the desktop) gets its VRAM back. Each
-# forge_generate bumps the timer; a daemon watcher kills Forge once idle.
-_forge_last_used: float = 0.0
-_forge_idle_timeout: int = int(_env.get("FORGE_IDLE_TIMEOUT", "300"))
-_forge_idle_watcher_on: bool = False
-# When the active brain is Hearth's builtin llama.cpp server (not LM Studio),
-# it can't JIT-unload — so to free VRAM for Forge we fully STOP it and remember
-# what it was running, then restart it from this snapshot when Forge shuts down.
-_builtin_paused: "Optional[Dict[str, Any]]" = None
-
-
-def _start_forge_idle_watcher() -> None:
-    """Spawn (once) a daemon that shuts Forge down after _forge_idle_timeout
-    seconds without a generation. Set HEARTH_FORGE_IDLE_TIMEOUT=0 to disable."""
-    global _forge_idle_watcher_on
-    if _forge_idle_watcher_on or _forge_idle_timeout <= 0:
-        return
-    import threading as _threading
-    _forge_idle_watcher_on = True
-
-    def _watch():
-        global _forge_idle_watcher_on
-        import time as _t
-        while True:
-            _t.sleep(20)
-            # Nothing to guard if we don't manage a live Forge process.
-            if _forge_proc is None or _forge_proc.poll() is not None:
-                _forge_idle_watcher_on = False
-                return
-            if _forge_last_used and (_t.time() - _forge_last_used) > _forge_idle_timeout:
-                try:
-                    _forge_shutdown({})
-                    _log_activity("forge_idle_shutdown",
-                                  {"idle_s": int(_t.time() - _forge_last_used)})
-                except Exception:
-                    pass
-                _forge_idle_watcher_on = False
-                return
-
-    _threading.Thread(target=_watch, daemon=True, name="forge-idle").start()
-
-
-def _forge_checkpoint(timeout: float = 3.0) -> str:
-    """The checkpoint Forge has loaded, or '' when it can't say."""
-    try:
-        with urllib.request.urlopen(f"{FORGE_URL}/sdapi/v1/options", timeout=timeout) as r:
-            return str((json.loads(r.read() or b"{}") or {}).get("sd_model_checkpoint") or "")
-    except Exception:
-        return ""
-
-
-def _forge_reachable(timeout: float = 1.5) -> bool:
-    try:
-        req = urllib.request.Request(f"{FORGE_URL}/sdapi/v1/options",
-                                     method="GET")
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status == 200
-    except Exception:
-        return False
-
-
-def _forge_status(p: Dict) -> str:
-    proc_alive = _forge_proc is not None and _forge_proc.poll() is None
-    reachable = _forge_reachable()
-    info = {
-        "forge_dir": FORGE_DIR,
-        "url": FORGE_URL,
-        "process_managed_by_jarvis": proc_alive,
-        "api_reachable": reachable,
-        "ready": reachable,
-    }
-    if reachable:
-        info["checkpoint"] = _forge_checkpoint()
-    if not os.path.isdir(FORGE_DIR):
-        info["error"] = f"FORGE_DIR not found: {FORGE_DIR} — set HEARTH_FORGE_DIR"
-    return json.dumps(info, indent=2)
-
-
-def _boot_forge() -> str:
-    """Launch Forge with --api flag. Returns '' on success, error message on
-    failure. Already-running Forge counts as success."""
-    global _forge_proc
-    if _forge_reachable():
-        return ""  # already up — fine
-    if not os.path.isdir(FORGE_DIR):
-        return f"Error: Forge dir not found: {FORGE_DIR}"
-    # Use the universal launcher which sets up venv + env, plus --api so
-    # /sdapi/v1/* is exposed. --nowebui would disable the gradio UI entirely
-    # but many setups need the UI thread alive; --api alongside the UI is
-    # the safest default.
-    webui_bat = os.path.join(FORGE_DIR, "webui.bat")
-    if not os.path.isfile(webui_bat):
-        # fall back to webui-user.bat which chains into webui.bat
-        webui_bat = os.path.join(FORGE_DIR, "webui-user.bat")
-    if not os.path.isfile(webui_bat):
-        return f"Error: no webui.bat or webui-user.bat in {FORGE_DIR}"
-    # Forge/A1111's --listen is a NO-ARGUMENT flag (it binds 0.0.0.0); the host
-    # and port come from --server-name / --port. Passing "--listen=127.0.0.1"
-    # makes launch.py abort ("argument --listen: ignored explicit argument").
-    # 127.0.0.1:7860 is already Forge's default, so we only add overrides when
-    # FORGE_URL points somewhere non-default.
-    from urllib.parse import urlparse as _urlparse
-    _fu = _urlparse(FORGE_URL)
-    forge_args = ["cmd", "/c", webui_bat, "--api"]
-    if _fu.port and _fu.port != 7860:
-        forge_args += ["--port", str(_fu.port)]
-    if _fu.hostname and _fu.hostname not in ("127.0.0.1", "localhost"):
-        forge_args += ["--server-name", _fu.hostname]
-    try:
-        _forge_proc = popen_outside(forge_args, console=True, cwd=FORGE_DIR, stdin=subprocess.DEVNULL)
-    except Exception as e:
-        return f"Error launching Forge: {e}"
-    # Poll until the API answers
-    import time as _t
-    deadline = _t.time() + FORGE_BOOT_TIMEOUT
-    while _t.time() < deadline:
-        if _forge_reachable(timeout=2.0):
-            return ""
-        if _forge_proc.poll() is not None:
-            return f"Error: Forge process exited with code {_forge_proc.returncode}"
-        _t.sleep(2)
-    return f"Error: Forge didn't become reachable on {FORGE_URL} within {FORGE_BOOT_TIMEOUT}s"
-
-
-def _try_release_llm_vram() -> str:
-    """Best-effort: tell LM Studio to JIT-eject the loaded model so Forge
-    can grab VRAM. LM Studio's native API (/api/v0/models/<id>) supports
-    POST with body {"loaded": false}, but the exact shape varies by build.
-    We try both shapes; failure is non-fatal (Forge can also coexist if
-    you have enough VRAM headroom)."""
-    # Builtin llama.cpp server: it holds the model in VRAM and can't JIT-unload,
-    # so stop it outright and snapshot what it was running for restore later
-    # (done in _forge_shutdown). This is the builtin half of the VRAM dance.
-    global _builtin_paused
-    try:
-        from . import llmserver as _ls
-        if _ls._proc is not None and _ls._proc.poll() is None:
-            _builtin_paused = dict(_ls._proc_info or {})
-            _ls.stop_builtin()
-            return "stopped builtin LLM server (restored after image gen)"
-    except Exception:
-        _builtin_paused = None
-
-    # Most reliable: LM Studio's own CLI (`lms unload --all`). The REST unload
-    # endpoints aren't exposed on every build, but the CLI ships with LM Studio
-    # and actually frees the VRAM. Try it first, on PATH or the default install.
-    import shutil as _shutil
-    lms = _shutil.which("lms") or os.path.expanduser(
-        os.path.join("~", ".lmstudio", "bin", "lms.exe"))
-    if lms and os.path.isfile(lms):
-        try:
-            subprocess.run([lms, "unload", "--all"], timeout=20,
-                           capture_output=True,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            return "unloaded via lms CLI"
-        except Exception:
-            pass
-
-    base = os.environ.get("LOCAL_API_BASE", _local_base())
-    native = base.replace("/v1", "/api/v0")
-    candidates = [
-        # Newer LM Studio: /api/v0/models with action
-        (f"{native}/models/unload", b""),
-        (f"{base}/models/unload", b""),
-    ]
-    for url, body in candidates:
-        try:
-            req = urllib.request.Request(url, data=body, method="POST")
-            with urllib.request.urlopen(req, timeout=3) as r:
-                if 200 <= r.status < 300:
-                    return f"unloaded via {url}"
-        except Exception:
-            continue
-    return "LM Studio unload not exposed — relying on VRAM headroom"
-
-
-def _forge_shutdown(p: Dict) -> str:
-    global _forge_proc
-    msgs = []
-    if _forge_proc is not None and _forge_proc.poll() is None:
-        try:
-            # Send Ctrl-Break to the new console group on Windows, then kill
-            if sys.platform == "win32":
-                _forge_proc.send_signal(subprocess.signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        try:
-            _forge_proc.terminate()
-            _forge_proc.wait(timeout=10)
-            msgs.append("forge process terminated")
-        except subprocess.TimeoutExpired:
-            _forge_proc.kill()
-            msgs.append("forge process killed (didn't terminate cleanly)")
-        except Exception as e:
-            msgs.append(f"shutdown error: {e}")
-        _forge_proc = None
-    else:
-        # Maybe the user launched it manually — try the API's own shutdown
-        try:
-            req = urllib.request.Request(
-                f"{FORGE_URL}/sdapi/v1/server-kill",
-                data=b"",
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=5) as _r:
-                msgs.append("requested forge api shutdown")
-        except Exception:
-            msgs.append("no jarvis-managed forge to kill, and API kill failed")
-
-    # Restore the builtin LLM server if we paused it to free VRAM for Forge.
-    global _builtin_paused
-    if _builtin_paused:
-        mp = _builtin_paused.get("model_path")
-        if mp and os.path.exists(mp):
-            try:
-                from . import llmserver as _ls
-                _ls.start_builtin(mp, port=_builtin_paused.get("port"),
-                                  ctx=int(_builtin_paused.get("ctx") or 24576))
-                msgs.append("restored builtin LLM server")
-            except Exception as e:
-                msgs.append(f"builtin restore failed: {type(e).__name__}")
-        _builtin_paused = None
-
-    return "; ".join(msgs) or "nothing to do"
-
-
-def _forge_generate(p: Dict) -> str:
-    """Run the full txt2img pipeline. Returns the path to the saved image
-    or an Error: line."""
-    import base64 as _b64
-
-    positive = (p.get("positive") or "").strip()
-    if not positive:
-        return "Error: positive prompt required"
-    negative = (p.get("negative") or
-                "low quality, blurry, deformed, extra limbs, bad anatomy")
-    width = int(p.get("width") or 1024)
-    height = int(p.get("height") or 1024)
-    steps = int(p.get("steps") or 25)
-    cfg = float(p.get("cfg_scale") or 6.0)
-    sampler = p.get("sampler") or "Euler a"
-    seed = int(p.get("seed") or -1)
-
-    # 1) Free the GPU from the chat model (best-effort)
-    vram_msg = _try_release_llm_vram()
-
-    # 2) Make sure Forge is up
-    boot_err = _boot_forge()
-    if boot_err:
-        return boot_err
-    # Mark active + start the idle watcher so Forge auto-deloads its VRAM once
-    # we stop generating (bumped again after the image lands below).
-    global _forge_last_used
-    _forge_last_used = time.time()
-    _start_forge_idle_watcher()
-
-    # 3) txt2img
-    body = json.dumps({
-        "prompt": positive,
-        "negative_prompt": negative,
-        "width": width,
-        "height": height,
-        "steps": steps,
-        "cfg_scale": cfg,
-        "sampler_name": sampler,
-        "seed": seed,
-    }).encode("utf-8")
-    try:
-        req = urllib.request.Request(
-            f"{FORGE_URL}/sdapi/v1/txt2img",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=600) as r:
-            payload = json.loads(r.read().decode())
-    except Exception as e:
-        return f"Error: txt2img call failed: {e}"
-
-    images = payload.get("images") or []
-    if not images:
-        return f"Error: Forge returned no images. Response info: {payload.get('info', '')[:300]}"
-
-    # 4) Save the first image
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join(WORKSPACE, "generated")
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"forge_{ts}.png")
-    try:
-        with open(out_path, "wb") as f:
-            f.write(_b64.b64decode(images[0]))
-    except Exception as e:
-        return f"Error: failed to decode/save image: {e}"
-
-    # Restart the idle countdown from completion of this generation.
-    _forge_last_used = time.time()
-    _idle_note = (f"auto-frees VRAM after {_forge_idle_timeout//60} min idle"
-                  if _forge_idle_timeout > 0 else
-                  "auto-deload off — call forge_shutdown to free VRAM")
-    ckpt = _forge_checkpoint()
-    return (
-        f"Saved: {out_path}" + (f" ({ckpt})" if ckpt else "") + "\n"
-        f"prompt: {positive}\n"
-        f"(GPU: {vram_msg}. Forge stays up for follow-ups; {_idle_note}.)\n"
-        + media_line("image", out_path, os.path.getsize(out_path), "png")
-    )
-
 
 def _set_voice(p: Dict) -> str:
     from . import voice as _voice
@@ -6852,9 +6480,6 @@ _HANDLERS = {
     "memory_forget": _memory_forget,
     "set_voice": _set_voice,
     "list_voices": _list_voices,
-    "forge_generate": _forge_generate,
-    "forge_status": _forge_status,
-    "forge_shutdown": _forge_shutdown,
     "end_session": _end_session,
     "get_time": _get_time,
     "whoami": _whoami,
@@ -8678,7 +8303,6 @@ _DRYRUN_GUARDED = {
     "connectors",                        # connects an app, lets someone in
     "helper_changes",                    # brings a helper's changes into real folders
     "race_helpers",                      # starts agent programs and runs a command
-    "forge_generate", "forge_shutdown",  # drive an external image server
     "load_model",                        # starts the engine and fills the graphics card
     "agent_sessions",                    # sends a message into a coding agent's session
 }
@@ -8966,13 +8590,8 @@ _DEFERRED_TOOLS = {
     "read_chat",
     # loading a model file: list_models points at it
     "load_model",
-    # image / video generation. All deferred, including forge_generate: local
-    # Forge image-gen is niche (most turns aren't image gen), and its schema is
-    # one of the heavier ones, so it shouldn't sit in every prompt just because
-    # a Forge install exists. The model reveals it via load_tools('image') when
-    # the user actually asks for a picture.
+    # image / video generation: most turns aren't, so load_tools('image') brings them in
     "generate_image", "generate_video", "check_video_task", "list_generations",
-    "forge_generate", "forge_status", "forge_shutdown",
     # self-extending
     "create_plugin", "list_plugins", "delete_plugin", "create_skill",
     # summarising a long document, reached when read_file says a file is too big
@@ -9312,7 +8931,7 @@ _RISKY_TOOLS: set = {
     "computer_click", "computer_type", "computer_key", "computer_scroll", "computer_drag",
     "desktop_click", "desktop_type", "execute_actions", "smart_click",
     "launch_team", "browse_click", "browse_type", "browse_key",
-    "disk_usage", "forge_generate", "forge_shutdown",
+    "disk_usage",
     "generate_image", "generate_video",
     # Bringing in, discarding or undoing a helper's work changes files.
     "helper_changes",
@@ -9667,8 +9286,6 @@ _TOOL_CATEGORY = {
     # Image generation
     "generate_image": "Image generation", "generate_video": "Image generation",
     "check_video_task": "Image generation", "list_generations": "Image generation",
-    "forge_generate": "Image generation", "forge_status": "Image generation",
-    "forge_shutdown": "Image generation",
     # Session
     "end_session": "Session", "ask_user": "Session", "worklog": "Session",
 }
