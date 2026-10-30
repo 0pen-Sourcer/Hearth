@@ -1163,6 +1163,12 @@ Emit = Callable[..., None]           # emit(kind, **fields): "step", "live", "th
 Ask = Callable[[str], bool]          # ask(question) -> allowed
 
 
+def attached(paths: List[str]) -> str:
+    """What a coding agent is told about files sent with a message from the phone: where they are, to open."""
+    return "".join(f"\n\n[Attached from the phone: {os.path.basename(p)}, saved at {p}. Open it to look at it.]"
+                   for p in paths if p)
+
+
 def _mode() -> str:
     try:
         from .tools import approval_mode

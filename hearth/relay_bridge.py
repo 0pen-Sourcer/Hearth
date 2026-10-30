@@ -1516,7 +1516,14 @@ class Bridge:
             return
         from . import agent_sessions
         if agent_sessions.parse_chat(str(m.get("chat") or "")):
-            self.agent_say(room, m)
+            # Pictures and files sent into a coding agent's session go with the message, saved where it can open them.
+            paths = []
+            for f in m.get("files") or []:
+                try:
+                    paths.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
+                except Exception:
+                    continue
+            self.agent_say(room, dict(m, paths=paths))
             return
         files = []
         for f in m.get("files") or []:
@@ -1584,7 +1591,7 @@ class Bridge:
         no while it waits on a question answers the question."""
         from . import agent_sessions
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
-        text = str(m.get("text") or "").strip()
+        text = (str(m.get("text") or "").strip() + agent_sessions.attached(m.get("paths") or [])).strip()
         turn = secrets.token_hex(5)
 
         def push(obj: Dict[str, Any]) -> None:
