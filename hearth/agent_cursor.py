@@ -101,12 +101,8 @@ def render(heading: float, fill: float, scale: float, rgb: tuple):
 
     ar, ag, ab = rgb
     fill = min(1.0, max(0.0, fill))
-    # The dot's inside: ink when empty, accent when pressed (premultiplied, 0..1).
-    in_a = _INK_A + (1.0 - _INK_A) * fill
-    in_r = (_INK[0] * _INK_A * (1 - fill) + ar * fill) / 255.0
-    in_g = (_INK[1] * _INK_A * (1 - fill) + ag * fill) / 255.0
-    in_b = (_INK[2] * _INK_A * (1 - fill) + ab * fill) / 255.0
     ring_mid = r_dot - _RING
+    ring_px = 2 * _RING * k
     out = bytearray(w * h * 4)
     inv = 1.0 / k
     o = 0
@@ -119,11 +115,13 @@ def render(heading: float, fill: float, scale: float, rgb: tuple):
             db = (_bracket_dist(mx, my) - _HALF) * k
             dd = math.hypot(mx - _DOT_C, my - _DOT_C)
             ddot = (dd - r_dot) * k
-            a_edge = _INK_A * _cov(min(db, ddot) - edge)
-            if a_edge <= 0.0:
+            # The ink edge rims the dot's outside only: an empty dot stays hollow.
+            rim = max(ddot - edge, -(ddot + ring_px))
+            a_edge = _INK_A * _cov(min(db - edge, rim))
+            if a_edge <= 0.0 and not (fill > 0.0 and ddot < 0.5):
                 o += 4
                 continue
-            # Ink edge, then the cream corner, then the dot's inside, then its ring.
+            # Ink edge, then the cream corner, then the accent filling the dot, then its ring.
             pa = a_edge
             pr = _INK[0] / 255.0 * a_edge
             pg = _INK[1] / 255.0 * a_edge
@@ -136,11 +134,12 @@ def render(heading: float, fill: float, scale: float, rgb: tuple):
                 pa = a + pa * (1 - a)
             a = _cov(ddot)
             if a > 0.0:
-                pr = in_r * a + pr * (1 - in_a * a)
-                pg = in_g * a + pg * (1 - in_a * a)
-                pb = in_b * a + pb * (1 - in_a * a)
-                pa = in_a * a + pa * (1 - in_a * a)
-                a = _cov((abs(dd - ring_mid) - _RING) * k) * (1.0 - fill)
+                a *= fill
+                pr = ar / 255.0 * a + pr * (1 - a)
+                pg = ag / 255.0 * a + pg * (1 - a)
+                pb = ab / 255.0 * a + pb * (1 - a)
+                pa = a + pa * (1 - a)
+                a = _cov((abs(dd - ring_mid) - _RING) * k)
                 if a > 0.0:
                     pr = ar / 255.0 * a + pr * (1 - a)
                     pg = ag / 255.0 * a + pg * (1 - a)

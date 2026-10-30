@@ -69,7 +69,7 @@ k = ac._UNIT
 hx = ac._TIP - ac._GAP / k / math.sqrt(2)
 dot = (f0[0] // 2 + int((dc - hx) * k), f0[0] // 2 + int((dc - hx) * k))
 check("the dot is empty at rest and filled with the accent when pressed",
-      f0[5] != f1[5] and alpha_at(f1, *dot) == 255)
+      alpha_at(f0, *dot) == 0 and alpha_at(f1, *dot) == 255)
 check("a scaled display gets a larger canvas, drawn at its own pixels",
       ac.render(-135, 0, 1.5, rose)[0] > ac.render(-135, 0, 1.0, rose)[0])
 

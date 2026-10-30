@@ -63,7 +63,8 @@ _CURSOR_JS = r"""
       + 'stroke-width="' + (6 + 2 * E) + '" stroke-linecap="round"/>'
       + '<path d="M16 40V22a6 6 0 0 1 6-6h18" fill="none" stroke="#ecebe7" stroke-width="6" stroke-linecap="round"/>'
       + '<g class="d" style="transform-origin:38px 38px">'
-      + '<circle cx="38" cy="38" r="' + (9 + E) + '" fill="#1f1c19" fill-opacity=".62"/>'
+      + '<circle cx="38" cy="38" r="' + (7.5 + E / 2) + '" fill="none" stroke="#1f1c19" '
+      + 'stroke-opacity=".62" stroke-width="' + (3 + E) + '"/>'
       + '<circle class="r" cx="38" cy="38" r="7.5" fill="none" stroke="var(--hc)" stroke-width="3"/>'
       + '<circle class="f" cx="38" cy="38" r="9" fill="var(--hc)" opacity="0"/></g></svg>';
     (document.body || document.documentElement).appendChild(c);
