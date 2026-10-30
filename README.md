@@ -1,7 +1,7 @@
 <h1 align="center">Inglen</h1>
 
 <p align="center">
-  <strong>Your own JARVIS, running on your own PC.</strong>
+  <strong>Your own assistant, running on your own PC.</strong>
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 I built Inglen at 17 because I wanted the assistant from the films, the one that knows you and actually does things, and nothing I could run on my own PC came close. Chat apps can't touch your machine. Coding agents stay inside a code folder. Cloud assistants forget you when the tab closes.
 
-Inglen is the framework (it was called Hearth until v0.7.6, and the files and settings still use that name). JARVIS is the assistant it comes with, and you can rename it to anything. It runs on whatever brain you give it, keeps its memory on your disk, and asks before it does anything risky.
+Inglen is the app, and on a new install it is the assistant's name too; you can rename it to anything. It was called Hearth until v0.7.6, and the files and settings still use that name. An older install keeps the name and the folder it already had. Inglen runs on whatever brain you give it, keeps its memory on your disk, and asks before risky steps.
 
 ## Get started in three steps
 
@@ -65,11 +65,11 @@ Inglen reads and writes files, including PDF, Word, Excel, PowerPoint, EPUB and 
 
 ### Brains
 
-A model on this PC through the built-in llama.cpp server, LM Studio, Ollama, vLLM or anything OpenAI-compatible. A cloud model with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq. Or **Claude Code, Codex or Cursor**, on the plan you already pay for and with no API key. Other agents that speak the Agent Client Protocol can be the brain once installed, such as OpenCode, Copilot CLI, Goose and Grok Build; OpenCode has been run this way, the others follow the protocol. JARVIS thinks with the agent and still uses Inglen's tools, memory and voice. You switch between all of them from one menu at the top of the window, mid-conversation, without restarting. A model on this PC can stay loaded under a cloud brain, so helpers keep working for free.
+A model on this PC through the built-in llama.cpp server, LM Studio, Ollama, vLLM or anything OpenAI-compatible. A cloud model with your own key from Anthropic, OpenAI, Google Gemini, OpenRouter, xAI or Groq. Or **Claude Code, Codex or Cursor**, on the plan you already pay for and with no API key. Other agents that speak the Agent Client Protocol can be the brain once installed, such as OpenCode, Copilot CLI, Goose and Grok Build; OpenCode has been run this way, the others follow the protocol. The assistant thinks with the agent and still uses Inglen's tools, memory and voice. You switch between all of them from one menu at the top of the window, mid-conversation, without restarting. A model on this PC can stay loaded under a cloud brain, so helpers keep working for free.
 
 ### Helpers and the Team room
 
-Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs". Each helper walks into the Team room, sits at a desk and works, and clicking anyone shows who asked, the task and every step so far. You can tell a working helper something or stop it, helpers message each other and JARVIS as they go, and each report comes back to JARVIS. An agent program working in a git repository gets its own copy, and its changes wait for you to bring them in, discard them or undo them. Past eight helpers the next room opens, and there is a winter cabin, a library and an ocean room besides the first. Helpers can also be other agent programs, each on your own install and account. Claude Code, Codex, Cursor and OpenCode have been run from Inglen; it has adapters for 19 more, among them Gemini CLI, Copilot CLI, Aider and Goose, written from each one's documented headless mode and not yet run here. Starting a helper by hand shows the ones on your PC and how to get the rest.
+Bigger jobs go to helpers. One sentence starts a mixed team, like "three on Codex for the frontend, two on Claude Haiku for the tests, one on this PC for the docs". Each helper walks into the Team room, sits at a desk and works, and clicking anyone shows who asked, the task and every step so far. You can tell a working helper something or stop it, helpers message each other and the assistant as they go, and each report comes back to it. An agent program working in a git repository gets its own copy, and its changes wait for you to bring them in, discard them or undo them. Past eight helpers the next room opens, and there is a winter cabin, a library and an ocean room besides the first. Helpers can also be other agent programs, each on your own install and account. Claude Code, Codex, Cursor and OpenCode have been run from Inglen; it has adapters for 19 more, among them Gemini CLI, Copilot CLI, Aider and Goose, written from each one's documented headless mode and not yet run here. Starting a helper by hand shows the ones on your PC and how to get the rest.
 
 ### Voice
 
@@ -77,15 +77,15 @@ Press the mic and talk. Speech-to-text (faster-whisper) and text-to-speech (Koko
 
 ### Memory and skills
 
-Every fact JARVIS learns is a small markdown file in your workspace that you can read, edit or delete. JARVIS keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. Each chat keeps a short card of where it stands (the goal, what's done and what's still open), so a new chat that starts with "guess what" gets a real guess, and each reply can show what it had in mind. Every past chat is searchable, by words or by time ("what did we do last Tuesday"), and one switch shares your memory with Claude Code, Codex, Cursor or OpenCode so they know you too. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and it uses the Agent Skills format Claude and Codex read too, so most skills on GitHub install here in one line, `/skill install owner/repo`, and each can be switched off without removing it. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
+Every fact Inglen learns is a small markdown file in your workspace that you can read, edit or delete. It keeps an index of them in view and looks up the ones a message needs. It notes lasting facts on its own unless you turn that off, ones that are never used are archived rather than deleted, and a new fact that overlaps an old one updates it. Each chat keeps a short card of where it stands (the goal, what's done and what's still open), so a new chat that starts with "guess what" gets a real guess, and each reply can show what it had in mind. Every past chat is searchable, by words or by time ("what did we do last Tuesday"), and one switch shares your memory with Claude Code, Codex, Cursor or OpenCode so they know you too. A skill is a folder that teaches a workflow, like making a PDF, a slide deck or a spreadsheet, and it uses the Agent Skills format Claude and Codex read too, so most skills on GitHub install here in one line, `/skill install owner/repo`, and each can be switched off without removing it. See [docs/SKILLS.md](docs/SKILLS.md) and [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills).
 
 ### Everywhere else
 
-The terminal app (`inglen.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). Inglen Plus, a paid add-on, adds a phone app that reaches your PC from anywhere through an end-to-end encrypted relay, with your chats and every step, approvals from the notification, files from the PC, the Team room, your coding agents' sessions, and voice calls with JARVIS. If you allow it, JARVIS can call you about a reminder, finished work or a question it is waiting on, never in your quiet hours or while you are at the PC. It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
+The terminal app (`inglen.bat`) does everything the window does, with slash commands and voice, and the two share one set of chats: start one in the terminal and carry it on in the window. Message it from your phone through a Telegram or Discord bot you set up in a minute, or an experimental WhatsApp link ([docs/PHONE.md](docs/PHONE.md)), with voice notes, photos and files going both ways, and reminders can go to your phone too. Anyone new needs a pairing code you approve, and you can write a connector for another app in one Python file ([docs/CONNECTORS.md](docs/CONNECTORS.md)). Inglen Plus, a paid add-on, adds a phone app that reaches your PC from anywhere through an end-to-end encrypted relay, with your chats and every step, approvals from the notification, files from the PC, the Team room, your coding agents' sessions, and voice calls with your assistant. If you allow it, Inglen can call you about a reminder, finished work or a question it is waiting on, never in your quiet hours or while you are at the PC. It is an MCP server, so LM Studio, Claude Desktop or Cursor can use its tools, and an MCP client, so other servers' tools appear beside its own. A headless mode drives it from scripts. It can also write a new tool for itself when it hits a gap.
 
 ### Safety
 
-A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs, unless a reviewer that reads only your own words finds you asked for exactly that step. Shutting down, disks, accounts, security settings and hidden commands always ask. File changes are copied first, so `/undo` puts one back. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
+A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and stops before deleting, moving, sending email or phone messages, uploading from the shell, pushing, publishing or installing, unless a reviewer that reads only your own words finds you asked for exactly that step. Something Inglen made itself in the last week it may delete or move without asking, since a copy is kept to undo it. Shutting down, disks, accounts, security settings and hidden commands always ask. A plain web fetch is not treated as sending, so a page or file that tries to steer the model is a reason to stay on Ask or Auto-edit ([SECURITY.md](SECURITY.md) has the details). File changes are copied first, so `/undo` puts one back. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
 
 ---
 
@@ -103,17 +103,17 @@ Its distinction is the user-owned environment around the workers. Local models, 
 
 ## FAQ
 
-**Is it free, and does it work offline?** Yes and yes. With a local model it is fully offline except web search, which only runs when the model looks something up.
+**Is it free, and does it work offline?** Yes and yes. With a local model it needs the internet only for web search, which runs when the model looks something up, and for its own update and catalog checks.
 
-**Will it mess with my files?** Writes, moves and deletes stay inside the workspace folder (`~/Jarvis`) unless you allow another folder, and the approval switch decides what asks first. Set `HEARTH_LOCKDOWN=1` to keep reads inside the workspace too.
+**Will it mess with my files?** Writes, moves and deletes stay inside the workspace folder (`~/Inglen`, or `~/Jarvis` on an older install) unless you allow another folder, and the approval switch decides what asks first. Set `HEARTH_LOCKDOWN=1` to keep reads inside the workspace too.
 
 **What do I need?** Windows 10 or 11. For local models, a graphics card with 8 GB of memory runs a 7B to 9B model well, NVIDIA through CUDA and AMD or Intel through Vulkan; less works on the CPU, slowly. With a cloud key or an agent brain, any PC that runs a browser is enough.
 
 **Can it replace ChatGPT?** For talking, looking things up and working on your own files and apps, on a good brain, yes. On a small local model it is quicker to set up than it is clever, so pick the brain to match the job.
 
-**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. With Plus on, the phone app's messages pass through the Plus relay sealed with keys only your PC and phone hold, so the relay can't read them, and the licence key is checked with the payment provider ([SECURITY.md](SECURITY.md) has the details). There is no telemetry unless you say yes to the install count (below). Inglen also asks GitHub for its own updates and for the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day reads the public models.dev catalog for the model details in the model menu; none of these send anything about you.
+**What leaves my PC?** Only what you turn on. That means your messages to the cloud model or agent you pick, web searches, and the phone bridges or email you set up. Nothing goes to me. With Plus on, the phone app's messages pass through the Plus relay sealed with keys only your PC and phone hold, so the relay can't read them, and the licence key is checked with the payment provider ([SECURITY.md](SECURITY.md) has the details). There is no telemetry unless you say yes to the install count (below). Inglen also asks GitHub for its own updates, its announcement feed and the model and image engines when you install them, the npm registry for updates to agents you have installed, and once a day the public models.dev catalog for the model details in the model menu, and it fetches small site icons the window shows. None of these carry your chats, memory or files.
 
-**Why "Inglen"?** An ingle is the fire in a hearth, the warm center of the house. JARVIS lives there. It was called Hearth before, and an update from Hearth keeps your settings, memory and chats.
+**Why "Inglen"?** An ingle is the fire in a hearth, the warm center of the house. Your assistant lives there. It was called Hearth before, and an update from Hearth keeps your settings, memory and chats.
 
 ---
 
@@ -183,7 +183,7 @@ Inglen has over a hundred tools, but only a core set goes to the model in full e
 <summary><strong>Where things live on disk</strong></summary>
 
 ```
-~/Jarvis/                  the assistant's home (HEARTH_WORKSPACE moves it)
+~/Inglen/                  the assistant's home (~/Jarvis on an older install; HEARTH_WORKSPACE moves it)
 ├── profile.md             who you are and how you like replies, read every turn
 ├── rules.md               your house rules, read every turn
 ├── memory/                one markdown file per fact, MEMORY.md as the index, _archive/ for cold ones
@@ -204,7 +204,7 @@ Inglen has over a hundred tools, but only a core set goes to the model in full e
 | `LOCAL_API_BASE` | found on its own | An OpenAI-compatible address |
 | `LOCAL_API_KEY` | none | The key for it, if it needs one |
 | `LOCAL_MODEL` | found on its own | The model name to use |
-| `HEARTH_WORKSPACE` | `~/Jarvis` | Where memory, logs and voices live |
+| `HEARTH_WORKSPACE` | `~/Inglen` (`~/Jarvis` on an older install) | Where memory, logs and voices live |
 | `HEARTH_LOCKDOWN` | `0` | `1` keeps reads inside the workspace too |
 | `HEARTH_AUTO_APPROVE` | `0` | `1` skips approval prompts |
 | `HEARTH_EXTRA_WORKSPACES` | none | More folders it may write in |
@@ -212,14 +212,14 @@ Inglen has over a hundred tools, but only a core set goes to the model in full e
 | `HEARTH_VOICE_SPEED` | `1.0` | How fast it speaks |
 | `HEARTH_STT_DEVICE` | found on its own | `cpu` or `cuda` for speech-to-text |
 | `HEARTH_WAKE_WORD` | none | Listen only after this word |
-| `HEARTH_BUILTIN_PORT` | `1234` | Port for the built-in server |
+| `HEARTH_BUILTIN_PORT` | `8790` | Port for the built-in server |
 | `HEARTH_COMPACT_AT` | `0.75` | Sum up old turns past this much of the context |
 | `HEARTH_NO_ONBOARDING` | `0` | `1` skips setup |
-| `HEARTH_PERSONA_NAME` | `JARVIS` | The assistant's name |
+| `HEARTH_PERSONA_NAME` | `Inglen` | The assistant's name |
 | `HEARTH_PERSONA` | none | Tone: `bro`, `chill`, `professional` or `formal` |
 | `HEARTH_ALL_TOOLS` | `0` | `1` loads every tool up front |
 
-`JARVIS_*` names work too.
+The older `JARVIS_*` names work too.
 
 </details>
 
@@ -251,7 +251,7 @@ Good first pull requests are macOS and Linux versions of the Windows-only tools 
 
 ## Privacy
 
-Inglen runs on your machine and collects nothing. There is no account, no analytics and no server of mine in the loop, except the Plus relay if you choose Plus, which only carries messages it can't read. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline.
+Your chats, memory and files stay on your machine. There is no account and no analytics, and no server of mine is in the loop except the Plus relay if you choose Plus, which only carries messages it can't read, and the install count below if you say yes to it. What leaves your computer is only what you turn on, and it goes to the service you chose, whether that is a cloud model or agent, web search (DuckDuckGo), the phone apps or email. With a local model and none of those set up, Inglen is fully offline.
 
 **Install count (opt-in, off by default).** If you say yes in setup or turn on Settings, Behavior, "Count this install", Inglen sends this once a day to the relay: a random id made for your install, the version, the OS and whether the brain is local, cloud or an agent. Setup shows the exact payload before you choose. No names, no messages, no file paths; the relay keeps one row per install per day and does not store your IP address. Turn it off in Settings any time. The [MIT license](LICENSE) is the whole agreement.
 

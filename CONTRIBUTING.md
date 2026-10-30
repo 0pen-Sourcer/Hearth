@@ -20,7 +20,7 @@ Most of [`hearth/tools.py`](hearth/tools.py) already runs on Linux and macOS: fi
 
 ### 2. More personas
 
-[`hearth/persona.py`](hearth/persona.py) is one JARVIS-flavored prompt with a few tone overlays (`HEARTH_PERSONA=bro|chill|professional|formal`). More overlays are welcome: a short block of voice and manner in the same style, ideally paired with a default voice in [`hearth/voice.py`](hearth/voice.py).
+[`hearth/persona.py`](hearth/persona.py) is one prompt with a few tone overlays (`HEARTH_PERSONA=bro|chill|professional|formal`). More overlays are welcome: a short block of voice and manner in the same style, ideally paired with a default voice in [`hearth/voice.py`](hearth/voice.py).
 
 ### 3. New tools
 
@@ -30,7 +30,7 @@ A tool is one function in [`hearth/tools.py`](hearth/tools.py) (`_my_tool(p: Dic
 
 ### 4. Agents as brains
 
-Any agent that speaks the Agent Client Protocol can already be JARVIS's brain through [`hearth/acp_brain.py`](hearth/acp_brain.py); only OpenCode has been run end to end. If you use Copilot CLI, Goose, Grok Build, Pi, Amp or Antigravity, running it as the brain and reporting what breaks (or fixing its entry in `claude_brain.ACP`) is very useful.
+Any agent that speaks the Agent Client Protocol can already be the assistant's brain through [`hearth/acp_brain.py`](hearth/acp_brain.py); only OpenCode has been run end to end. If you use Copilot CLI, Goose, Grok Build, Pi, Amp or Antigravity, running it as the brain and reporting what breaks (or fixing its entry in `claude_brain.ACP`) is very useful.
 
 ### 5. Share a skill (no code needed)
 
