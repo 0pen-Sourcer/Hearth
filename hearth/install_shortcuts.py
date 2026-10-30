@@ -111,6 +111,22 @@ def rebrand(desktop: Optional[str] = None, programs: Optional[str] = None) -> in
             done += 1
         except Exception:
             continue
+    # The login shortcut keeps its name (the start-at-login switch looks it up
+    # by name) but gets the app icon instead of the old one in Hearth.exe.
+    try:
+        startup = _startup_lnk_path()
+        if startup and os.path.isfile(startup):
+            sc = shell.CreateShortcut(startup)
+            icon = os.path.join(os.path.dirname(sc.TargetPath or ""), "_internal", "assets", "icon_app.ico")
+            if not os.path.isfile(icon):
+                icon = app_icon()
+            if (os.path.basename(sc.TargetPath or "").lower() in _OURS and icon
+                    and (sc.IconLocation or "").split(",")[0] != icon):
+                sc.IconLocation = icon
+                sc.Save()
+                done += 1
+    except Exception:
+        pass
     old_dir = programs and os.path.join(programs, "Hearth")
     try:
         if old_dir and os.path.isdir(old_dir) and not os.listdir(old_dir):
