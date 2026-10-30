@@ -16,6 +16,7 @@ the voice through it, so talking over a reply works on speakers too.
 from __future__ import annotations
 
 import base64
+import json
 import re
 import threading
 import time
@@ -441,7 +442,7 @@ class Call:
 
     def _speak(self, text: str) -> None:
         self.send({"type": "call.state", "state": "speaking"})
-        self.speaker.speak(text)
+        self.speaker.speak(_voice._clean_for_tts(text))
 
 
 class Turn:
@@ -535,3 +536,58 @@ def asked_last(history) -> bool:
         if (m or {}).get("role") == "user":
             continue
     return False
+
+
+def step_key(name: str, args: Any) -> str:
+    try:
+        return name + ":" + json.dumps(args or {}, sort_keys=True, default=str)
+    except Exception:
+        return name + ":" + str(args)
+
+
+def brain_says_why() -> bool:
+    """Whether the brain hears the words given with a step it wasn't let do. Codex's
+    own approvals and the ACP agents only hear yes or no."""
+    try:
+        from . import claude_brain as _cb
+        cur = _cb.current()
+    except Exception:
+        return True
+    return cur in (None, "claude-code", "cursor-agent")
+
+
+def voice_permission_check(check, emit_fn, prompt: str, history, *, asks, tapped,
+                           always_allow=(), always_deny=(), says_why=None) -> Any:
+    """The permission check for a voice turn. Nothing is read out from a template:
+    a step the approval mode lets run, runs (Auto never asks about looking at
+    things); one they just said a clear yes to, after the brain asked, runs unless
+    only a tap may allow it; any other step goes back to the brain to say what it is
+    about to do and ask. A brain that can't hear why waits on the card instead."""
+    from . import tools as _tl
+    yes = spoken_answer(prompt) in ("allow", "always") and asked_last(history)
+
+    def _check(name: str, args: Dict) -> Any:
+        if name in always_deny:
+            return "deny"
+        try:
+            if _tl.mode_allows(name, args) or name in always_allow:
+                return "allow"
+            tap = _tl.needs_a_tap(name, args)
+        except Exception:
+            tap = True
+        key = step_key(name, args)
+        if key in tapped:
+            tapped.discard(key)
+            return "allow"
+        if yes and not tap:
+            return "allow"
+        if not (says_why or brain_says_why)():
+            return check(name, args)
+        rid = f"perm_{int(time.time() * 1000)}_{name}"
+        asks[rid] = {"name": name, "key": key, "tap": tap, "at": time.time()}
+        for old in [k for k, v in asks.items() if time.time() - v["at"] > 600]:
+            asks.pop(old, None)
+        emit_fn("permission_request", id=rid, name=name, args=args, aloud=True, **({"tap": True} if tap else {}))
+        return {"decision": "ask_aloud", "reason": ASK_TAP if tap else ASK_ALOUD}
+    return _check
+

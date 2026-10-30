@@ -20,6 +20,7 @@ import base64
 import hashlib
 import json
 import os
+import queue
 import re
 import urllib.parse
 import secrets
@@ -247,6 +248,12 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "undo":
         from . import undo as _undo
         return _undo.undo(str(m.get("id") or ""))
+    if what == "agent_catalog":
+        from .agent_launch import catalog
+        return catalog()
+    if what == "agent_folders":
+        from .agent_launch import folders
+        return folders(str(m.get("path") or ""))
     if what == "agent_subagents":
         # The helpers a coding agent's session started (Codex's Subagents panel).
         from . import agent_sessions
@@ -676,7 +683,7 @@ def memory_view(m: Dict[str, Any]) -> Dict[str, Any]:
             continue
         try:
             with open(os.path.join(mem_dir, fn), encoding="utf-8") as f:
-                fm, body = _front(f.read(20000))
+                fm, body = _front(f.read(60000))
         except OSError:
             continue
         desc = fm.get("description", "")
@@ -684,7 +691,8 @@ def memory_view(m: Dict[str, Any]) -> Dict[str, Any]:
         src = fm.get("source_chat", "")
         if src and src not in titles:
             titles[src] = ((chat_sync.load(src) or {}).get("title") or "") if re.fullmatch(r"[\w-]{1,80}", src) else ""
-        facts.append({"name": fm.get("name") or fn[:-3], "text": desc or text[:300], "more": text[:1500] if desc else "",
+        # The whole of it for the phone to open, as the window's Memory tab shows it.
+        facts.append({"name": fm.get("name") or fn[:-3], "text": desc or text[:300], "more": text[:20000],
                       "type": fm.get("type", ""), "noticed": "auto-extracted" in fm.get("tags", ""),
                       "updated": fm.get("updated", ""), "chat": src if titles.get(src) else "",
                       "chat_title": titles.get(src, "")})
@@ -1035,18 +1043,26 @@ class Relay(cc.Adapter):
             run = hub._busy.get(c) or hub._busy.get(str(chat)) or {}
             return bool(run.get("tap"))
 
-    def ask(self, chat, text):
+    def ask_voice(self, chat, text, aid, tap):
+        """A step in a spoken turn the brain asks about in its own words: the card shows on the
+        phone and the call waits on it, and nothing is read out from a template."""
+        return self.ask(chat, text, aid=aid, tap=tap, aloud=False)
+
+    def ask(self, chat, text, *, aid="", tap=None, aloud=True):
         # The question's own id: an answer from a notification counts only for it.
-        aid, c = secrets.token_hex(8), cc.turn_context().get("c", "")
+        aid, c = aid or secrets.token_hex(8), cc.turn_context().get("c", "")
         self.asks[c or str(chat)] = aid
-        tap = self._needs_tap(chat, c)
+        tap = self._needs_tap(chat, c) if tap is None else tap
         self.asked[aid] = {"at": time.time(), "key": c or str(chat), "c": c, "chat": str(chat), "text": text, "tap": tap}
         if len(self.asked) > 100:
             for k in list(self.asked)[:50]:
                 self.asked.pop(k, None)
         call = self._call_for(chat)
         if call is not None:
-            call.ask(text, tap=tap, aid=aid)
+            if aloud:
+                call.ask(text, tap=tap, aid=aid)
+            else:
+                call.ask_quietly(tap=tap, aid=aid)
         mid = self._push(chat, {"type": "ask", "text": text, "ask": aid, **({"tap": True} if tap else {})})
         from . import persona
         self.notify(chat, {"kind": "ask", "title": f"{persona.NAME} asks", "body": text, "c": c, "ask": aid}, urgent=True)
@@ -1283,6 +1299,9 @@ class Room:
             if m and str(m.get("type") or "").startswith("say."):
                 self.on_say(m)
                 return
+            if m and m.get("type") == "answer":
+                await asyncio.to_thread(self.bridge.on_answer, self, m)
+                return
             if m and m.get("type") == "req":
                 # Lookups run side by side, so a slow one (icons from the web)
                 # never holds up a switch the person is waiting on.
@@ -1473,7 +1492,15 @@ class Bridge:
     def on_message(self, room: Room, m: Dict[str, Any]) -> None:
         if m.get("type") == "req":
             try:
-                out = answer(m, cc.chat_id_for(self.adapter.name, room.chat))
+                if m.get("what") == "agent_start":
+                    # A new session in a coding agent's own harness: the phone opens it at once,
+                    # and its first message starts it.
+                    from .agent_launch import reserve
+                    out = reserve(str(m.get("agent") or ""), str(m.get("cwd") or ""), str(m.get("text") or ""))
+                    if not out.get("error"):
+                        self.agent_say(room, {"chat": out["chat"], "text": str(m.get("text") or "")})
+                else:
+                    out = answer(m, cc.chat_id_for(self.adapter.name, room.chat))
             except Exception as e:
                 out = {"error": f"{type(e).__name__}: {e}"}
             # "rid" names the request; "id" is left to the request itself (an agent's id).
@@ -1525,7 +1552,9 @@ class Bridge:
             return
         self.adapter.asks.pop(key, None)
         run = self.agent_runs.get(cid)
-        if run is not None:
+        if self.hub.answer_voice(key, aid, yes):
+            self.hub.receive(room.chat, "phone", "yes" if yes else "no", cid=cid, spoken=True)
+        elif run is not None:
             q = run.get("q")
             if q is None or q.is_set():
                 return
@@ -1566,26 +1595,42 @@ class Bridge:
             except Exception:
                 pass
 
+        agent = (agent_sessions.parse_chat(cid) or ("", ""))[0]
+        name = agent_sessions.label(agent)
         run = self.agent_runs.get(cid)
         if run is not None:
             q = run.get("q")
-            if q is not None and not q.is_set():
-                run["answer"] = bool(cc._YES.match(text))
+            from .call import spoken_answer
+            said = spoken_answer(text)
+            if q is not None and not q.is_set() and said:
+                run["answer"] = said in ("allow", "always")
                 self.adapter.asks.pop(cid, None)
                 q.set()
-            else:
-                push({"type": "text", "note": True,
-                      "text": "It's still working on your last message. Send this once it's done."})
+            elif text:
+                # Said while it works: Codex steers the turn it is on, Claude Code takes it next
+                # (each says so); the other agents get it when this turn ends.
+                run["steer"].put(text)
+                if agent not in ("codex", "claude-code"):
+                    push({"type": "text", "note": True, "text": f"{name} gets this when it finishes."})
             return
         if not text:
             return
-        run = self.agent_runs[cid] = {"q": None, "answer": False, "t": turn}
+        run = self.agent_runs[cid] = {"q": None, "answer": False, "t": turn, "steer": queue.Queue(), "keys": [cid]}
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
 
         def emit(kind: str, **f: Any) -> None:
+            nonlocal cid
             now = time.time()
-            if kind == "step":
+            if kind == "session":
+                # A new session's own id: the phone moves the chat it opened onto it.
+                real = agent_sessions.chat_id(str(f.get("agent") or agent), str(f.get("id") or ""))
+                if real != cid:
+                    was, cid = cid, real
+                    self.agent_runs[real] = run
+                    run["keys"].append(real)
+                    push({"type": "agent_session", "from": was, "chat": real})
+            elif kind == "step":
                 push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or "",
                       **({"cmd": f["cmd"]} if f.get("cmd") else {})})
             elif kind == "step_out" and f.get("out"):
@@ -1607,8 +1652,6 @@ class Bridge:
             elif kind == "error":
                 push({"type": "text", "text": f.get("message") or "It stopped.", "error": True})
 
-        name = agent_sessions.label((agent_sessions.parse_chat(cid) or ("", ""))[0])
-
         def ask(question: str) -> bool:
             run["q"], run["answer"] = threading.Event(), False
             aid = secrets.token_hex(8)
@@ -1620,12 +1663,28 @@ class Bridge:
             run["q"] = None
             return bool(run["answer"])
 
+        def drain() -> List[str]:
+            out: List[str] = []
+            while True:
+                try:
+                    out.append(run["steer"].get_nowait())
+                except queue.Empty:
+                    return out
+
         def go() -> None:
             try:
                 push({"type": "typing"})
-                asyncio.run(agent_sessions.say(cid, text, emit, ask))
+                asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain))
             finally:
-                self.agent_runs.pop(cid, None)
+                def finished() -> None:
+                    for k in run["keys"]:
+                        if self.agent_runs.get(k) is run:
+                            self.agent_runs.pop(k, None)
+                    left = drain()
+                    if left:
+                        # What came after its last turn ended starts the next one.
+                        self.agent_say(room, {"chat": cid, "text": "\n\n".join(left)})
+                self.loop.call_soon_threadsafe(finished)
 
         threading.Thread(target=go, daemon=True, name="relay-agent-session").start()
 

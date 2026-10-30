@@ -298,6 +298,7 @@ class Hub:
         self._busy: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self.threads: List[threading.Thread] = []
+        self._voice_approvals: Dict[str, Dict[str, Any]] = {}
 
     # Called by the adapter, from whatever thread it receives on.
     def receive(self, chat: str, sender: str, text: str = "", name: str = "", reply_to: Any = None,
@@ -349,27 +350,41 @@ class Hub:
             return "empty"
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(cid or ""))[:80]
         key = cid or chat
+        voice_result = ""
         with self._lock:
+            # A step the brain asked about aloud, in a turn that has ended: a whole-sentence yes or
+            # no answers it (the next turn hears it); anything else is a message of its own.
+            pending = (self._voice_approvals.get(key) or {}).get("asks") or {}
+            if spoken and pending:
+                from .call import spoken_answer
+                said = spoken_answer(text)
+                # A spoken yes cannot stand in for the exact card's Allow tap.
+                if said in ("allow", "always") and any(v.get("tap") for v in pending.values()):
+                    return "needs_tap"
+                pending.clear()
+                voice_result = "answered" if said else "aside"
             run = self._busy.get(key)
             if run is not None:
                 q = run.get("question")
                 if q is not None and not q.is_set():
-                    yes = bool(_YES.match(text))
-                    if yes and spoken and run.get("tap"):
-                        return "needs_tap"          # said, not tapped: this one takes the Allow button
-                    run["answer"] = yes
+                    from .call import aside_note, spoken_answer
+                    answer = spoken_answer(text) if spoken else ("allow" if _YES.match(text) else "deny")
+                    if answer in ("allow", "always") and spoken and run.get("tap"):
+                        return "needs_tap"
+                    run["answer"] = ({"decision": "aside", "reason": aside_note(text)} if not answer
+                                     else answer in ("allow", "always"))
                     q.set()
-                    return "answered"
+                    return "answered" if answer else "aside"
                 run["steer"].append(text)
                 return "joined"
             run = {"steer": [], "question": None, "answer": None, "key": key, "regen": regen,
-                   "shown": shown, "files": files}
+                   "shown": shown, "files": files, "spoken": spoken}
             self._busy[key] = run
         t = threading.Thread(target=self._turn, args=(chat, text, reply_to, run, cid), daemon=True,
                              name=f"{self.a.name}-turn")
         self.threads.append(t)
         t.start()
-        return "ran"
+        return voice_result or "ran"
 
     def _ask(self, chat: str, run: Dict[str, Any], name: str, args: Dict[str, Any]) -> str:
         from .tools import mode_allows
@@ -407,13 +422,25 @@ class Hub:
             ev.wait(wait_s)
         with self._lock:
             run["question"] = None
-            ok = bool(run.get("answer"))
+            answer = run.get("answer")
+            ok = bool(answer) and not isinstance(answer, dict)
         # Kept with the turn's steps, so a chat opened again shows what was allowed, where.
         kept = run.get("kept")
         if isinstance(kept, list):
-            kept.append({"kind": "ask", "text": question, "answer": ok, "at": int(time.time() * 1000),
+            kept.append({"kind": "ask", "text": question, "answer": "aside" if isinstance(answer, dict) else ok,
+                         "at": int(time.time() * 1000),
                          "pos": (run.get("so_far") or {}).get("n", 0)})
-        return "allow" if ok else "deny"
+        return answer if isinstance(answer, dict) else "allow" if ok else "deny"
+
+    def answer_voice(self, key: str, aid: str, yes: bool) -> bool:
+        with self._lock:
+            state = self._voice_approvals.get(key) or {}
+            request = (state.get("asks") or {}).pop(aid, None)
+            if request is None:
+                return False
+            if yes:
+                state["tapped"].add(request["key"])
+            return True
 
     def _turn(self, chat: str, text: str, reply_to: Any, run: Dict[str, Any], cid: str = "") -> None:
         from . import bridge_status, chat_sync, headless
@@ -441,6 +468,7 @@ class Hub:
         history = chat_sync.from_chat(saved.get("messages") or [])[-16:]
         prior_failure = chat_sync.last_failure(saved.get("messages") or [])
         primer = bridge_status.channel_primer(self.a.label)
+        spoken_turn = bool(run.get("spoken"))
         note = getattr(self.a, "call_note", None)
         if callable(note):
             try:
@@ -448,6 +476,7 @@ class Hub:
             except Exception:
                 said = ""
             if said:
+                spoken_turn = True
                 primer = dict(primer, content=primer["content"] + " " + said)
         parts: List[str] = []
         tools_used: List[Any] = []
@@ -479,6 +508,11 @@ class Hub:
                 live_bus.publish(live_bus.turn_event(cid, self.a.name, (_TURN.ctx or {}).get("t", ""), kind, kw))
             except Exception:
                 pass
+            if kind == "permission_request" and kw.get("aloud"):
+                ask_voice = getattr(self.a, "ask_voice", None)
+                if callable(ask_voice):
+                    question = _what(str(kw.get("name") or ""), kw.get("args") or {})
+                    ask_voice(chat, question[:1].upper() + question[1:] + "?", kw["id"], bool(kw.get("tap")))
             if kind == "done":
                 stats.update(kw.get("stats") or {})
                 if kw.get("duration_ms") is not None:
@@ -578,12 +612,18 @@ class Hub:
             steered.extend({"role": "user", "content": s, "via": self.a.name, "at": at} for s in said)
             return said
 
+        check = lambda n, a: self._ask(chat, run, n, a)
+        if spoken_turn:
+            from .call import voice_permission_check
+            with self._lock:
+                approvals = self._voice_approvals.setdefault(run["key"], {"asks": {}, "tapped": set()})
+            check = voice_permission_check(check, emit, text, history, **approvals)
         try:
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(headless.run_once(
                     text, emit=emit, history=[primer] + history, chat_id=cid, prior_failure=prior_failure,
-                    permission_check=lambda n, a: self._ask(chat, run, n, a),
+                    permission_check=check, voice=spoken_turn,
                     drain_steer=steer, supervised=False,
                     think=bool(settings.get("think_default")), think_level=str(settings.get("think_level") or "")))
             finally:

@@ -657,57 +657,19 @@ _VOICE_TAPPED: set = set()
 
 
 def _step_key(name: str, args: Any) -> str:
-    try:
-        return name + ":" + json.dumps(args or {}, sort_keys=True, default=str)
-    except Exception:
-        return name + ":" + str(args)
+    from .call import step_key
+    return step_key(name, args)
 
 
 def _brain_says_why() -> bool:
-    """Whether the brain hears the words given with a step it wasn't let do. Codex's
-    own approvals and the ACP agents only hear yes or no."""
-    try:
-        from . import claude_brain as _cb
-        cur = _cb.current()
-    except Exception:
-        return True
-    return cur in (None, "claude-code", "cursor-agent")
+    from .call import brain_says_why
+    return brain_says_why()
 
 
 def _voice_permission_check(check, emit_fn, prompt: str, history) -> Any:
-    """The permission check for a voice turn. Nothing is read out from a template:
-    a step the approval mode lets run, runs (Auto never asks about looking at
-    things); one they just said a clear yes to, after the brain asked, runs unless
-    only a tap may allow it; any other step goes back to the brain to say what it is
-    about to do and ask. A brain that can't hear why waits on the card instead."""
-    from .call import ASK_ALOUD, ASK_TAP, asked_last, spoken_answer
-    from . import tools as _tl
-    yes = spoken_answer(prompt) in ("allow", "always") and asked_last(history)
-
-    def _check(name: str, args: Dict) -> Any:
-        if name in _always_deny:
-            return "deny"
-        try:
-            if _tl.mode_allows(name, args) or name in _always_allow:
-                return "allow"
-            tap = _tl.needs_a_tap(name, args)
-        except Exception:
-            tap = True
-        key = _step_key(name, args)
-        if key in _VOICE_TAPPED:
-            _VOICE_TAPPED.discard(key)
-            return "allow"
-        if yes and not tap:
-            return "allow"
-        if not _brain_says_why():
-            return check(name, args)
-        rid = f"perm_{int(time.time() * 1000)}_{name}"
-        _VOICE_ASKS[rid] = {"name": name, "key": key, "at": time.time()}
-        for old in [k for k, v in _VOICE_ASKS.items() if time.time() - v["at"] > 600]:
-            _VOICE_ASKS.pop(old, None)
-        emit_fn("permission_request", id=rid, name=name, args=args, aloud=True, **({"tap": True} if tap else {}))
-        return {"decision": "ask_aloud", "reason": ASK_TAP if tap else ASK_ALOUD}
-    return _check
+    from .call import voice_permission_check
+    return voice_permission_check(check, emit_fn, prompt, history, asks=_VOICE_ASKS, tapped=_VOICE_TAPPED,
+                                  always_allow=_always_allow, always_deny=_always_deny, says_why=_brain_says_why)
 
 
 def _answer_voice_ask(rid: str, decision: str) -> bool:
