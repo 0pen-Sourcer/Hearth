@@ -176,8 +176,9 @@ for line in sys.stdin:
     elif meth == "session/prompt":
         prompt_id = m["id"]
         log.write(json.dumps({{"who": "opencode", "text": m["params"]["prompt"][0]["text"]}}) + "\\n"); log.flush()
+        cmd = "ls build" if "list" in m["params"]["prompt"][0]["text"] else "rm -rf build"
         send({{"id": 900, "method": "session/request_permission", "params": {{
-            "toolCall": {{"kind": "execute", "title": "rm -rf build", "rawInput": {{"command": "rm -rf build"}}}},
+            "toolCall": {{"kind": "execute", "title": cmd, "rawInput": {{"command": cmd}}}},
             "options": [{{"optionId": "y", "kind": "allow_once"}}, {{"optionId": "n", "kind": "reject_once"}}]}}}})
     elif m.get("id") == 900:
         ok = m["result"]["outcome"].get("optionId") == "y"
@@ -299,6 +300,22 @@ check(f"the replayed old messages aren't shown again, and the answer is ({got[-1
       got[-1] == ("text", {"text": "Cleaned the build folder."}) and not any("an old reply" in str(f) for _, f in got))
 rc, got, asked = say(by["opencode"]["chat"], "clean the build", allow=False)
 check("told no, it doesn't", got[-1] == ("text", {"text": "Left the build folder."}))
+
+# The approval switch holds for an agent session too: in Auto a plain look runs, a delete still asks.
+_settings = os.path.join(os.environ["HEARTH_WORKSPACE"], "settings.json")
+_before = open(_settings, encoding="utf-8").read() if os.path.exists(_settings) else None
+with open(_settings, "w", encoding="utf-8") as f:
+    json.dump(dict(json.loads(_before or "{}"), approval_mode="auto"), f)
+rc, got, asked = say(by["opencode"]["chat"], "list the build")
+check(f"in Auto, a step Auto would run isn't asked about ({asked})", not asked
+      and got[-1] == ("text", {"text": "Cleaned the build folder."}))
+rc, got, asked = say(by["opencode"]["chat"], "clean the build")
+check(f"in Auto, a delete is still asked about ({asked})", asked and "rm -rf build" in asked[0])
+if _before is None:
+    os.remove(_settings)
+else:
+    with open(_settings, "w", encoding="utf-8") as f:
+        f.write(_before)
 
 # A session open in Claude Code on the PC right now: Claude writes ~/.claude/sessions/<pid>.json for it.
 write(os.path.join(HOME, ".claude", "sessions", f"{os.getpid()}.json"), json.dumps({"pid": os.getpid(), "sessionId": CL}))
