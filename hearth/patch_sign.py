@@ -98,3 +98,46 @@ def check(path: str, installed: str, keys: Optional[List[str]] = None) -> Dict[s
         return {"ok": False, "error": f"this update ({m.get('version')}) is older than what's installed ({installed}), "
                                       "so it wasn't installed"}
     return {"ok": True, "version": m.get("version"), "files": len(present)}
+
+
+# Installers: the .exe can't carry its own signature, so the release carries <name>.sig beside it,
+# an Ed25519 signature by the same release key over the installer's name and sha256.
+
+def _installer_statement(name: str, sha256_hex: str) -> bytes:
+    return f"inglen-installer\n{name}\n{sha256_hex.lower()}\n".encode()
+
+
+def sign_installer(path: str, private_raw: bytes) -> str:
+    """Write <path>.sig for an installer; returns its path (used by build_release.ps1)."""
+    import os
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    with open(path, "rb") as f:
+        digest = hashlib.file_digest(f, "sha256").hexdigest()
+    sig = Ed25519PrivateKey.from_private_bytes(private_raw).sign(_installer_statement(os.path.basename(path), digest))
+    out = path + ".sig"
+    with open(out, "w") as f:
+        f.write(base64.b64encode(sig).decode())
+    return out
+
+
+def check_installer(path: str, name: str, sig_text: str, keys: Optional[List[str]] = None) -> str:
+    """'' when the installer at path is the one the release key signed as name, else why not."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    if keys is None:
+        from .release_keys import PUBLIC_KEYS as keys
+    if not (sig_text or "").strip():
+        return "this installer isn't signed by Inglen's release key, so it wasn't kept"
+    try:
+        sig = base64.b64decode(sig_text.strip(), validate=True)
+    except ValueError:
+        return "this installer's signature is damaged, so it wasn't kept"
+    with open(path, "rb") as f:
+        statement = _installer_statement(name, hashlib.file_digest(f, "sha256").hexdigest())
+    for k in keys or []:
+        try:
+            Ed25519PublicKey.from_public_bytes(base64.b64decode(k)).verify(sig, statement)
+            return ""
+        except (InvalidSignature, ValueError):
+            continue
+    return "this installer isn't signed by Inglen's release key, so it wasn't kept"

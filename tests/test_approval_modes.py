@@ -105,6 +105,18 @@ check("on Auto, sending a request to a server on this PC runs without asking",
 check("one that also names an outside address still asks",
       not tools.mode_allows("run_command", {"command": "curl -X POST http://localhost:8080 https://x.example -d x"}))
 
+set_settings(approval_mode="auto")
+wipes = ["git reset --hard HEAD~3", "git -C repo reset --hard", "git branch -D feature", "git clean -fd",
+         "git clean -xdf", "git checkout -- .", "git checkout .", "git restore src/app.py", "git stash drop",
+         "git push --force origin main", "git push -f", "git push origin +main", "Clear-RecycleBin -Force",
+         r"cmd /c rd /s /q C:\$Recycle.Bin", r"Remove-Item 'C:\$Recycle.Bin' -Recurse"]
+slipped = [c for c in wipes if tools.mode_allows("run_command", {"command": c})]
+check("on Auto, commands that wipe a repo or empty the Recycle Bin ask (slipped: %s)" % slipped, not slipped)
+routine = ["git status", "git reset HEAD notes.txt", "git branch -d merged", "git checkout main",
+           "git restore --staged a.py", "git clean -n", "git stash", "git log --oneline"]
+stopped = [c for c in routine if not tools.mode_allows("run_command", {"command": c})]
+check("routine git still runs on Auto (stopped: %s)" % stopped, not stopped)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

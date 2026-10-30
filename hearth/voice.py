@@ -184,10 +184,16 @@ def drop_damaged_models(error: str = "") -> List[str]:
     return gone
 
 
-# Same release the installer pulls from. Auto-fetched on first TTS use if the
-# files aren't already on disk (set HEARTH_NO_AUTODOWNLOAD=1 to opt out).
-KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/kokoro-v1.0.onnx"
-KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/voices-v1.0.bin"
+# One fixed release, the same one install.ps1 pulls, each file checked against its sha256.
+# Auto-fetched on first TTS use if the files aren't already on disk (set
+# HEARTH_NO_AUTODOWNLOAD=1 to opt out).
+_KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/"
+KOKORO_MODEL_URL = _KOKORO_RELEASE + "kokoro-v1.0.onnx"
+KOKORO_VOICES_URL = _KOKORO_RELEASE + "voices-v1.0.bin"
+KOKORO_SHA256 = {
+    KOKORO_MODEL_URL: "beb0d1848dee9a49da392cc3df26958d46cfa35d321edf434f52949153f0df3a",
+    KOKORO_VOICES_URL: "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+}
 
 
 class DownloadCancelled(Exception):
@@ -219,7 +225,8 @@ def _download(url: str, dest: str,
 
     try:
         _ls._download_with_resume(url, Path(dest), Path(dest + ".part"), on_progress=_on,
-                                  ua="Inglen (voice files)", cancel=should_cancel)
+                                  ua="Inglen (voice files)", cancel=should_cancel,
+                                  sha256=KOKORO_SHA256.get(url, ""))
         print()
     except _ls.DownloadCancelled:
         raise DownloadCancelled()

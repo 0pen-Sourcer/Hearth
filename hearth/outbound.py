@@ -65,6 +65,13 @@ class Seen:
     def __init__(self) -> None:
         self.outside: List[str] = []
         self.given: List[str] = []
+        self.said: List[str] = []        # the person's own words only
+
+    def person_said(self, text: Any) -> None:
+        t = _flat(text)
+        if t:
+            self.said.append(t[-20000:])
+        self.gave(t)
 
     def gave(self, text: Any) -> None:
         t = _flat(text)
@@ -173,7 +180,7 @@ def from_history(history: Optional[Iterable[Dict[str, Any]]], prompt: str = "") 
             if "<task-notification" in text:
                 seen.took_in("a helper's report", text)   # written by a model, not the person
             else:
-                seen.gave(text)
+                seen.person_said(text)
         elif role == "assistant":
             for tc in m.get("tool_calls") or []:
                 fn = (tc or {}).get("function") or {}
@@ -186,7 +193,7 @@ def from_history(history: Optional[Iterable[Dict[str, Any]]], prompt: str = "") 
             except ValueError:
                 args = {}
             note_on(seen, str(m.get("name") or ""), args, m.get("content"))
-    seen.gave(prompt)
+    seen.person_said(prompt)
     return seen
 
 
@@ -229,3 +236,74 @@ def reason(name: str, args: Any = None) -> str:
         return (f"This would send a request to {_host(url)}: {_short(url)}. Nobody gave that address, "
                 f"and this chat has read {src}, which could have asked for it.")
     return ""
+
+
+# ---------------------------------------------------------------- the local network
+
+def _local_ip(addr: str) -> bool:
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip.version == 4 and ip in ipaddress.ip_network("100.64.0.0/10"):
+        return True                      # carrier-grade NAT, also where Tailscale puts its devices
+    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+            or ip.is_multicast or ip.is_unspecified)
+
+
+def _resolve(host: str) -> List[str]:
+    import socket
+    out = set()
+    try:
+        out.add(socket.inet_ntoa(socket.inet_aton(host)))   # 2130706433, 0x7f.1, 127.1 and the like
+    except (OSError, UnicodeError, ValueError):
+        pass
+    try:
+        out |= {i[4][0] for i in socket.getaddrinfo(host, None)}
+    except (OSError, UnicodeError):
+        pass
+    return sorted(out)
+
+
+def _named_by_person(host: str, port: Optional[int], said: Iterable[str]) -> bool:
+    """Whether the person wrote this host (with this port, when one is given) in their own words."""
+    h = re.escape(host.lower().strip("[]"))
+    if port:
+        pat = rf"(?<![\w.-])\[?{h}\]?:{port}(?!\d)"
+    else:
+        pat = rf"(?<![\w.-])\[?{h}\]?(?![\w-]|\.\w)"
+    return any(re.search(pat, html.unescape(t).lower()) for t in said)
+
+
+def local_refusal(url: str, seen: Optional[Seen] = None) -> str:
+    """Why a fetch or a page open may not go to this address: it is on this PC or the local
+    network (after looking the name up) and the person didn't name it. '' when it may."""
+    u = url if "://" in url else "https://" + url
+    try:
+        parts = urllib.parse.urlsplit(u)
+        host, port = (parts.hostname or ""), parts.port
+    except ValueError:
+        return ""
+    if not host:
+        return ""
+    addrs = [host] if _local_ip(host) else [a for a in _resolve(host) if _local_ip(a)]
+    if not addrs:
+        return ""
+    if seen is None:
+        seen = current()
+    said = seen.said if seen is not None else []
+    loop = host.lower() in ("localhost",) or all(_local_ip(a) and a.startswith(("127.", "::1")) for a in addrs)
+    names = {host.lower()}
+    if loop:
+        names |= {"localhost", "127.0.0.1", "::1"}
+    # On this PC the port matters (each one is a different program); on the network the host is enough.
+    if any(_named_by_person(n, port if loop else None, said) for n in names):
+        return ""
+    where = "this PC" if loop else "the local network"
+    at = f"{host}:{port}" if port else host
+    also = f" ({addrs[0]})" if addrs[0] != host else ""
+    return (f"Error: {at}{also} is on {where}, and only an address you were given in the person's own "
+            f"words may be opened there. Ask them for it, or say what you wanted to check.")

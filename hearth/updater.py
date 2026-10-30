@@ -586,16 +586,20 @@ def installer_asset(tag: str = "") -> dict:
     except Exception as e:
         return {"error": f"couldn't reach GitHub releases: {e}"}
     lite = edition.is_lite()
-    for a in rel.get("assets") or []:
+    assets = rel.get("assets") or []
+    for a in assets:
         n = (a.get("name") or "")
         if not n.lower().endswith(".exe"):
             continue
         is_lite_asset = "-lite-" in n.lower()
         if is_lite_asset == lite:
+            sig = next((s for s in assets if (s.get("name") or "") == n + ".sig"), {})
             return {"name": n, "url": a.get("browser_download_url"),
                     "size": int(a.get("size") or 0), "tag": rel.get("tag_name"),
                     # GitHub's own hash of the file it holds ("sha256:..."), when it gives one.
-                    "digest": str(a.get("digest") or "")}
+                    "digest": str(a.get("digest") or ""),
+                    # The release key's signature over the installer (patch_sign.sign_installer).
+                    "sig_url": str(sig.get("browser_download_url") or "")}
     return {"error": f"no {edition.label()} installer in the latest release"}
 
 
@@ -613,6 +617,11 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
         return {"ok": False, "error": asset["error"]}
     from pathlib import Path
     from .llmserver import _download_with_resume, DownloadCancelled
+    sig = _installer_sig(asset)
+    if not sig:
+        return {"ok": False, "error": "this release's installer isn't signed by Inglen's release key, "
+                                      "so it wasn't downloaded"}
+    asset["sig"] = sig
     dest_dir = Path(os.path.expanduser("~/Downloads"))
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -620,7 +629,7 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
         dest_dir = Path(os.path.expanduser("~"))
     dest = dest_dir / asset["name"]
     if dest.exists() and dest.stat().st_size == asset["size"]:
-        bad = _digest_mismatch(str(dest), asset.get("digest", ""))
+        bad = _installer_refusal(str(dest), asset)
         if not bad:
             _VERIFIED.add(os.path.abspath(str(dest)))
             return {"ok": True, "path": str(dest), "already": True}
@@ -638,7 +647,7 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
                 "error": "download cancelled (progress kept, it will resume)"}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    bad = _digest_mismatch(str(dest), asset.get("digest", ""))
+    bad = _installer_refusal(str(dest), asset)
     if bad:
         try:
             dest.unlink()
@@ -651,6 +660,28 @@ def download_installer(on_progress=None, tag: str = "") -> dict:
 
 # Installers this run downloaded and checked; launch_installer runs no other file.
 _VERIFIED: set = set()
+
+
+def _installer_sig(asset: dict) -> str:
+    """The release's <installer>.sig text, or '' when there is none."""
+    url = asset.get("sig_url") or ""
+    if not url:
+        return ""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Inglen-updater"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read(4096).decode("ascii", "replace").strip()
+    except Exception:
+        return ""
+
+
+def _installer_refusal(path: str, asset: dict) -> str:
+    """'' when the installer matches GitHub's hash and carries the release key's signature."""
+    bad = _digest_mismatch(path, asset.get("digest", ""))
+    if bad:
+        return bad
+    from .patch_sign import check_installer
+    return check_installer(path, asset.get("name") or os.path.basename(path), asset.get("sig") or "")
 
 
 def _digest_mismatch(path: str, digest: str) -> str:
