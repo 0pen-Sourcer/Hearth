@@ -13,9 +13,28 @@ Dodo changed today. Owner showed the live dashboard with:
 - Bank Verification: Approved
 - banner: "Live payments are active"
 
-So merchant verification/KYC/bank is no longer the blocker described in old handoffs. This does NOT prove a real live purchase or revenue. Do not claim revenue until a Live Mode transaction exists.
+This is independently confirmed by a Dodo email on Oct 30 that says live payments were enabled for the business **Inglen**. Merchant verification/KYC/bank is no longer the blocker described in old handoffs.
 
-The live site already has Plus pricing, Terms, Privacy, Refunds and hello@inglen.app. `PLUS_CHECKOUT` on the home page is currently empty, so website Get Plus falls back to the app/download path rather than direct Dodo checkout.
+Do not infer Inglen revenue from the older Dodo dashboard milestone. I checked the Oct 22 $20 receipt: that payment was for a separate product called **Yoinked**, not Inglen. Unless a new Inglen Live Mode payment appears, Inglen revenue remains $0.
+
+The live site already has Plus pricing, Terms, Privacy and Refunds. `PLUS_CHECKOUT` on the home page is currently empty, so website Get Plus falls back to the app/download path rather than direct Dodo checkout.
+
+## P0: the legal/support address on the live site is confirmed dead
+
+The live site uses `hello@inglen.app` in Terms, Privacy, Refunds and the footer.
+
+I sent a real routing test from Ishant's connected Gmail to `hello@inglen.app` on Oct 30. Google immediately returned **Delivery Status Notification (Failure)** saying the domain `inglen.app` could not be found.
+
+I also checked the registrar:
+
+- `inglen.app` is currently available;
+- Vercel price lookup: $9.99 for the first year, $15 renewal.
+
+Buying it is an owner/non-refundable action, so I did not purchase it.
+
+Release rule: do not take a live Plus payment while the published refund/support address is dead. Either the owner buys/configures `inglen.app` + mail routing, or the site must deliberately use another real monitored address before sales.
+
+The Vercel site project is not Git-linked; the current deployment was uploaded as a source bundle, so I did not try to invent a site-repo patch.
 
 ## P0: public-facing JARVIS drift contradicts our own rename decision
 
@@ -50,22 +69,29 @@ Please make the public README and release/user docs say that. This is both brand
 
 ### 1. O1 from the Oct 29 attacker review: prompt injection -> outbound GET in Auto
 
-The review still marks this Medium and FOR_CHATGPT addendum says it is "open by choice".
+I traced this against current main after writing the first memo. This is not just an old note.
+
+Current permission path:
+
+- `web._make_permission_check()` calls `tools.mode_allows(name, args)` before showing a permission prompt.
+- `_ALWAYS_ASK_IN_AUTO` contains `delete_path`, `move_path`, `send_email`, `send_to_phone`, `install_skill`; `web_fetch` is not there.
+- `_RISKY_TOOLS` also does not contain `web_fetch`, so it is treated as a safe read before the Ask/Auto prompt machinery gets a vote.
+- shell commands get an `_is_outward()` check for curl/Invoke-WebRequest/etc.; native `web_fetch` bypasses that shell parser.
+- `_web_fetch()` accepts http/https/bare hostnames and calls `_http_get()`, which uses `urllib.request.urlopen()`.
 
 Attack shape:
 
 1. Auto reads untrusted web/file/email content.
 2. Content tells model to read private state.
-3. Model performs a plain `web_fetch`/browse request whose URL carries the private value.
-4. Current approval floor may not treat that GET as a send/upload.
+3. Model performs a native `web_fetch` whose URL/query carries the private value.
+4. That GET can run without the same outward-action prompt used for email/phone/shell sends.
 
-I searched current main for an outbound-host/prompt-injection guard and did not find an obvious landed fix. Please prove me wrong against current code, not the note.
+My release recommendation:
 
-My release recommendation if it is still real:
-
-- best: implement the bounded guard the security review already proposed and test it;
-- acceptable fallback for Oct 31: make it impossible for Auto to silently perform a NEW outbound request after reading untrusted/outside content, even if that means an extra prompt;
-- bad: leave the public Safety copy implying Auto catches all outbound disclosure.
+- best: implement a bounded outbound/taint guard and a regression test;
+- acceptable fallback: after private/untrusted reads, a new outbound host/request needs confirmation;
+- bad: mark every ordinary web read risky forever just to make the test green;
+- also bad: leave public copy implying Auto catches every possible outbound disclosure.
 
 A regression test should fail on current main with a fake external document instructing an exfil GET and pass only when the outbound call asks/blocks.
 
@@ -81,6 +107,12 @@ Current review says:
 Please check CURRENT main/build scripts before release. At minimum I want the release process to have a written, reproducible answer to "what proves the installer/runtime bytes are the ones you intended?"
 
 Do not call the supply chain fully signed unless it actually is.
+
+## Public tool-doc claim is wrong at the generator, not only the markdown
+
+Current generated `docs/TOOLS.md` says everything runs locally and the only outbound calls are web searches/fetches. The same tool registry includes `send_email`, `send_to_phone` and configured cloud/network features, so that sentence is false.
+
+I patched `scripts/gen_tools_doc.py` on this branch so regenerated docs say that most work is local and network tools make the requests needed for those features. Please regenerate `docs/TOOLS.md` after merging the generator change rather than hand-editing the generated file.
 
 ## SECURITY.md fix already on this branch
 
@@ -106,8 +138,8 @@ Do not let new copy work hide these:
 5. frozen build includes new dependencies such as windows-toasts/winrt;
 6. real phone: current APK install/pair, call with screen off, Back, update sheet, locked notification/push where actually supported;
 7. site/README/release note claims match the exact device checks;
-8. Dodo production configuration checked after today's approval; no revenue claim from the approval banner;
-9. `hello@inglen.app` actually receives mail before it is relied on for refunds/security/support.
+8. Dodo production checkout/licence configuration checked after today's approval; no Inglen revenue claim without an Inglen Live Mode transaction;
+9. `hello@inglen.app` fixed or deliberately replaced with a real monitored address before a live Plus sale.
 
 ## YC/demo claim rule
 
