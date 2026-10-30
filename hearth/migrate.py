@@ -1,21 +1,21 @@
-"""Migrate memory from other local-AI agents into Hearth's store.
+"""Migrate memory from other local-AI agents into Inglen's store.
 
 Sources implemented:
   - hermes   : ~/.hermes/memories/USER.md + MEMORY.md  (entries split by \\n§\\n)
   - openclaw : ~/.openclaw/workspace/MEMORY.md + memory/YYYY-MM-DD*.md
   - md       : any markdown file with one fact per bullet (universal fallback)
 
-Each entry becomes one Hearth memory file under ~/Jarvis/memory/.
-Hearth's regex sub-category classifier picks the bucket on save, so migrated
+Each entry becomes one memory file under <workspace>/memory/.
+The regex sub-category classifier picks the bucket on save, so migrated
 facts integrate with the graph view + sibling-recall immediately.
 
 Optional flags:
   --include-config : pull the source agent's chosen model/provider into
-                     ~/Jarvis/settings.json. API keys are NEVER copied —
+                     <workspace>/settings.json. API keys are NEVER copied —
                      migrator stays away from .env / secrets.json for safety.
-  --include-skills : copy SKILL.md directories into ~/Jarvis/imported_skills/
-                     for later review. Hearth has no skill loader yet so they
-                     are parked, not registered.
+  --include-skills : copy SKILL.md directories into <workspace>/imported_skills/
+                     for review. They are parked, not installed: install one
+                     with install_skill (or /skill install <path>) to use it.
 
 Usage:
     python -m hearth.migrate --from hermes                          # dry-run
@@ -153,7 +153,7 @@ def _oc_split_sections(text: str) -> List[Tuple[str, str]]:
 
 def _oc_bullets(text: str) -> List[str]:
     """Pull bulleted lines out of a daily note. Multi-line bullets are
-    NOT joined — each line is its own entry. Hearth's classifier groups
+    NOT joined — each line is its own entry. The memory classifier groups
     them via sub_category anyway."""
     out: List[str] = []
     for ln in _strip_frontmatter(text).splitlines():
@@ -244,8 +244,8 @@ def _title_for(hint: str, text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _copy_skills(roots: List[Path]) -> int:
-    """Park skill dirs under ~/Jarvis/imported_skills/<source>/<name>/.
-    Hearth has no skill loader yet; this preserves them for later review."""
+    """Park skill dirs under <workspace>/imported_skills/<source>/<name>/ for review.
+    Nothing is installed; install_skill takes one from there once it has been read."""
     target_root = Path(__import__("hearth.tools", fromlist=["WORKSPACE"]).WORKSPACE) / "imported_skills"
     count = 0
     for root in roots:
@@ -279,8 +279,8 @@ def _copy_skills(roots: List[Path]) -> int:
 
 
 def _maybe_import_config(source: str) -> Optional[dict]:
-    """Read the source agent's chosen model/provider so Hearth can preset
-    settings. Returns a dict to merge into ~/Jarvis/settings.json, or None
+    """Read the source agent's chosen model/provider so Inglen can preset
+    settings. Returns a dict to merge into the workspace's settings.json, or None
     when nothing useful is found. API keys are skipped on purpose."""
     if source == "hermes":
         cfg_path = _hermes_home() / "config.yaml"
@@ -337,13 +337,13 @@ def main() -> int:
                     choices=["openclaw", "hermes", "md"])
     ap.add_argument("--path", help="Override the source path (required for md).")
     ap.add_argument("--apply", action="store_true",
-                    help="Write to ~/Jarvis/memory. Without this, dry-run.")
+                    help="Write to the workspace's memory folder. Without this, dry-run.")
     ap.add_argument("--include-skills", action="store_true",
-                    help="Copy SKILL.md dirs into ~/Jarvis/imported_skills/ "
-                         "for later review. Inglen has no skill loader yet.")
+                    help="Copy SKILL.md dirs into <workspace>/imported_skills/ "
+                         "for review; install one with install_skill to use it.")
     ap.add_argument("--include-config", action="store_true",
                     help="Pull the source agent's chosen model/provider into "
-                         "~/Jarvis/settings.json. API keys are NOT copied.")
+                         "the workspace's settings.json. API keys are NOT copied.")
     args = ap.parse_args()
 
     # ---- collect entries ----
@@ -446,14 +446,16 @@ def main() -> int:
         print(f"  updated:       {updated}")
         print(f"  errors:        {errors}")
         if args.include_skills:
-            print(f"  skills parked: {skills_copied}  (under ~/Jarvis/imported_skills/)")
+            _ws = Path(__import__("hearth.tools", fromlist=["WORKSPACE"]).WORKSPACE)
+            print(f"  skills parked: {skills_copied}  (under {_ws / 'imported_skills'})")
         if cfg_diff:
             if any(k.startswith("_") for k in cfg_diff):
                 print(f"  config import: {cfg_diff}")
             else:
                 print(f"  config import: {cfg_diff} -> settings.json")
         print()
-        print("open ~/Jarvis/memory or the GUI Memory tab to browse.")
+        _ws = Path(__import__("hearth.tools", fromlist=["WORKSPACE"]).WORKSPACE)
+        print(f"open {_ws / 'memory'} or the Memory tab in the window to browse.")
     else:
         if args.include_skills:
             print(f"  would scan skills under: {[str(p) for p in skill_roots]}")
