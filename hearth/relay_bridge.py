@@ -1093,6 +1093,15 @@ class Relay(cc.Adapter):
                 call.hang_up()                  # its goodbye is said, then the call ends
                 return
             call.step(words)
+        # Thinking still waiting on its pace goes first, so it sits above this step and not under the next.
+        t = cc.turn_context().get("t", "")
+        timer = self._later.pop(f"think:{t}", None)
+        if timer is not None:
+            timer.cancel()
+            newest = self._latest.get(f"think:{t}")
+            if newest is not None:
+                self._think_at[t] = time.time()
+                self._push(chat, {"type": "think", "text": newest})
         self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site, **({"cmd": cmd} if cmd else {})})
 
     def call_note(self, chat, cid: str = "") -> str:
@@ -1154,7 +1163,7 @@ class Relay(cc.Adapter):
 
     def think(self, chat, text):
         """The reasoning so far, four times a second, folded on the phone like the window's."""
-        self._paced(chat, "think", text[-4000:], THINK_EVERY, self._think_at)
+        self._paced(chat, "think", text[-20000:], THINK_EVERY, self._think_at)
 
     def heard(self, chat, text, cid=""):
         """What a voice note said, so the phone shows the words instead of "Voice note"."""
@@ -1638,6 +1647,10 @@ class Bridge:
                     run["keys"].append(real)
                     push({"type": "agent_session", "from": was, "chat": real})
             elif kind == "step":
+                if thought and sent.get("thought_n") != len(thought):
+                    # The thinking before this step reaches the phone before the step, so it sits above it.
+                    sent["thought_n"] = len(thought)
+                    push({"type": "think", "text": "".join(thought)[-20000:]})
                 push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or "",
                       **({"cmd": f["cmd"]} if f.get("cmd") else {})})
             elif kind == "step_out" and f.get("out"):
@@ -1648,8 +1661,8 @@ class Bridge:
             elif kind == "think":
                 thought.append(str(f.get("text") or ""))
                 if now - sent["think"] >= THINK_EVERY:
-                    sent["think"] = now
-                    push({"type": "think", "text": "".join(thought)[-4000:]})
+                    sent["think"], sent["thought_n"] = now, len(thought)
+                    push({"type": "think", "text": "".join(thought)[-20000:]})
             elif kind == "note":
                 # Inglen saying what it did ("Sent to Codex on your PC"), not the agent: drawn muted.
                 push({"type": "text", "text": f.get("text") or "", "note": True})
