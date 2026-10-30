@@ -244,7 +244,8 @@ check("a system or developer message is never read as said",
 
 S._exe = lambda a: CODEX if a == "codex" else None
 got = RB.answer({"what": "agent_catalog"})
-check(f"only the agents installed here are offered ({got.get('agents')})", got.get("agents") == [{"id": "codex", "label": S.label("codex")}])
+check(f"only the agents installed here are offered, with their marks ({got.get('agents')})",
+      [(a["id"], a["label"], bool(a.get("brand"))) for a in got.get("agents") or []] == [("codex", S.label("codex"), True)])
 check(f"with the folders they have worked in ({[r['path'] for r in got.get('recent') or []]})",
       any(os.path.samefile(r["path"], PROJ) for r in got.get("recent") or []))
 os.makedirs(os.path.join(HOME, ".hearth"), exist_ok=True)

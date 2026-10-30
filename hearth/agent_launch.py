@@ -17,7 +17,8 @@ def catalog() -> Dict[str, Any]:
     """{agents: [{id, label}], recent: [{agent, path, at}]}: the agents installed on this PC,
     and the folders each has worked in, newest first."""
     from . import agent_sessions as S
-    agents = [{"id": a, "label": S.label(a)} for a in S.AGENTS if S._exe(a)]
+    from .brand_icons import key_for
+    agents = [{"id": a, "label": S.label(a), "brand": key_for(a)} for a in S.AGENTS if S._exe(a)]
     have = {a["id"] for a in agents}
     recent: List[Dict[str, Any]] = []
     seen = set()
@@ -72,7 +73,8 @@ def reserve(agent: str, cwd: str, text: str) -> Dict[str, Any]:
     if not (text or "").strip():
         return {"error": "Type what it should do first."}
     cid = S.chat_id(agent, "new" + uuid.uuid4().hex[:12])
-    row = {"chat": cid, "agent": agent, "id": "", "label": S.label(agent), "cwd": cwd,
+    from .brand_icons import key_for
+    row = {"chat": cid, "agent": agent, "id": "", "label": S.label(agent), "brand": key_for(agent), "cwd": cwd,
            "project": os.path.basename(cwd.rstrip("/\\")) or cwd, "title": S._title(text),
            "at": int(time.time() * 1000), "live": "recent", "model": ""}
     DRAFTS[cid] = row
