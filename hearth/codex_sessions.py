@@ -38,6 +38,7 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
     from .agent_sessions import _step
     from .channel_core import _what, out_of
     from .codex_brain import _Rpc, _change_call, _shown_command
+    from .tools import mode_allows
 
     proc = await asyncio.create_subprocess_exec(
         *exe, "app-server", cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -124,12 +125,13 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
                 continue
             if "id" in msg:                  # Codex asks before doing something
                 if meth == "item/commandExecution/requestApproval":
-                    ok = await may(f"Codex asks: may it {_what('run_command', {'command': _shown_command(prm)})}?")
+                    run = {"command": _shown_command(prm)}
+                    ok = mode_allows("run_command", run) or await may(f"Codex asks: may it {_what('run_command', run)}?")
                 elif meth == "item/fileChange/requestApproval":
                     changes = (items.get(str(prm.get("itemId"))) or {}).get("changes") or []
                     ok = bool(changes)
                     for c in changes:
-                        if not await may(f"Codex asks: may it {_what(*_change_call(c))}?"):
+                        if not (mode_allows(*_change_call(c)) or await may(f"Codex asks: may it {_what(*_change_call(c))}?")):
                             ok = False
                             break
                 else:

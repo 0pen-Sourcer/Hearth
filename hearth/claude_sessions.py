@@ -84,7 +84,9 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
                 req = ev.get("request") or {}
                 if req.get("subtype") == "can_use_tool":
                     name, args = str(req.get("tool_name") or ""), req.get("input") if isinstance(req.get("input"), dict) else {}
-                    ok = await asyncio.to_thread(ask, f"Claude Code asks: may it {_what(*hearth_view(name, args))}?")
+                    from .tools import mode_allows
+                    ok = mode_allows(*hearth_view(name, args)) or await asyncio.to_thread(
+                        ask, f"Claude Code asks: may it {_what(*hearth_view(name, args))}?")
                     answer = ({"behavior": "allow", "updatedInput": args} if ok
                               else {"behavior": "deny", "message": "Not allowed from the phone."})
                     send({"type": "control_response", "response": {"subtype": "success", "request_id": ev.get("request_id"),
