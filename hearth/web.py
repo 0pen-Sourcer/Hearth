@@ -694,13 +694,16 @@ def _make_permission_check(emit_fn):
     def _check(name: str, args: Dict) -> str:
         if name in _always_deny:  return "deny"
         # The approval mode picked in the chat bar (Ask / Auto-edit / Auto).
+        _out = ""
         try:
             from . import tools as _tl
             if _tl.mode_allows(name, args):
                 return "allow"
+            _out = _tl.sends_out(name, args)
         except Exception:
             pass
-        if name in _always_allow: return "allow"
+        # A standing yes for the tool doesn't cover sending data out after reading from outside.
+        if name in _always_allow and not _out: return "allow"
         req_id = f"perm_{int(time.time()*1000)}_{name}"
         _permission_queues[req_id] = _queue.Queue()
         try:
@@ -723,6 +726,7 @@ def _make_permission_check(emit_fn):
         if isinstance(decision, dict):
             _reason = (decision.get("reason") or "").strip()
             decision = decision.get("decision") or "deny"
+        if decision == "always" and _out: return "allow"          # this request only
         if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
         if decision == "never":  _always_deny.add(name);  _save_perms_to_disk(); return "deny"
         if decision == "aside":

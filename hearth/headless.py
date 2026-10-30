@@ -2240,7 +2240,7 @@ async def _run_once(
                 # 2. Otherwise the legacy HEARTH_AUTO_APPROVE env var applies:
                 #    when set to "0", risky tools are auto-denied (no UI).
                 from .tools import is_risky  # single source — see tools.py
-                if is_risky(name) and permission_check is not None:
+                if is_risky(name, args) and permission_check is not None:
                     _deny_reason = ""
                     try:
                         decision = permission_check(name, args)
@@ -2313,12 +2313,14 @@ async def _run_once(
                             "content": tool_result,
                         })
                         continue
-                elif is_risky(name):
-                    if _env.get("AUTO_APPROVE", "1") == "0":
+                elif is_risky(name, args):
+                    from .tools import sends_out as _sends_out
+                    if _env.get("AUTO_APPROVE", "1") == "0" or (
+                            _sends_out(name, args) and os.environ.get("HEARTH_AUTO_APPROVE") != "1"):
                         tool_result = (
                             f"Not run: '{name}' needs approval and nobody is here to "
-                            f"give it (HEARTH_AUTO_APPROVE=0)."
-                        )
+                            f"give it. {_sends_out(name, args)}"
+                        ).rstrip()
                         gd = guard.after(name, args, tool_result)
                         if gd.action in ("warn", "stop"):
                             tool_result = f"{tool_result}\n\n{gd.note}"

@@ -5944,7 +5944,7 @@ class JarvisCLI:
         tool calls print like Hearth's own, and anything it needs permission
         for is asked at this prompt."""
         from hearth import claude_brain as _cb
-        from hearth.tools import mode_allows
+        from hearth.tools import mode_allows, sends_out
         loop = asyncio.get_running_loop()
         convo = [m for m in self.messages if m.get("role") in ("user", "assistant")]
         prompt = str(convo[-1].get("content") or "") if convo else ""
@@ -5952,7 +5952,7 @@ class JarvisCLI:
         state = {"open": False}
 
         def ask(name, args):
-            if mode_allows(name, args) or self.tool_perms.get(name) == "always":
+            if mode_allows(name, args) or (self.tool_perms.get(name) == "always" and not sends_out(name, args)):
                 return "allow"
             if self.tool_perms.get(name) == "never":
                 return "deny"
@@ -6032,7 +6032,9 @@ class JarvisCLI:
                     print(f"{C_DIM}  {st.get('brain')} · {st['tokens_in']:,} in, {st.get('tokens_out') or 0:,} out{C_RESET}")
 
         from hearth import auto_review as _ar          # Auto's reviewer checks steps against this turn's words
-        _ar.begin_turn((getattr(self, "_chat", None) or {}).get("id"), prompt, history, emit)
+        # The whole chat, tool results included: what it read from outside still counts.
+        _ar.begin_turn((getattr(self, "_chat", None) or {}).get("id"), prompt,
+                       [m for m in self.messages if not (convo and m is convo[-1])], emit)
         try:
             await _cb.run_turn(prompt, emit=emit, history=history, permission_check=ask,
                                should_cancel=self._respond_cancel.is_set)
@@ -6191,8 +6193,8 @@ class JarvisCLI:
 
     async def _ask_permission(self, name: str, args: Dict[str, Any]):
         """Approval for one tool call, as a picker. The open input waits meanwhile."""
-        from hearth.tools import mode_allows
-        if mode_allows(name, args) or self.tool_perms.get(name) == "always":
+        from hearth.tools import mode_allows, sends_out
+        if mode_allows(name, args) or (self.tool_perms.get(name) == "always" and not sends_out(name, args)):
             return "allow"
         if self.tool_perms.get(name) == "never":
             return "deny"
@@ -6796,7 +6798,7 @@ class JarvisCLI:
             # the workspace), we show a tidy one-line preview cut with "…" -
             # no 600-char code blob (e.g. create_plugin) dumped to the screen.
             preview_full = json.dumps(args, ensure_ascii=False)
-            is_risky = _is_risky(name)
+            is_risky = _is_risky(name, args)
 
             # Will a [y/n/a/N] prompt actually fire? Only then do we need the
             # full args on screen.
@@ -6805,10 +6807,16 @@ class JarvisCLI:
                 _mode_ok = _mode_allows(name, args)
             except Exception:
                 _mode_ok = False
+            try:
+                from hearth.tools import sends_out as _sends_out
+                _out = _sends_out(name, args)
+            except Exception:
+                _out = ""
             _will_prompt = (is_risky
                             and not self.auto_approve
                             and not _mode_ok
-                            and self.tool_perms.get(name) not in ("always", "never"))
+                            and (self.tool_perms.get(name) not in ("always", "never") or
+                                 (_out and self.tool_perms.get(name) == "always")))
 
             # Tool card: a per-family violet glyph + bold name + a compact,
             # muted "key=val, …" arg preview (whitespace collapsed, long values
@@ -6841,10 +6849,10 @@ class JarvisCLI:
             denied = False
             decline_reason = ""
 
-            if (_is_risky(name)
+            if (_is_risky(name, args)
                     and not self.auto_approve
                     and not _mode_ok
-                    and self.tool_perms.get(name) != "always"):
+                    and (self.tool_perms.get(name) != "always" or _out)):
                 if self.tool_perms.get(name) == "never":
                     denied = True
                 else:

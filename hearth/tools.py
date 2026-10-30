@@ -8334,8 +8334,10 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
                 if td["name"] == name:
                     r = mcp_client.call_tool(td["_mcp_server"],
                                              td["_mcp_tool"], args)
-                    return r.get("output") if r.get("ok") else \
-                           f"Error ({name}): {r.get('error', 'unknown')}"
+                    out = r.get("output") if r.get("ok") else \
+                        f"Error ({name}): {r.get('error', 'unknown')}"
+                    _took_in(name, args, out)
+                    return out
             return f"Error: MCP tool '{name}' not currently connected"
         except Exception as e:
             return f"Error ({name}): {type(e).__name__}: {e}"
@@ -8475,7 +8477,17 @@ def execute_tool(name: str, args: Optional[Dict] = None) -> str:
     dt_ms = int((datetime.now() - t0).total_seconds() * 1000)
     _log_activity("result", tool=name, id=_cid, chars=len(truncated), ms=dt_ms,
                   ok=not _says_failed(truncated), preview=truncated[:300])
+    _took_in(name, args, truncated)
     return truncated
+
+
+def _took_in(name: str, args, result) -> None:
+    """The turn running this call notes what it brought in from outside."""
+    try:
+        from .outbound import note
+        note(name, args, result)
+    except Exception:
+        pass
 
 
 _UNDOABLE = {"write_file", "edit_file", "delete_path", "move_path", "create_directory", "run_command"}
@@ -8963,12 +8975,26 @@ def strip_control_args(args):
 MCP_TOOL_PREFIX = "mcp_"
 
 
-def is_risky(name: str) -> bool:
+def is_risky(name: str, args=None) -> bool:
     """Single source for whether a call needs permission. Import this rather
-    than testing membership of _RISKY_TOOLS, so a surface cannot drift."""
+    than testing membership of _RISKY_TOOLS, so a surface cannot drift. With
+    the call's arguments, a request that would carry data out after the chat
+    read something from outside counts too (hearth/outbound.py)."""
     if not name or name in _NEVER_PERM:
         return False
-    return name in _RISKY_TOOLS or name.startswith(MCP_TOOL_PREFIX)
+    if name in _RISKY_TOOLS or name.startswith(MCP_TOOL_PREFIX):
+        return True
+    return args is not None and bool(sends_out(name, args))
+
+
+def sends_out(name: str, args=None) -> str:
+    """Why this call asks in every mode, because it would send something out
+    after the chat took in content from outside; '' when it doesn't."""
+    try:
+        from .outbound import reason
+        return reason(name, args)
+    except Exception:
+        return ""
 
 
 # ============================================================
@@ -9040,7 +9066,7 @@ def needs_a_tap(name: str, args=None) -> bool:
     assistant's own voice can never set it off: what Auto mode would still
     stop to ask about (deleting, moving, sending, installing, destructive or
     outward commands)."""
-    if name in _ALWAYS_ASK_IN_AUTO:
+    if name in _ALWAYS_ASK_IN_AUTO or sends_out(name, args):
         return True
     if name in _SHELL_TOOLS and name != "delegate":
         cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
@@ -9050,6 +9076,11 @@ def needs_a_tap(name: str, args=None) -> bool:
 
 def mode_allows(name: str, args=None) -> bool:
     """True when the current approval mode lets this call run without asking."""
+    if sends_out(name, args):
+        return False                    # data could go out after reading something from outside: always asks
+    from .outbound import READS_WEB
+    if name in READS_WEB and name not in _RISKY_TOOLS:
+        return True                     # reading the web asks in no mode (an agent brain's fetch comes here)
     m = approval_mode()
     if name == "helper_changes":
         act = str((args or {}).get("action") or "show")
@@ -9145,17 +9176,20 @@ def standing_permission(name: str, args=None) -> str:
     """'allow', 'deny' or 'ask': what the user has already decided about a
     tool, for a caller that cannot put a question to them, such as a sub-agent
     working in the background. A tool that is not risky is 'allow'."""
-    if not is_risky(name):
+    if not is_risky(name, args):
         return "allow"
+    out = sends_out(name, args)
     try:
         with open(os.path.join(WORKSPACE, "permissions.json"), encoding="utf-8") as f:
             v = (json.load(f) or {}).get(name)
         if v == "never":
             return "deny"
-        if v == "always":
+        if v == "always" and not out:
             return "allow"
     except Exception:
         pass
+    if out:
+        return "ask"                    # a standing yes for the tool doesn't cover sending data out
     if (os.environ.get("HEARTH_AUTO_APPROVE") or _env.get("AUTO_APPROVE")) == "1":
         return "allow"
     return "allow" if mode_allows(name, args) else "ask"

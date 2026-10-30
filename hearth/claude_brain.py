@@ -831,7 +831,11 @@ def _safe_hearth_tools() -> List[str]:
     allowed up front so Claude Code doesn't stop to ask about them."""
     try:
         from .tools import TOOL_DEFINITIONS, _RISKY_TOOLS
-        return [f"mcp__hearth__{t['name']}" for t in TOOL_DEFINITIONS if t["name"] not in _RISKY_TOOLS]
+        from .outbound import URL_ARGS
+        # A fetch is asked about each time: whether it would carry data out
+        # depends on what the turn has read, which only Inglen knows.
+        return [f"mcp__hearth__{t['name']}" for t in TOOL_DEFINITIONS
+                if t["name"] not in _RISKY_TOOLS and t["name"] not in URL_ARGS]
     except Exception:
         return []
 
@@ -1071,6 +1075,10 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     reached: Dict[str, Optional[str]] = {}      # call id -> the tool use_tool ran (None: a lookup)
     # When the agent last said anything, and which of its own steps are running.
     heard = {"at": time.time(), "steps": set(), "told": False, "stop": False}
+    # What the agent's steps bring in from outside is noted on this turn, whichever
+    # process ran them (its own tools, or Inglen's through the tool server).
+    from . import outbound
+    seen, called = outbound.current(), {}
 
     def emit(kind: str, **fields) -> None:
         heard["at"], heard["told"] = time.time(), False
@@ -1083,6 +1091,10 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
             fields = reached_tool(kind, fields, reached)
             if fields is None:
                 return
+            if kind == "tool_call":
+                called[cid] = fields.get("args")
+            elif kind == "tool_result":
+                outbound.note_on(seen, str(fields.get("name") or ""), called.pop(cid, None), fields.get("content"))
         if kind == "done":
             fields["stats"] = priced(agent, fields.get("stats"))
         elif kind == "error":
@@ -1142,6 +1154,10 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                 _emit("quiet", seconds=int(quiet), name=name,
                       message=f"{name} has been quiet for {int(quiet)} s. It may still be thinking; Stop ends it.")
 
+    # Every agent's permission questions arrive on a thread of the bridge: they are
+    # answered in this turn (Auto's reviewer, what the turn has read from outside).
+    from . import auto_review
+    _turns[_TOKEN] = auto_review.current()
     turn = asyncio.ensure_future(_turn_on(prompt, emit, history, permission_check, should_cancel, voice, drain_steer))
     watcher = asyncio.ensure_future(watch(turn))
     try:
@@ -1153,6 +1169,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         return 0
     finally:
         watcher.cancel()
+        _turns.pop(_TOKEN, None)
 
 
 async def _turn_on(prompt, emit, history, permission_check, should_cancel, voice, drain_steer) -> int:
