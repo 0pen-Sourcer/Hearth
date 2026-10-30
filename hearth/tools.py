@@ -3510,6 +3510,17 @@ _DESTRUCTIVE_PATTERNS = [
     re.compile(r"(base64\s+(-d|--decode)|certutil\b.*-decode|FromBase64String).*\|\s*(sh|bash|zsh|iex|Invoke-Expression|cmd)\b", re.I),
     # Writing into the home folder's own files (shell start-up, keys, config).
     re.compile(r">>?\s*(~|\$HOME|%USERPROFILE%|\$env:USERPROFILE)", re.I),
+    # Git steps that throw away work no snapshot keeps.
+    re.compile(r"\bgit\b[^\n;&|]*\sreset\b[^\n;&|]*\s--(hard|merge|keep)\b", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\sbranch\b[^\n;&|]*\s(-D|-d\s+(-f|--force)|--delete\s+(-f|--force)|(-f|--force)\s+(-d|--delete))\b"),
+    re.compile(r"\bgit\b[^\n;&|]*\sclean\b[^\n;&|]*\s(-\w*f\w*|--force)\b", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\scheckout\b[^\n;&|]*(\s--\s|\s(-f|--force)\b|\s\.(\s|$))", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\srestore\b(?![^\n;&|]*--staged\b(?![^\n;&|]*--worktree))", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\sstash\s+(drop|clear)\b", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\spush\b[^\n;&|]*\s(-f|--force(-with-lease)?|--mirror|--delete|-d)\b|\bgit\b[^\n;&|]*\spush\b[^\n;&|]*\s\+\S", re.I),
+    # The Recycle Bin, emptied: nothing comes back from that.
+    re.compile(r"\bClear-RecycleBin\b", re.I),
+    re.compile(r"\$Recycle\.Bin", re.I),
 ]
 
 
