@@ -570,7 +570,7 @@ def voice_permission_check(check, emit_fn, prompt: str, history, *, asks, tapped
         if name in always_deny:
             return "deny"
         try:
-            if _tl.mode_allows(name, args) or name in always_allow:
+            if _tl.mode_allows(name, args) or (name in always_allow and not _tl.sends_out(name, args)):
                 return "allow"
             tap = _tl.needs_a_tap(name, args)
         except Exception:

@@ -100,11 +100,16 @@ def _cmd(args: Any) -> str:
 # ---------------------------------------------------------------- the turn it reviews for
 
 class _Turn:
-    def __init__(self, chat: str, asks: List[str], emit: Optional[Callable], supervised: bool = True):
+    def __init__(self, chat: str, asks: List[str], emit: Optional[Callable], supervised: bool = True,
+                 seen: Any = None):
         self.chat, self.asks, self.emit, self.supervised = chat, asks, emit, supervised
         self.id = hashlib.sha1(f"{chat}{time.time()}".encode()).hexdigest()[:10]
         self.verdicts: Dict[str, "Verdict"] = {}
         self.asked_in_a_row = 0
+        if seen is None:
+            from .outbound import Seen
+            seen = Seen()
+        self.seen = seen                 # what the chat has taken in from outside (hearth/outbound.py)
 
 
 # Per turn, not per process: the window, the phone and a chat app can each be mid-turn.
@@ -131,11 +136,22 @@ def begin_turn(chat: Optional[str], prompt: str, history: Optional[List[Dict[str
     """A turn starts: what the person said lately in this chat is what steps are checked against."""
     said = [str(m.get("content") or "") for m in (history or []) if m.get("role") == "user"
             and isinstance(m.get("content"), str) and m.get("content").strip()][-3:]
-    _TURN.set(_Turn(chat or "", [s[-1500:] for s in said + [prompt or ""] if s.strip()][-4:], emit, supervised))
+    from .outbound import from_history
+    _TURN.set(_Turn(chat or "", [s[-1500:] for s in said + [prompt or ""] if s.strip()][-4:], emit, supervised,
+                    seen=from_history(history, prompt)))
 
 
 def end_turn() -> None:
     _TURN.set(None)
+
+
+def helper_turn() -> _Turn:
+    """The turn a background helper works in: nothing the person said to review
+    against, and the same record of what came in from outside as the turn that
+    sent it, so what either reads counts for both."""
+    parent = _TURN.get()
+    return _Turn(parent.chat if parent else "", [], None, supervised=False,
+                 seen=parent.seen if parent is not None else None)
 
 
 class Verdict:
@@ -434,6 +450,13 @@ def _said(turn: Optional[_Turn], name: str, v: "Verdict") -> "Verdict":
 def why(name: str, args: Any) -> str:
     """What a question about this step adds: the reviewer's or the floor's reason, '' when there is none."""
     turn = _TURN.get()
+    try:
+        from .outbound import reason as _sends_out
+        out = _sends_out(name, args)
+    except Exception:
+        out = ""
+    if out:
+        return out
     f = floor_reason(name, args)
     if f:
         return words(Verdict(False, f"it {f}, which always asks"))

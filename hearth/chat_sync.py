@@ -87,9 +87,13 @@ def from_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     the next message as context (last_failure gives one at the very end)."""
     from .headless import failure_note
     out, failed = [], ""
+    # Tool steps ride along (the model is sent only what was said), so a turn can
+    # tell what the chat has read from outside (hearth/outbound.py).
+    steps: List[Dict[str, Any]] = []
     for m in messages:
         if m.get("role") not in ("user", "assistant"):
             continue
+        steps += [e for e in m.get("events") or [] if isinstance(e, dict) and e.get("kind") == "tool"]
         f = _failure(m)
         if f:
             failed = f
@@ -101,6 +105,10 @@ def from_chat(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             text = failure_note(failed) + "\n\n" + text
         failed = ""
         out.append({"role": m["role"], "content": text})
+        if steps and m["role"] == "assistant":
+            out[-1]["events"], steps = steps, []
+    if steps and out:
+        out[-1]["events"] = steps
     return out
 
 

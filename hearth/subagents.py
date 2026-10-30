@@ -1585,8 +1585,15 @@ def spawn_subagent(persona: str, prompt: str,
                 f"Settings > server_parallel_slots.")}
         with _BG_RESULTS_LOCK:
             _BG_RUNNING.add(agent_id)
+        # What the sending turn has read from outside counts in the helper too, and back.
+        from . import auto_review as _ar
+        _turn = _ar.helper_turn()
+
+        def _in_turn(*a):
+            with _ar.using(_turn):
+                _bg_worker(*a)
         t = threading.Thread(
-            target=_bg_worker, name=f"hearth-subagent-{agent_id}",
+            target=_in_turn, name=f"hearth-subagent-{agent_id}",
             args=(p, prompt, turns_cap, agent_id, depth), daemon=True,
         )
         t.start()
