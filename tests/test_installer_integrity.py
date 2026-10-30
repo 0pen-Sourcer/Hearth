@@ -36,10 +36,28 @@ def check(label, cond):
 
 
 REAL = b"MZ the real installer " * 1000
+NAME = "Inglen-Setup-9.9.9.exe"
 served = {"bytes": REAL}
+SIG = {"asset": {"name": NAME + ".sig", "browser_download_url": "https://github.example/i.exe.sig", "size": 88}}
 release = {"tag_name": "v9.9.9", "assets": [
-    {"name": "Inglen-Setup-9.9.9.exe", "browser_download_url": "https://github.example/i.exe", "size": len(REAL),
-     "digest": "sha256:" + hashlib.sha256(REAL).hexdigest()}]}
+    {"name": NAME, "browser_download_url": "https://github.example/i.exe", "size": len(REAL),
+     "digest": "sha256:" + hashlib.sha256(REAL).hexdigest()}, SIG["asset"]]}
+
+# A throwaway key stands in for the release key.
+import base64  # noqa: E402
+from cryptography.hazmat.primitives import serialization as _s  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+from hearth import patch_sign, release_keys  # noqa: E402
+_key, _other = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+release_keys.PUBLIC_KEYS = [base64.b64encode(_key.public_key().public_bytes(_s.Encoding.Raw, _s.PublicFormat.Raw)).decode()]
+
+
+def sig_for(data: bytes, key=_key) -> bytes:
+    stmt = patch_sign._installer_statement(NAME, hashlib.sha256(data).hexdigest())
+    return base64.b64encode(key.sign(stmt))
+
+
+SIG["text"] = sig_for(REAL)
 
 
 class _Resp(io.BytesIO):
@@ -52,10 +70,11 @@ class _Resp(io.BytesIO):
 
 import urllib.request  # noqa: E402
 _real_open = urllib.request.urlopen
-urllib.request.urlopen = lambda req, timeout=0: _Resp(json.dumps(release).encode())
+urllib.request.urlopen = lambda req, timeout=0: _Resp(
+    SIG["text"] if getattr(req, "full_url", str(req)).endswith(".sig") else json.dumps(release).encode())
 
 
-def fake_download(url, dest, tmp, on_progress=None, ua="", cancel=None):
+def fake_download(url, dest, tmp, on_progress=None, ua="", cancel=None, sha256=""):
     with open(dest, "wb") as f:
         f.write(served["bytes"])
 
@@ -92,7 +111,33 @@ check("the checked installer runs", r.get("ok") and ran and ran[-1][0] == got["p
 release["assets"][0].pop("digest")
 os.remove(got["path"])
 got = updater.download_installer()
-check("a release without a hash still downloads (size checked, as before)", got.get("ok"))
+check("a release without GitHub's hash still downloads when signed", got.get("ok"))
+
+# The hash comes from the same release, so it proves nothing if the release itself is not ours.
+os.remove(got["path"])
+served["bytes"] = b"MZ a hijacked release's installer " * 600
+release["assets"][0]["digest"] = "sha256:" + hashlib.sha256(served["bytes"]).hexdigest()
+release["assets"][0]["size"] = len(served["bytes"])
+got = updater.download_installer()
+check(f"an installer whose hash matches but whose signature doesn't is refused {got}",
+      not got.get("ok") and "release key" in got.get("error", ""))
+check("and isn't kept", not os.path.exists(os.path.join(HOME, "Downloads", NAME)))
+SIG["text"] = sig_for(served["bytes"], _other)
+got = updater.download_installer()
+check("one signed by another key is refused", not got.get("ok") and "release key" in got.get("error", ""))
+release["assets"].remove(SIG["asset"])
+got = updater.download_installer()
+check(f"a release with no signature is refused before downloading {got}",
+      not got.get("ok") and "isn't signed" in got.get("error", ""))
+
+exe = os.path.join(HOME, NAME)
+with open(exe, "wb") as f:
+    f.write(REAL)
+raw = _key.private_bytes(_s.Encoding.Raw, _s.PrivateFormat.Raw, _s.NoEncryption())
+with open(patch_sign.sign_installer(exe, raw)) as f:
+    made = f.read()
+check("the release tooling's .sig checks out", patch_sign.check_installer(exe, NAME, made) == "")
+check("and names the file it signed", patch_sign.check_installer(exe, "Inglen-Setup-Lite-9.9.9.exe", made) != "")
 
 urllib.request.urlopen = _real_open
 print()

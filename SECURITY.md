@@ -54,7 +54,7 @@ Out of scope:
 - **Shared memory** can expose Inglen memory and past chats to coding agents you explicitly enable through the MCP memory server. Those agents may send the retrieved content to their own provider under that provider's terms.
 - **The built-in llama.cpp server** uses Inglen's own local port (8790 by default; configurable) and the local image engine commonly uses 8189. Inglen tries to stop child processes on exit, but a hard process kill can still leave a child alive briefly. A restart cleans up the managed server state.
 - **`model_configs.json`** is plain JSON in the active Inglen workspace. It stores per-model local load settings. Treat it as local user data.
-- **Installer trust is not fully solved yet.** Code-only update patches are signed and file hashes are checked. Downloaded Windows installers are checked against the SHA-256 digest GitHub publishes with the release asset (when GitHub gives one), but the installer is not Authenticode-signed and that digest is not separately signed by Inglen's release key. The llama.cpp and stable-diffusion.cpp engines are checked against the SHA-256 digest GitHub publishes for each release asset, before extracting and again for a copy kept from an earlier download; that proves the file is the one the project uploaded, not that the project's account wasn't misused. The Kokoro voice files come from one fixed release and are checked against a SHA-256 written into Inglen.
+- **Installer trust is not fully solved yet.** Code-only update patches and the installers the app downloads are signed with Inglen's Ed25519 release key, whose public half ships in the app; an unsigned or wrongly signed one is refused, so a release uploaded by someone holding only the GitHub account doesn't install. The installer is not Authenticode-signed, so Windows SmartScreen still warns on a first install from the website. The llama.cpp and stable-diffusion.cpp engines are checked against the SHA-256 digest GitHub publishes for each release asset, before extracting and again for a copy kept from an earlier download; that proves the file is the one the project uploaded, not that the project's account wasn't misused. The Kokoro voice files come from one fixed release and are checked against a SHA-256 written into Inglen.
 - **Relay room knowledge is still a low-probability denial-of-service edge.** Room ids are 128-bit values derived from pairing material and are not enumerable. If one were somehow disclosed, the relay currently does not require the phone to prove the pairing secret before occupying that room. Frames remain encrypted, so this is about disruption rather than reading their contents. A phone proof is planned.
 
 ## What is already hardened
@@ -68,7 +68,7 @@ The current development line includes fixes for issues found in the October 2026
 - Plus relay access validates both the licence and its activation instance rather than accepting a copied key alone;
 - licence credentials no longer need to travel in the relay URL;
 - relay sockets have frame-rate limits;
-- downloaded installers are hash-checked before Inglen will launch the file it downloaded;
+- downloaded installers are hash-checked and must carry the release key's signature before Inglen will launch the file it downloaded;
 - code update patches are signed, hash-checked and recover from an interrupted apply;
 - MCP child processes do not inherit password/token/key-like environment variables by default;
 - chat-app bridges gate messages by the approved sender identity.

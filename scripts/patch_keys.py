@@ -3,6 +3,8 @@
     python scripts/patch_keys.py new <path-outside-the-repo>   writes the private key there, prints the public key
                                                                to add to hearth/release_keys.py
     python scripts/patch_keys.py sign <patch.zip> <key-file> [version]
+    python scripts/patch_keys.py sign-installer <key-file> <installer.exe>...   writes <installer.exe>.sig beside each;
+                                                               upload it with the installer or installs refuse it
 
 build_patch.py signs on its own when HEARTH_PATCH_KEY names the key file. Keep the key file off this repository
 and backed up: without it no release can update installs that trust it (list a second key before retiring one).
@@ -47,6 +49,13 @@ def main(argv) -> int:
             raw = base64.b64decode(f.read().strip())
         sign_zip(argv[1], raw, argv[3] if len(argv) > 3 else HEARTH_VERSION)
         print(f"signed {argv[1]}")
+        return 0
+    if len(argv) >= 3 and argv[0] == "sign-installer":
+        from hearth.patch_sign import sign_installer
+        with open(argv[1]) as f:
+            raw = base64.b64decode(f.read().strip())
+        for exe in argv[2:]:
+            print(f"signed {exe} -> {sign_installer(exe, raw)}")
         return 0
     print(__doc__)
     return 1
