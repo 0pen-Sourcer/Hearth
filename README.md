@@ -97,7 +97,7 @@ Inglen reads the tool-call formats of Gemma, Hermes, Qwen, Llama, Mistral, Phi, 
 
 ## How it compares
 
-OpenClaw and Hermes are broad agent platforms, and Munder Difflin coordinates many coding agents on one machine. Open WebUI and LM Studio are places to run and chat with models. Those products already cover much of the obvious checklist, so Inglen is not trying to win by having one more integration.
+OpenClaw and Hermes are broad agent platforms, and Munder Difflin coordinates many coding agents on one machine. Open WebUI and LM Studio are places to run and chat with models.
 
 Its distinction is the user-owned environment around the workers. Local models, cloud models and agent programs can use the same computer, memory and tools while Inglen keeps the approval boundary, visible supervision and reversible work outside any one worker. Coding-agent changes can be isolated before they reach the main tree, and Plus carries the same human-control surface to the phone. **The worker can change; it should not own the computer. You should.**
 
