@@ -803,20 +803,47 @@ def _release_part(key: str, lock: "_threading.Lock", mine: "_threading.Event") -
 def _download_with_resume(url, dest, tmp,
                           on_progress: Optional[Callable[[int, int], None]] = None,
                           ua: str = "Inglen/0.7.6 (HF-download)",
-                          cancel: Optional[Callable[[], bool]] = None) -> int:
+                          cancel: Optional[Callable[[], bool]] = None,
+                          sha256: str = "") -> int:
     """Stream `url` into `tmp`, RESUMING from an existing .part via an HTTP Range
     request so a closed/interrupted download continues instead of restarting
     from zero (matters a lot on slow/metered links). Atomic rename to `dest` on
     completion. The caller LEAVES the .part on failure so the next attempt
-    resumes. Returns total bytes written."""
+    resumes. With `sha256` ("<hex>" or "sha256:<hex>") a finished file that
+    doesn't match is deleted and never becomes `dest`. Returns total bytes written."""
     key, lock, superseded = _claim_part(tmp)
     try:
-        return _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded)
+        return _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded, sha256)
     finally:
         _release_part(key, lock, superseded)
 
 
-def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded) -> int:
+class DigestMismatch(IOError):
+    """A finished download whose sha256 isn't the published one."""
+
+
+def file_sha256(path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _want_sha(digest: str) -> str:
+    algo, sep, hexd = (digest or "").strip().partition(":")
+    return (hexd if sep and algo.lower() == "sha256" else ("" if sep else algo)).strip().lower()
+
+
+def cached_matches(path, asset: Dict[str, Any]) -> bool:
+    """A file kept from an earlier download, checked against the sha256 GitHub publishes for
+    the release asset. Assets uploaded before GitHub kept digests have none to check."""
+    want = _want_sha(str((asset or {}).get("digest") or ""))
+    return not want or file_sha256(path) == want
+
+
+def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded, sha256="") -> int:
     # Read after the claim, so a writer that was still appending has stopped
     # and the offset is where the file really ends.
     resume_from = tmp.stat().st_size if tmp.exists() else 0
@@ -876,6 +903,14 @@ def _download_claimed(url, dest, tmp, on_progress, ua, cancel, superseded) -> in
     if total and done > total:
         raise IOError(f"download is {done - total} bytes longer than the server "
                       f"sent; the partial file is not trustworthy")
+    want = _want_sha(sha256)
+    if want and file_sha256(tmp) != want:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise DigestMismatch(f"{os.path.basename(str(dest))} doesn't match the file its publisher "
+                             f"lists, so it was deleted; try again later")
     # os.replace overwrites an existing dest atomically (Path.rename raises on
     # Windows when dest already exists), and we retry because antivirus / the
     # search indexer briefly locks the just-closed .part — that surfaces as
@@ -2003,13 +2038,13 @@ def download_llama_runtime(cuda: str = "12.4", tag: Optional[str] = None,
         # A stale/corrupt archive in cache (a truncated promotion, an AV-gutted
         # file) would otherwise skip the download and then fail to extract.
         # Trust one only if it opens; else drop it (and any stale .part).
-        if zip_path.exists() and not _archive_ok(zip_path):
+        if zip_path.exists() and not (_archive_ok(zip_path) and cached_matches(zip_path, asset)):
             zip_path.unlink(missing_ok=True)
             part.unlink(missing_ok=True)
         if not zip_path.exists():
             _download_with_resume(asset["browser_download_url"], zip_path, part,
                                   _prog, ua="Inglen",
-                                  cancel=_llama_dl_cancel.is_set)
+                                  cancel=_llama_dl_cancel.is_set, sha256=asset.get("digest") or "")
         done[0] = base + int(asset.get("size", 0))
         try:
             _extract_archive(zip_path, dest)   # exe + ggml libraries + cudart all land together

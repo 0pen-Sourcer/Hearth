@@ -200,12 +200,12 @@ def install(on_progress: Optional[Callable[[int, int], None]] = None, force: boo
             name = asset["name"]
             path, part = cache / name, cache / (name + ".part")
             base = done[0]
-            if path.exists() and not L._archive_ok(path):
+            if path.exists() and not (L._archive_ok(path) and L.cached_matches(path, asset)):
                 path.unlink(missing_ok=True)
             if not path.exists():
                 L._download_with_resume(asset["browser_download_url"], path, part,
                                         (lambda d, t, b=base: on_progress and on_progress(b + d, total)),
-                                        ua="Inglen", cancel=_cancel.is_set)
+                                        ua="Inglen", cancel=_cancel.is_set, sha256=asset.get("digest") or "")
             done[0] = base + int(asset.get("size") or 0)
             L._extract_archive(path, dest)
             path.unlink(missing_ok=True)

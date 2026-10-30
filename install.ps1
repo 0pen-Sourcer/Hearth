@@ -346,8 +346,11 @@ if (-not $NoVoice) {
         # current kokoro_onnx Python package + matching voices-v1.0.bin.
         # If you specifically want the smaller fp16, swap the URL to the
         # `.fp16.onnx` variant from the same release.
-        $onnxUrl = 'https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/kokoro-v1.0.onnx'
-        $binUrl  = 'https://github.com/thewh1teagle/kokoro-onnx/releases/latest/download/voices-v1.0.bin'
+        # One fixed release, kept in step with hearth/voice.py (KOKORO_SHA256).
+        $onnxUrl = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx'
+        $binUrl  = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
+        $onnxSha = 'beb0d1848dee9a49da392cc3df26958d46cfa35d321edf434f52949153f0df3a'
+        $binSha  = 'bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d'
 
         Write-Host "   Voice download is ~150MB. Press Enter to download, or Ctrl-C to skip." -ForegroundColor DarkGray
         try { [void](Read-Host) } catch { Write-Skip "non-interactive; skipping voice download"; $skip = $true }
@@ -357,10 +360,18 @@ if (-not $NoVoice) {
                 if (-not (Test-Path $onnxPath)) {
                     Write-Host "   downloading kokoro-v1.0.onnx ..." -ForegroundColor DarkGray
                     Invoke-WebRequest -Uri $onnxUrl -OutFile $onnxPath -UseBasicParsing
+                    if ((Get-FileHash $onnxPath -Algorithm SHA256).Hash -ne $onnxSha) {
+                        Remove-Item $onnxPath -Force
+                        throw "kokoro-v1.0.onnx does not match its published sha256"
+                    }
                 }
                 if (-not (Test-Path $binPath)) {
                     Write-Host "   downloading voices-v1.0.bin ..." -ForegroundColor DarkGray
                     Invoke-WebRequest -Uri $binUrl -OutFile $binPath -UseBasicParsing
+                    if ((Get-FileHash $binPath -Algorithm SHA256).Hash -ne $binSha) {
+                        Remove-Item $binPath -Force
+                        throw "voices-v1.0.bin does not match its published sha256"
+                    }
                 }
                 Write-OK "voice models in $voicesDir"
             } catch {
