@@ -1223,8 +1223,10 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
         # Codex takes a message for a session its app holds (codex queue): the app runs it
         # when that session is free, and the reply shows here.
         if await _queue_codex(_exe(agent), sid, cwd, text):
-            emit("note", text=f"Sent to {name} on your PC, where this session is open. It goes in when {name} is free.")
-            return 0
+            emit("note", text=f"Sent to {name} on your PC, where this session is open.")
+            from . import codex_sessions
+            return await codex_sessions.follow(d.get("path") or "", emit, drain=drain,
+                                               queue_more=lambda more: _queue_codex(_exe(agent), sid, cwd, more))
     if state == "open":
         emit("error", message=f"This session is open in {name} on your PC right now. Send it there, or close it "
                               f"there and send this again.")

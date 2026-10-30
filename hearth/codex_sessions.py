@@ -10,7 +10,10 @@ a turn runs steer it (turn/steer), or start the next turn when it has ended."""
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import sys
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 Emit = Callable[..., None]
@@ -193,3 +196,76 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
     if reply:
         emit("text", text=reply)
     return 0 if reply and not failure else 1
+
+
+# ---------------------------------------------------------------- a session open in the Codex app
+
+PICKUP_S = 120         # a queued message runs when the session is free; a held one is said so after this
+TURN_S = 1800
+
+
+async def follow(path: str, emit: Emit, *, queue_more: Optional[Callable[[str], "asyncio.Future"]] = None,
+                 drain: Optional[Callable[[], List[str]]] = None) -> int:
+    """After `codex queue` has handed a message to the Codex app holding the session, follow the session's
+    rollout for that turn (Codex marks it turn_trigger "queue"): its steps and words as written, until
+    it completes. What the phone sends meanwhile is queued the same way and runs after."""
+    from .agent_sessions import _steps_of
+    from .channel_core import out_of
+
+    pos = os.path.getsize(path) if os.path.exists(path) else 0
+    partial, parts, started, t0, told = b"", [], False, time.time(), False
+    while time.time() - t0 < TURN_S:
+        for more in (drain() if drain else []):
+            if more and queue_more is not None and await queue_more(more):
+                emit("note", text="Codex takes this next, in the session on your PC.")
+        try:
+            with open(path, "rb") as f:
+                f.seek(pos)
+                chunk = f.read()
+        except OSError:
+            chunk = b""
+        lines = []
+        if chunk:
+            pos += len(chunk)
+            lines = (partial + chunk).split(b"\n")
+            partial = lines.pop()
+        for raw in lines:
+            try:
+                o = json.loads(raw)
+            except ValueError:
+                continue
+            kind, p = o.get("type"), o.get("payload") if isinstance(o.get("payload"), dict) else {}
+            if kind == "event_msg" and p.get("type") == "task_started":
+                started = started or ((p.get("turn_attribution") or {}).get("turn_trigger") == "queue")
+                continue
+            if not started:
+                continue
+            if kind == "event_msg" and p.get("type") == "agent_message" and p.get("message"):
+                parts.append(str(p["message"]))
+                emit("live", text="\n\n".join(parts))
+            elif kind == "event_msg" and p.get("type") == "agent_reasoning" and p.get("text"):
+                emit("think", text=str(p["text"]))
+            elif kind == "response_item" and p.get("type") in ("function_call", "local_shell_call", "custom_tool_call"):
+                try:
+                    args = (p.get("input") or "") if p.get("type") == "custom_tool_call" else (
+                        json.loads(p.get("arguments") or "{}") if isinstance(p.get("arguments"), str) else (p.get("action") or {}))
+                except ValueError:
+                    args = {}
+                for st in _steps_of(str(p.get("name") or "shell"), args):
+                    emit("step", words=st["w"], tool=st["tool"], cmd=st.get("cmd", ""))
+            elif kind == "response_item" and p.get("type") in ("function_call_output", "custom_tool_call_output") and p.get("output"):
+                emit("step_out", out=out_of(str(p["output"])))
+            elif kind == "event_msg" and p.get("type") in ("task_complete", "turn_aborted"):
+                said = "\n\n".join(parts).strip() or str(p.get("last_agent_message") or "").strip()
+                if said:
+                    emit("text", text=said)
+                    return 0
+                emit("error", message="Codex finished on your PC without a reply. Open the session there to see why "
+                                      "(a usage limit, or it was stopped).")
+                return 1
+        if not started and not told and time.time() - t0 > PICKUP_S:
+            told = True
+            emit("note", text="Codex is still busy with this session on your PC. Its reply shows here when it gets to it.")
+        await asyncio.sleep(0.3)
+    emit("error", message="Codex is still working on your PC. Its reply shows here when you open the session again.")
+    return 1
