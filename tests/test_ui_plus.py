@@ -199,6 +199,23 @@ with sync_playwright() as pw:
     pg.click(".modal button:has-text('Move it')")
     pg.wait_for_selector("#plus-key", timeout=10000)
     check("Plus can be moved off this PC", not os.path.exists(os.path.join(home, ".hearth", "plus.json")))
+    # The look picked on the phone: the bridge writes the window's own settings, and the window follows.
+    from hearth import relay_bridge as _rb2  # noqa: E402
+    _rb2._window = lambda method, path, body=None, timeout=30: json.loads(__import__("urllib.request").request.urlopen(
+        __import__("urllib.request").request.Request(f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(),
+                                                     headers={"Content-Type": "application/json"}, method=method)).read())
+    got = _rb2.brain_request("set", {"key": "ui_accent", "value": "ocean"})
+    check(f"the phone may set the accent ({got})", got.get("ok") is not False and web._load_settings().get("ui_accent") == "ocean")
+    # The settings event as /api/events hands it over (its delivery is test_live_sync's).
+    pg.evaluate("onLiveEvent({ kind: 'settings', keys: ['ui_accent'] })")
+    try:
+        pg.wait_for_function("document.documentElement.dataset.accent === 'ocean' && localStorage.getItem('hearth_accent') === 'ocean'",
+                             timeout=10000)
+        followed = True
+    except Exception:
+        followed = False
+    check("and the window takes it when told the setting changed", followed)
+    check("but not a look the window doesn't have", _rb2.brain_request("set", {"key": "ui_theme", "value": "neon"}).get("ok") is False)
     check(f"no script errors {errors[:2]}", not errors)
     print("screenshots in", home)
     browser.close()

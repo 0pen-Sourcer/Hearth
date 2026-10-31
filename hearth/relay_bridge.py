@@ -749,7 +749,10 @@ def ideas() -> Dict[str, Any]:
 # switch from the phone is the same switch as one made in the window.
 WINDOW_URL = os.environ.get("HEARTH_WINDOW_URL", "").rstrip("/")
 _SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, False), "think_level": None,
-             "gen_stats": (True, False)}
+             "gen_stats": (True, False),
+             # The look, as the window's Appearance writes it: either side follows the other.
+             "ui_theme": ("classic", "dark", "light", "system"),
+             "ui_accent": ("ember", "sage", "ocean", "rose", "violet", "mono")}
 
 
 def _front(raw: str) -> tuple:
