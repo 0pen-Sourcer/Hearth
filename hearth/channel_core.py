@@ -405,7 +405,10 @@ class Hub:
             because = ""
         if because:
             question += " " + because
-        if callable(getattr(self.a, "ask", None)):
+        if callable(getattr(self.a, "ask", None)) and getattr(self.a, "takes_detail", False):
+            cmd = ((args or {}).get("command") or (args or {}).get("cmd")) if name in ("run_command", "start_job") else ""
+            self.a.ask(chat, question, detail={"cmd": str(cmd or "")})   # the whole command, apart from the words
+        elif callable(getattr(self.a, "ask", None)):
             self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
         else:
             self.a.send(chat, question + " Reply yes to let me, anything else to stop.")

@@ -103,7 +103,7 @@ os.environ["HOME"] = os.environ["USERPROFILE"] = str(home)
 asked: list = []
 
 
-def fake_download(url, path, part, prog, ua=None, cancel=None):
+def fake_download(url, path, part, prog, ua=None, cancel=None, sha256=""):
     name = url.rsplit("/", 1)[-1]
     asked.append(name)
     src = real / name if str(real) else None

@@ -67,5 +67,15 @@ if ($LASTEXITCODE -ne 0) { throw "Full installer failed" }
 & $iscc /DSrcDir=dist_lite\Hearth /DEditionSuffix=-Lite "/DEditionLabel= Lite" Hearth.iss
 if ($LASTEXITCODE -ne 0) { throw "Lite installer failed" }
 
+# The in-app updater refuses an installer without <name>.exe.sig from the release key beside it.
+Write-Host "=== Signing installers ===" -ForegroundColor Cyan
+$key = $env:HEARTH_PATCH_KEY
+if (-not $key) { $key = Join-Path $env:USERPROFILE ".hearth\release_patch_key.txt" }
+if (-not (Test-Path $key)) { throw "Release key not found at $key - set HEARTH_PATCH_KEY. Unsigned installers are refused by the updater." }
+$exes = @(Get-ChildItem Output\*.exe | ForEach-Object { $_.FullName })
+& $py scripts\patch_keys.py sign-installer $key @exes
+if ($LASTEXITCODE -ne 0) { throw "Signing the installers failed" }
+
 Write-Host "=== Done ===" -ForegroundColor Green
-Get-ChildItem Output\*.exe | Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } } | Format-Table -AutoSize
+Get-ChildItem Output\*.exe, Output\*.sig | Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } } | Format-Table -AutoSize
+Write-Host "Upload each .exe with its .exe.sig, and the hearth-code zip from build_patch.py." -ForegroundColor Yellow

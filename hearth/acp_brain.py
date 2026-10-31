@@ -342,6 +342,21 @@ def _text(content: List[Dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+async def use_model(rpc: "_Rpc", provider: str, sid: Any, opened: Dict[str, Any], want: str) -> bool:
+    """Put an open session on `want` for its next prompt, the way the brain's own sessions switch."""
+    opt = _model_option(opened.get("configOptions") or [], opened.get("models"))
+    if not opt or not want or want == str(opt.get("currentValue") or ""):
+        return False
+    try:
+        if opt.get("via"):
+            await rpc.call(opt["via"], {"sessionId": sid, "modelId": want}, 30)
+        else:
+            await rpc.call("session/set_config_option", {"sessionId": sid, "configId": opt["id"], "value": want}, 30)
+        return True
+    except Exception:
+        return False
+
+
 async def _use_model(rpc: _Rpc, provider: str, sid: Any, opened: Dict[str, Any]) -> tuple:
     """Put a new session on the model picked for this agent, if it offers one.
     (the model option, the session's options, the model in use, whether it was switched)."""

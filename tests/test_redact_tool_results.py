@@ -62,7 +62,7 @@ seen = []
 from hearth import agent_sessions, claude_brain as cb  # noqa: E402
 
 
-async def fake_run(agent, exe, sid, cwd, text, emit, ask, drain=None):
+async def fake_run(agent, exe, sid, cwd, text, emit, ask, drain=None, **_):
     emit("live", text=f"your key is {SHAPELESS}")
     emit("step", words=f"cat key {BOT}", tool="run_command", cmd=f"echo {ANT}")
     emit("step_out", out=f"{BOT}")

@@ -3217,12 +3217,32 @@ class _HTMLText(HTMLParser):
                 self.parts.append(text + " ")
 
 
+class _LocalRefused(Exception):
+    pass
+
+
+class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect is a new address: it gets the same local-network check as the first one."""
+
+    def __init__(self, seen=None):
+        self.seen = seen
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        from .outbound import local_refusal
+        why = local_refusal(newurl, self.seen)
+        if why:
+            raise _LocalRefused(f"{req.full_url} redirected to {newurl}. " + why.removeprefix("Error: "))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
+    from .outbound import current
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Inglen-Local)",
         "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5",
     })
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    opener = urllib.request.build_opener(_CheckedRedirects(current()))
+    with opener.open(req, timeout=timeout) as r:
         return r.status, r.headers.get("Content-Type", ""), r.read()
 
 
@@ -3356,8 +3376,14 @@ def _web_fetch(p: Dict) -> str:
     # Models often emit a bare hostname ("docs.python.org") without a scheme.
     if not scheme:
         url = "https://" + url
+    from .outbound import local_refusal
+    why = local_refusal(url)
+    if why:
+        return why
     try:
         status, ctype, body = _http_get(url, 20)
+    except _LocalRefused as e:
+        return f"Error: {e}"
     except Exception as e:
         return f"Error: fetch failed for {url}: {e}"
     text = body.decode("utf-8", errors="replace")
@@ -3510,6 +3536,17 @@ _DESTRUCTIVE_PATTERNS = [
     re.compile(r"(base64\s+(-d|--decode)|certutil\b.*-decode|FromBase64String).*\|\s*(sh|bash|zsh|iex|Invoke-Expression|cmd)\b", re.I),
     # Writing into the home folder's own files (shell start-up, keys, config).
     re.compile(r">>?\s*(~|\$HOME|%USERPROFILE%|\$env:USERPROFILE)", re.I),
+    # Git steps that throw away work no snapshot keeps.
+    re.compile(r"\bgit\b[^\n;&|]*\sreset\b[^\n;&|]*\s--(hard|merge|keep)\b", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\sbranch\b[^\n;&|]*\s(-D|-d\s+(-f|--force)|--delete\s+(-f|--force)|(-f|--force)\s+(-d|--delete))\b"),
+    re.compile(r"\bgit\b[^\n;&|]*\sclean\b[^\n;&|]*\s(-\w*f\w*|--force)\b", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\scheckout\b[^\n;&|]*(\s--\s|\s(-f|--force)\b|\s\.(\s|$))", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\srestore\b(?![^\n;&|]*--staged\b(?![^\n;&|]*--worktree))", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\sstash\s+(drop|clear)\b", re.I),
+    re.compile(r"\bgit\b[^\n;&|]*\spush\b[^\n;&|]*\s(-f|--force(-with-lease)?|--mirror|--delete|-d)\b|\bgit\b[^\n;&|]*\spush\b[^\n;&|]*\s\+\S", re.I),
+    # The Recycle Bin, emptied: nothing comes back from that.
+    re.compile(r"\bClear-RecycleBin\b", re.I),
+    re.compile(r"\$Recycle\.Bin", re.I),
 ]
 
 
@@ -6522,6 +6559,12 @@ _HANDLERS["delete_plugin"] = _delete_plugin
 # ----- INTERACTIVE BROWSER (Playwright-driven Chromium; see hearth/browse.py) -----
 def _browse(p: Dict) -> str:
     from . import browse as _b
+    from .outbound import local_refusal
+    url = str((p or {}).get("url") or "").strip()
+    if url and not url.lower().startswith("file:"):
+        why = local_refusal(url)
+        if why:
+            return why
     return _b.browse(p)
 
 
