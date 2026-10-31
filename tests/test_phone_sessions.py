@@ -292,6 +292,39 @@ check("a Claude Code session started from the phone gets Inglen's agent tools", 
 check("so does a Codex one", any("mcp_servers.hearth-memory.command" in a for a in codex_sessions.inglen_tools()))
 check("and an ACP one (OpenCode, Gemini CLI)", S.acp_tools()[0]["name"] == "hearth-memory")
 
+# ------------------------------------------------------------ a goodbye, then the call ends
+
+from hearth import headless  # noqa: E402
+
+
+class Talky(CC.Adapter):
+    name, label = "relay", "Phone"
+
+    def __init__(self):
+        self.rooms, self.sent, self.written = {}, [], []
+
+    def send(self, chat, text, *a, **k):
+        self.sent.append(text)
+
+    def live(self, chat, text):
+        self.written.append(text)
+
+
+async def goodbye(prompt, *, emit, **k):
+    emit("assistant_chunk", content="No worries, catch you later.")
+    emit("tool_call", name="end_session", args={})
+    emit("done", reason="end_session")
+    return 0
+
+headless.run_once = goodbye
+ta = Talky()
+th = CC.Hub(ta, configured_senders=["phone"])
+th.receive("room", "phone", "that's all, thanks", cid="bye1")
+for t in list(th.threads):
+    t.join(30)
+check(f"a goodbye said before end_session is the reply, not the couldn't-get-a-response line ({ta.sent})",
+      ta.sent and ta.sent[-1].startswith("No worries, catch you later.") and "couldn't get a response" not in " ".join(ta.sent))
+
 # ------------------------------------------------------------ approvals on a call
 
 

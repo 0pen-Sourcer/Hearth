@@ -632,7 +632,10 @@ class Hub:
             from .errors import classify_api_error
             info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
             err["cat"], err["msg"] = info.category, info.hint
-        reply = headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
+        # A turn that ended on a step after its words (a goodbye, then end_session) has them only as
+        # written, never as a final message: those words are the reply, not "couldn't get a response".
+        said = "".join(parts).strip() or "".join(written).strip()
+        reply = headless.bridge_reply_or_reason(said, err["cat"], err["msg"])
         if tools_used and not self.a.can_edit and not steps:
             foot = bridge_status.footer(tools_used)
             if foot:
@@ -640,7 +643,7 @@ class Hub:
         final = redact_secrets_only(reply or "(no output)")[0]
         stats = {k: v for k, v in stats.items() if v is not None}
         _TURN.ctx = dict(_TURN.ctx or {}, stats=stats, context=context)   # the finished reply carries them
-        if err["cat"] and not "".join(parts).strip():
+        if err["cat"] and not said:
             _TURN.ctx["error"] = True          # the reply is why it failed: the phone shows it as an error
         try:
             if status["id"] is not None and tools_used:
