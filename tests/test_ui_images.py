@@ -133,9 +133,17 @@ with sync_playwright() as pw:
     pg.route("**/api/images/sets", lambda r: r.fulfill(json={"installed": True, "ready": True, "sets": [
         {"id": "z-image-turbo", "name": "Z-Image Turbo", "video": False, "blurb": "Makes pictures from text, in a few steps",
          "url": "", "ok": True, "repo": "Comfy-Org/Z-Image-Turbo", "downloads": 400000, "bytes": 8_000_000_000, "parts": [
-             {"slot": "diffusion_model", "kind": "Diffusion model", "label": "Diffusion model", "repo": "Comfy-Org/Z-Image-Turbo",
-              "path": "split_files/diffusion_models/z.safetensors", "category": "diffusion_models", "name": "z.safetensors",
-              "size": 6_000_000_000, "have": False},
+             {"slot": "diffusion_model", "kind": "Diffusion model", "label": "Diffusion model", "repo": "unsloth/Z-Image-Turbo-GGUF",
+              "path": "z-image-turbo-Q6_K.gguf", "category": "diffusion_models", "name": "z-image-turbo-Q6_K.gguf",
+              "size": 6_000_000_000, "have": False, "quant": "Q6_K", "pick": 2, "options": [
+                  {"repo": "Comfy-Org/Z-Image-Turbo", "path": "split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+                   "name": "z_image_turbo_bf16.safetensors", "size": 12_300_000_000, "quant": "BF16", "fit": "partial", "have": False},
+                  {"repo": "unsloth/Z-Image-Turbo-GGUF", "path": "z-image-turbo-Q8_0.gguf", "name": "z-image-turbo-Q8_0.gguf",
+                   "size": 7_200_000_000, "quant": "Q8_0", "fit": "partial", "have": False},
+                  {"repo": "unsloth/Z-Image-Turbo-GGUF", "path": "z-image-turbo-Q6_K.gguf", "name": "z-image-turbo-Q6_K.gguf",
+                   "size": 6_000_000_000, "quant": "Q6_K", "fit": "good", "have": False},
+                  {"repo": "unsloth/Z-Image-Turbo-GGUF", "path": "z-image-turbo-Q4_K_M.gguf", "name": "z-image-turbo-Q4_K_M.gguf",
+                   "size": 4_600_000_000, "quant": "Q4_K_M", "fit": "good", "have": False}]},
              {"slot": "vae", "kind": "VAE", "label": "VAE", "repo": "Comfy-Org/Z-Image-Turbo", "path": "split_files/vae/ae.safetensors",
               "category": "vae", "name": "ae.safetensors", "size": 300_000_000, "have": True},
              {"slot": "llm", "kind": "Text encoder", "label": "Qwen 3", "repo": "Comfy-Org/Z-Image-Turbo",
@@ -218,6 +226,20 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(200)
     btn = pg.evaluate("document.querySelector('[data-img-get=z-image-turbo]').textContent")
     check(f"a part can be left out ({btn})", btn == "Download 1 part · 6.0 GB")
+    sizes = pg.evaluate("""() => [...document.querySelectorAll('.model-row[data-img-recipe=z-image-turbo] .img-sizes .ex-file')]
+        .map(f => f.querySelector('.ex-quant').textContent + (f.classList.contains('selected') ? '*' : ''))""")
+    check(f"the diffusion model offers its sizes, the one that fits this card picked {sizes}",
+          sizes == ["BF16", "Q8_0", "Q6_K*", "Q4_K_M"])
+    pg.click(".model-row[data-img-recipe=z-image-turbo] .img-sizes .ex-file[data-o='3']")
+    pg.wait_for_timeout(200)
+    got = pg.evaluate("""() => { const r = document.querySelector('.model-row[data-img-recipe=z-image-turbo]');
+        return { btn: r.querySelector('[data-img-get]').textContent, name: r.querySelector('.img-pick .mp-row[data-i="0"] .mp-s').textContent,
+                 part: _modelsState.imgSets.sets[0].parts[0].path }; }""")
+    check(f"a smaller size changes the part and the total {got}",
+          got["btn"] == "Download 1 part · 4.6 GB" and got["name"] == "z-image-turbo-Q4_K_M.gguf" and got["part"] == "z-image-turbo-Q4_K_M.gguf")
+    pg.locator(".model-row[data-img-recipe=z-image-turbo]").scroll_into_view_if_needed()
+    pg.screenshot(path=os.path.join(work, "sizes.png"))
+    print("screenshot:", os.path.join(work, "sizes.png"))
     pg.evaluate("_modelsState.hfQuery = 'wan'; modelsRenderDiscover()")
     pg.wait_for_timeout(1000)
     found = pg.evaluate("document.getElementById('models-pane-discover').innerText")
