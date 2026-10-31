@@ -291,6 +291,20 @@ async def _discover(provider: str) -> None:
         await _end(proc, reader)
 
 
+def says_of(tool: Dict[str, Any]) -> str:
+    """The agent's own words for a step: the description it gave a command, else
+    its title when the title says more than the command itself."""
+    raw = tool.get("rawInput") or {}
+    d = raw.get("description") if isinstance(raw, dict) else None
+    if isinstance(d, str) and d.strip():
+        return " ".join(d.split())[:120]
+    title = " ".join(str(tool.get("title") or "").split())
+    cmd = " ".join(str(raw.get("command") or "").split()) if isinstance(raw, dict) else ""
+    if " " not in title or title == cmd or any(title.startswith(p) for p in (f"{SERVER}_", f"mcp__{SERVER}__", f"{SERVER}/", f"{SERVER}.")):
+        return ""
+    return title[:120]
+
+
 def hearth_call(tool: Dict[str, Any]) -> tuple:
     """(Hearth tool name, args) that a tool call amounts to, for the approval and its card."""
     kind = str(tool.get("kind") or "other")
@@ -580,7 +594,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
                 has_args = bool(raw.get("command")) if up.get("kind") == "execute" else any(v for v in targs.values())
                 if cid not in shown and (has_args or status in ("completed", "failed")):
                     shown[cid] = (time.time(), tname)
-                    emit("tool_call", name=tname, args=targs, id=cid)
+                    emit("tool_call", name=tname, args=targs, id=cid, says=says_of(up))
                 if status in ("completed", "failed") and cid in shown:
                     out = _text(up.get("content")) or str((up.get("rawOutput") or {}).get("output") or "")
                     began, first = shown.pop(cid)

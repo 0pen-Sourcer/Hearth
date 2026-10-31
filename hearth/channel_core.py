@@ -576,11 +576,13 @@ class Hub:
                                    "words": kw["words"], "pos": so_far["n"], "_done": True})
             if kind == "tool_call" and kw.get("name"):
                 steps_kept.append({"kind": "tool", "name": kw["name"], "args": kw.get("args") or {}, "result": "",
-                                   "ms": 0, "pos": so_far["n"], "_t0": time.time()})
+                                   "ms": 0, "pos": so_far["n"], "_t0": time.time(),
+                                   **({"words": kw["words"]} if isinstance(kw.get("words"), dict) else {})})
             if kind == "tool_call" and kw.get("name"):
                 tools_used.append((kw["name"], kw.get("args")))
                 if steps and kw["name"] not in QUIET_STEPS:
-                    words = tool_words(kw["name"], kw.get("args"))
+                    words = (kw["words"].get("done") if isinstance(kw.get("words"), dict) else "") \
+                        or tool_words(kw["name"], kw.get("args"), str(kw.get("says") or ""))
                     try:
                         if getattr(self.a, "step_detail", False):
                             self.a.step(chat, words, tool=kw["name"], site=site_of(kw.get("args")),

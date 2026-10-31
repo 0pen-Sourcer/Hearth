@@ -1068,6 +1068,8 @@ async def _run_once(
         emit = _cards_turn.Trail(emit, _used)
     except Exception:
         _lately = ""
+    from . import step_words as _step_words
+    emit = _step_words.Wrap(emit)               # every step carries its words, the same on each surface
     # The last turn in this chat failed (out of usage, a key refused, a provider
     # down): the brain hears it, so it doesn't carry on as if it had answered or
     # try the same thing blindly. Never part of what it said.

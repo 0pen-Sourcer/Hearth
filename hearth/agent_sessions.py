@@ -1305,7 +1305,7 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
                     shown.add(cid)
                     tname, targs = A.hearth_call(up)
                     from .term_render import tool_words
-                    emit("step", words=tool_words(tname, targs), tool=tname)
+                    emit("step", words=tool_words(tname, targs, A.says_of(up)), tool=tname)
         if turn.done() and turn.exception():
             emit("error", message=f"{name} stopped: {turn.exception()}"[:600])
     finally:
