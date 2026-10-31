@@ -1042,11 +1042,12 @@ class Speaker:
         self._pipe_lock = threading.Lock()
         self._threads: "list[threading.Thread]" = []
         self._synthing = False
+        self._pending = 0           # texts handed to speak() whose synthesis hasn't finished
 
     # ---- state
     def busy(self) -> bool:
         """Anything still to be heard: text waiting, being made into audio, or playing."""
-        return (self._synthing or not self.synth_q.empty() or not self.audio_q.empty()
+        return (self._synthing or self._pending > 0 or not self.synth_q.empty() or not self.audio_q.empty()
                 or self.is_speaking())
 
     def note_spoken(self, text: str) -> None:
@@ -1100,10 +1101,15 @@ class Speaker:
         if self.abort.is_set():
             return "ok"  # a stop() landed; don't queue into a cut turn
         self._ensure_pipeline()
+        with self._state_lock:
+            self._pending += 1
         self.synth_q.put((text, voice, speed))
         if blocking:
-            while (not self.abort.is_set() and
-                   (not self.synth_q.empty() or not self.audio_q.empty() or self.is_speaking())):
+            # Done once nothing is waiting, being made or playing, seen a few times running:
+            # a chunk passes from the play queue to playing between two looks.
+            idle = 0
+            while not self.abort.is_set() and idle < 3:
+                idle = 0 if self.busy() else idle + 1
                 time.sleep(0.05)
         return "ok"
 
@@ -1140,6 +1146,9 @@ class Speaker:
             try:
                 while True:
                     q.get_nowait()
+                    if q is self.synth_q:
+                        with self._state_lock:
+                            self._pending = max(0, self._pending - 1)
             except _queue.Empty:
                 pass
 
@@ -1161,6 +1170,8 @@ class Speaker:
                 self._synth_one(text, voice, speed)
             finally:
                 self._synthing = False
+                with self._state_lock:
+                    self._pending = max(0, self._pending - 1)
 
     def _synth_one(self, text: str, voice, speed) -> None:
         if self.abort.is_set():
