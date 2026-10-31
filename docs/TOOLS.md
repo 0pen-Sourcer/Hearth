@@ -159,7 +159,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `create_skill` † | Save a workflow as a skill, in the workspace's skills folder |
 | `delete_plugin` † | Delete an installed plugin by name (removes its file + unregisters the tool) |
 | `install_skill` † | Install a skill someone shares, from GitHub or a folder on this PC, into the workspace's skills folder |
-| `list_plugins` † | List the self-authored/installed plugins in C:/Users/SWAGGY~1/AppData/Local/Temp/tmp.nHbv9tzZWyJarvis/plugins/ (name, status, description) |
+| `list_plugins` † | List the self-authored/installed plugins in ~/Jarvis/plugins/ (name, status, description) |
 | `list_skills` † | List available skills, bundled and installed |
 | `load_skill` | Load a skill's full instructions and its bundled files before following it |
 
