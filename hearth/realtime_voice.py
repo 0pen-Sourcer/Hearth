@@ -40,6 +40,18 @@ from . import voice as _tts
 _REALTIME_AVAILABLE: Optional[bool] = None
 
 
+def _log_line(line: str) -> None:
+    """Print a line that may hold any script; a stream that can't take it gets
+    the escaped form, and a stream that fails outright gets nothing."""
+    try:
+        print(line, flush=True)
+    except Exception:
+        try:
+            print(line.encode("ascii", "backslashreplace").decode("ascii"), flush=True)
+        except Exception:
+            pass
+
+
 class _Session:
     """One voice session: its own recorder, stop signal and callbacks.
 
@@ -911,10 +923,6 @@ def _run_session(sess: _Session) -> None:
                 # returns the finalized text. ~200-400ms after you stop talking.
                 text = rec.text()
                 _err_streak = 0
-                # Diagnostic: proves whether VAD is actually endpointing (a final
-                # utterance) vs blocking forever. If you SEE this line in the
-                # terminal after you stop talking, the final fired.
-                print(f"[hearth.realtime_voice] FINAL utterance -> {text!r}", flush=True)
             except Exception as e:
                 # A mid-session mic disconnect (unplugging a Bluetooth headset) makes
                 # the recorder spew 'Unanticipated host error' / 'device validation
@@ -933,6 +941,9 @@ def _run_session(sess: _Session) -> None:
                     break
                 time.sleep(0.3)
                 continue
+            # Shows the endpoint fired. Outside the try: a log line that can't be
+            # written must never cost the sentence.
+            _log_line(f"[hearth.realtime_voice] FINAL utterance -> {text!r}")
             if sess.stop.is_set():
                 break
             if not text:
@@ -965,12 +976,12 @@ def _run_session(sess: _Session) -> None:
                     # Hearth's own voice never starts a sentence with its name,
                     # so this is the one interruption speakers can safely allow.
                     if _addressed_by_name(text) and not _looks_like_echo(text, sp):
-                        print(f"[hearth.realtime_voice] interrupted by name: {text!r}", flush=True)
+                        _log_line(f"[hearth.realtime_voice] interrupted by name: {text!r}")
                         try: sp.stop()
                         except Exception: pass
                         _call(sess.on_barge)
                     else:
-                        print(f"[hearth.realtime_voice] dropped (speakers mode, Inglen was talking): {text!r}", flush=True)
+                        _log_line(f"[hearth.realtime_voice] dropped (speakers mode, Inglen was talking): {text!r}")
                         try: rec.clear_audio_queue()
                         except Exception: pass
                         continue
@@ -983,7 +994,7 @@ def _run_session(sess: _Session) -> None:
                 _barge_grace_until = 0.0
                 if _looks_like_echo(text, sp):
                     _heard_own_voice(sess)
-                    print(f"[hearth.realtime_voice] dropped (repeat of Inglen's own words): {text!r}", flush=True)
+                    _log_line(f"[hearth.realtime_voice] dropped (repeat of Inglen's own words): {text!r}")
                     try: rec.clear_audio_queue()
                     except Exception: pass
                     continue
@@ -999,7 +1010,7 @@ def _run_session(sess: _Session) -> None:
             # headset user's words don't overlap, so they pass straight through.
             if sp.seconds_since_spoke() < 6.0 and _looks_like_echo(text, sp):
                 _heard_own_voice(sess)
-                print(f"[hearth.realtime_voice] dropped (repeat of Inglen's own words): {text!r}", flush=True)
+                _log_line(f"[hearth.realtime_voice] dropped (repeat of Inglen's own words): {text!r}")
                 try: rec.clear_audio_queue()
                 except Exception: pass
                 continue

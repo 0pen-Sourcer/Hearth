@@ -11,7 +11,18 @@ llama.cpp) and cloud providers work too.
 # Hearth package, not inside listen.py (which is imported lazily later).
 # ---------------------------------------------------------------------------
 import os as _os
+import sys as _sys
 import warnings as _warnings
+
+# Output goes to the code page Windows picks for a pipe or file (cp1252 here),
+# which holds no Hindi: printing a heard sentence in Devanagari raised and lost it.
+# The packaged app ignores PYTHONIOENCODING, so the streams are set here.
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except Exception:
+        pass
+
 _os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 _os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 _os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")

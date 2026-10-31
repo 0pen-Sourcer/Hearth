@@ -295,6 +295,7 @@ def stream_mic_levels(emit, seconds: float = 6.0) -> None:
     try:
         p = subprocess.Popen(args, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, text=True,
+                             encoding="utf-8", errors="replace",
                              creationflags=flags)
     except Exception as e:
         emit({"error": f"{type(e).__name__}: {e}"})

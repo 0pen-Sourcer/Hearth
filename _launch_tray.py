@@ -16,6 +16,15 @@ import os
 import sys
 import multiprocessing
 
+# A pipe or file gets the Windows code page (cp1252), which holds no Hindi, and
+# the packaged app ignores PYTHONIOENCODING. Every child (bridges, the speech
+# worker, the model server) starts here, so the streams are set first.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # PyInstaller + multiprocessing: RealtimeSTT spawns its STT recorder as a CHILD
 # process, which on frozen Windows re-launches THIS exe with
 # `--multiprocessing-fork parent_pid=… pipe_handle=…`. Without freeze_support()
@@ -119,7 +128,7 @@ if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):
     try:
         os.makedirs(_log_dir, exist_ok=True)
         _log_path = os.path.join(_log_dir, "hearth_tray.log")
-        _f = open(_log_path, "a", encoding="utf-8", buffering=1)
+        _f = open(_log_path, "a", encoding="utf-8", errors="replace", buffering=1)
         sys.stdout = _f
         sys.stderr = _f
     except OSError:

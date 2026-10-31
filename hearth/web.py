@@ -3876,6 +3876,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                         proc = _sp.Popen(
                             _pip_cmd,
                             stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1,
+                            encoding="utf-8", errors="replace",
                             env=env, creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
                         buf = ""
                         while True:
@@ -3926,7 +3927,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                                      "-m", "pip", "uninstall", "-y",
                                      "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml"]
                             _sp.run(_uninstall_cmd,
-                                    capture_output=True, text=True,
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace",
                                     creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
                             rc = _stream_pip(["install", "--no-index",
                                               "--find-links", _tmp, *_pkgs])
