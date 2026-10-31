@@ -541,7 +541,7 @@ def main(argv: Optional[list] = None) -> int:
     # (via Xlib set_wm_name), and a U+2014 here crashes the tray on Linux
     # before it ever appears. Windows uses a different pystray backend so it
     # never surfaced there.
-    icon = pystray.Icon("hearth", img, "Inglen - local AI", menu)
+    icon = pystray.Icon("hearth", img, "Inglen", menu)
     # Notices from this process go through this icon instead of adding one each.
     try:
         from . import reminders as _rem

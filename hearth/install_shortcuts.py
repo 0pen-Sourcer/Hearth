@@ -244,7 +244,7 @@ def install(no_autostart: bool = False) -> int:
         args=(t_args + " --open").strip() if t_args else "",
         lnk_path=desktop_lnk,
         icon_path=icon_path,
-        description="Inglen — local AI for your machine",
+        description="Inglen",
         working_dir=t_wd,
         pythonw=t_pythonw,
     )
