@@ -4863,7 +4863,7 @@ class JarvisCLI:
         a = ask("Will you hear me on headphones or speakers? (h / s, Enter to skip)").lower()
         if a[:1] in ("h", "s"):
             answers["audio"] = "headphones" if a[:1] == "h" else "speakers"
-        lang = ask("What language will you speak to me in? (Enter for English, or a name like hindi, or 'any' to work it out each time)")
+        lang = ask("What language should we talk in? (Enter for English, or a name like hindi, or 'any' to work it out each time)")
         if lang:
             code = "" if lang.lower() in ("any", "detect", "auto") else onboarding.language_code(lang)
             if code is None:
@@ -4873,9 +4873,11 @@ class JarvisCLI:
                 voice = onboarding.voice_for(code, _env.get("VOICE", "") or "")
                 if voice:
                     answers["voice_name"] = voice
-                    print(f"  {C_DIM}I'll listen for {onboarding.LANGUAGES[code]} and answer in a {onboarding.LANGUAGES[code]} voice.{C_RESET}")
+                    print(f"  {C_DIM}I'll reply in {onboarding.LANGUAGES[code]}, listen for it, and speak in a {onboarding.LANGUAGES[code]} voice.{C_RESET}")
                 elif code and code != "en" and code not in onboarding._VOICE_LETTER:
-                    print(f"  {C_DIM}I'll listen for {onboarding.LANGUAGES[code]}. No voice speaks it yet, so replies read out loud use an English voice.{C_RESET}")
+                    print(f"  {C_DIM}I'll reply in {onboarding.LANGUAGES[code]} and listen for it. No voice speaks it yet, so replies read out loud use an English voice.{C_RESET}")
+                elif code and code != "en":
+                    print(f"  {C_DIM}I'll reply in {onboarding.LANGUAGES[code]} and listen for it.{C_RESET}")
         print()
         print(f"  {C_TOOL}Before I change things on your PC:{C_RESET}")
         print(f"  {C_DIM}    1  ask me every time{C_RESET}")
