@@ -235,12 +235,8 @@ def _model_size() -> str:
         if (_v or "").strip():                 # a blank export is not a choice
             size = _v.strip()
             break
-    # An English-only size can't hear another language; one that is named
-    # gets the same size's multilingual model, as push-to-talk does.
-    lang = _named_language()
-    if lang and lang != "en" and size.lower().endswith(".en"):
-        return size[:-3]
-    return size
+    from .listen import size_for_language
+    return size_for_language(size, _named_language())
 
 
 def _named_language() -> str:
@@ -268,6 +264,36 @@ def _language() -> str:
         if (_v or "").strip():
             return _v.strip().lower()
     return ""
+
+
+def _allowed_languages() -> list:
+    """What a detected sentence may be in when nothing is forced: their language
+    and English. [] when anything goes, or one language is forced already."""
+    if _language():
+        return []
+    lang = _named_language()
+    return [lang, "en"] if lang and lang != "en" else []
+
+
+def _in_their_language(rec, text: str) -> str:
+    """The sentence again in their language when detection named a third one.
+    Short Hindi is often taken for Urdu and written in Urdu script, which the
+    reply can't be read back in; noise came back as Georgian letters."""
+    langs = _allowed_languages()
+    heard = getattr(rec, "detected_language", None)
+    audio = getattr(rec, "last_transcription_bytes", None)
+    if not langs or not heard or heard in langs or audio is None or not (text or "").strip():
+        return text
+    was = getattr(rec, "language", "")
+    try:
+        rec.language = langs[0]
+        again = rec.perform_final_transcription(audio)
+        _log_line(f"[hearth.realtime_voice] heard as {heard}, again in {langs[0]}: {again!r}")
+        return again if (again or "").strip() else text
+    except Exception:
+        return text
+    finally:
+        rec.language = was
 
 
 def status() -> dict:
@@ -387,6 +413,11 @@ def cpu_model(size: str) -> str:
     base takes 1.7 s). A smaller one chosen already is kept."""
     english = size.lower().endswith(".en") or _language() == "en"
     fam = _family(size)
+    if not english and _named_language() == "hi":
+        # Hindi from tiny came back as English or noise and from base in Urdu
+        # script; small is the first that writes it (2.9 s a sentence, 4.5 s
+        # when it also has to detect the language).
+        return "small"
     if fam == "tiny":
         return size
     if english:
@@ -923,6 +954,7 @@ def _run_session(sess: _Session) -> None:
                 # returns the finalized text. ~200-400ms after you stop talking.
                 text = rec.text()
                 _err_streak = 0
+                text = _in_their_language(rec, text)
             except Exception as e:
                 # A mid-session mic disconnect (unplugging a Bluetooth headset) makes
                 # the recorder spew 'Unanticipated host error' / 'device validation
@@ -932,7 +964,7 @@ def _run_session(sess: _Session) -> None:
                 if sess.stop.is_set():
                     break           # shut down on purpose; text() gave up
                 _err_streak += 1
-                print(f"[hearth.realtime_voice] rec.text() error ({_err_streak}): {e}", flush=True)
+                _log_line(f"[hearth.realtime_voice] rec.text() error ({_err_streak}): {e}")
                 if _err_streak >= 4:
                     print("[hearth.realtime_voice] mic looks disconnected — stopping voice", flush=True)
                     _call(sess.on_error, "Your microphone disconnected, so voice mode "

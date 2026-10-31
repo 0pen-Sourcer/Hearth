@@ -25,6 +25,7 @@ ONE-TIME SETUP:
 
 from __future__ import annotations
 
+import json
 import os
 from . import env as _env
 import re
@@ -32,7 +33,7 @@ import sys
 import time
 import threading
 from queue import Queue, Empty
-from typing import List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 # Env-var-based suppression of huggingface_hub warnings lives in hearth/__init__.py
 # (must run before any HF import, which means before listen.py is imported).
@@ -587,10 +588,41 @@ _VOICE_SPEAKS = {"h": "hi", "e": "es", "f": "fr", "i": "it", "j": "ja", "p": "pt
 
 def spoken_language() -> str:
     """The language to listen in: the one named in Settings, else the language
-    of the voice picked to answer. Someone who picked a Hindi voice and left
-    listening on its default heard their Hindi turned into English words."""
+    of the voice picked to answer, else the one their recent chats are in.
+    Someone who picked a Hindi voice and left listening on its default heard
+    their Hindi turned into English words."""
     lang = (_env.get("STT_LANGUAGE", "") or "").strip().lower()
-    return lang or _VOICE_SPEAKS.get((_env.get("VOICE", "") or "")[:1].lower(), "")
+    return (lang or _VOICE_SPEAKS.get((_env.get("VOICE", "") or "")[:1].lower(), "")
+            or recent_language())
+
+
+_DEVANAGARI = re.compile(r"[ऀ-ॿ]")
+_recent: Dict[str, Any] = {"at": 0.0, "lang": ""}
+
+
+def recent_language() -> str:
+    """"hi" when Hindi script appears in the newest few chats, from either side;
+    else "". An English-only speech model can't hear Hindi at all, so one Hindi
+    turn is enough to keep it from being picked. Looked up at most once a minute."""
+    now = time.time()
+    if now - _recent["at"] < 60:
+        return _recent["lang"]
+    lang = ""
+    try:
+        from .chat_sync import CONVOS_DIR
+        files = sorted((e for e in os.scandir(CONVOS_DIR) if e.name.endswith(".json")),
+                       key=lambda e: e.stat().st_mtime, reverse=True)[:6]
+        for e in files:
+            with open(e.path, encoding="utf-8") as f:
+                msgs = (json.load(f) or {}).get("messages") or []
+            if any(_DEVANAGARI.search(str(m.get("content") or "")) for m in msgs[-40:]
+                   if isinstance(m, dict)):
+                lang = "hi"
+                break
+    except Exception:
+        pass
+    _recent.update(at=now, lang=lang)
+    return lang
 
 
 def model_size() -> str:
@@ -599,9 +631,17 @@ def model_size() -> str:
     multilingual model of the same size is used instead; otherwise Hindi
     speech came back as English words that sounded like it."""
     size = (_env.get("STT_MODEL", MODEL_SIZE) or MODEL_SIZE or "").strip()
-    lang = spoken_language()
+    return size_for_language(size, spoken_language())
+
+
+def size_for_language(size: str, lang: str) -> str:
+    """The model to hear `lang` with, given the size chosen. An English-only
+    size becomes the same size's multilingual one. For Hindi, tiny wrote English
+    or noise and base wrote Urdu script, so small is the least it gets."""
     if lang and lang != "en" and size.lower().endswith(".en"):
-        return size[:-3]
+        size = size[:-3]
+    if lang == "hi" and size.lower() in ("tiny", "base"):
+        size = "small"
     return size
 
 
