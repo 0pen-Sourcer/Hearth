@@ -1091,7 +1091,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     it sent."""
     _sent.clear()
     # Every agent's turn ends with what it cost, by one rule for all of them.
-    _emit, agent = emit, current() or ""
+    from .redact import clean_emit
+    _emit, agent = clean_emit(emit), current() or ""      # what the agent shows: no saved key
     reached: Dict[str, Optional[str]] = {}      # call id -> the tool use_tool ran (None: a lookup)
     # When the agent last said anything, and which of its own steps are running.
     heard = {"at": time.time(), "steps": set(), "told": False, "stop": False}

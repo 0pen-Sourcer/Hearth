@@ -1132,7 +1132,8 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
         return 2
     agent, sid = got
     name = label(agent)
-    outer, ran = emit, []
+    from .redact import clean_emit
+    outer, ran = clean_emit(emit), []        # what reaches the phone or window: no saved key
 
     def emit(kind: str, **fields: Any) -> None:
         if kind == "session":

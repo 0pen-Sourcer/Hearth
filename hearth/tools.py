@@ -8318,6 +8318,19 @@ _HUD_TOOLS = {
 
 
 def execute_tool(name: str, args: Optional[Dict] = None) -> str:
+    """Run a tool by name. The result never carries a saved key or a key-shaped
+    string to the model (hearth/redact.py)."""
+    out = _execute_tool(name, args)
+    if isinstance(out, str):
+        try:
+            from .redact import redact_for_model
+            out = redact_for_model(out)[0]
+        except Exception:
+            pass
+    return out
+
+
+def _execute_tool(name: str, args: Optional[Dict] = None) -> str:
     """Run a tool by name. Returns a string (truncated to per-tool cap).
     MCP-bridged tools (name starts with 'mcp_') route through the live
     MCP client session instead of the static _HANDLERS dict."""
