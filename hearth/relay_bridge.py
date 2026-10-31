@@ -248,6 +248,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "undo":
         from . import undo as _undo
         return _undo.undo(str(m.get("id") or ""))
+    if what == "about":
+        # The phone's About: the version of Inglen on this PC.
+        from .updater import HEARTH_VERSION
+        return {"version": HEARTH_VERSION}
     if what == "agent_catalog":
         from .agent_launch import catalog
         return catalog()
