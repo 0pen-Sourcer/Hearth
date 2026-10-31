@@ -27,7 +27,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 REPO = "leejet/stable-diffusion.cpp"
 SERVER = "sd-server.exe" if sys.platform == "win32" else "sd-server"
@@ -135,14 +135,25 @@ def folder_view(root: str) -> Optional[str]:
 
 # ---------------------------------------------------------------- the engine build
 
+def _pinned() -> str:
+    """The build picked under Models, Engine (settings sd_build); '' for the newest."""
+    try:
+        from .web import _load_settings
+        return str(_load_settings().get("sd_build") or "")
+    except Exception:
+        return ""
+
+
 def installed() -> List[Path]:
-    """Usable sd-server builds on disk, newest first."""
+    """Usable sd-server builds on disk, the one in use first: the picked one,
+    else the newest."""
     from .llmserver import _usable_server_exe
     root = builds_dir()
     if not root.is_dir():
         return []
     found = [p for p in root.glob(f"*/{SERVER}") if _usable_server_exe(p)]
-    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+    pin = _pinned()
+    return sorted(found, key=lambda p: (p.parent.name != pin, -p.stat().st_mtime))
 
 
 def _backend() -> str:
@@ -150,23 +161,85 @@ def _backend() -> str:
     return engine_backend()
 
 
-def _latest_release(timeout: float = 20) -> Optional[Dict[str, Any]]:
+def _releases(ttl: float = 6 * 3600, timeout: float = 20) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    from .llmserver import github_releases
+    return github_releases(REPO, 10, ttl=ttl, timeout=timeout)
+
+
+def _latest_release(timeout: float = 20, tag: str = "") -> Optional[Dict[str, Any]]:
     from .release_files import for_this_system
-    req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases?per_page=10",
-                                 headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        rels = json.load(r)
-    return next((rel for rel in rels if isinstance(rels, list) and for_this_system(rel.get("assets"))), None)
+    rels, got = _releases(ttl=600, timeout=timeout)
+    if not rels and got["error"]:
+        raise OSError("GitHub's hourly limit for this network was reached" if got["limited"] else got["error"])
+    return next((rel for rel in rels if for_this_system(rel.get("assets"))
+                 and (not tag or rel.get("tag_name") == tag)), None)
 
 
-def install(on_progress: Optional[Callable[[int, int], None]] = None, force: bool = False) -> Dict[str, Any]:
-    """Fetch the newest build for this system and card. NVIDIA on Linux, where
-    no CUDA build is published, gets the Vulkan one, which its driver runs."""
+def _sizes(assets: List[dict], backend: str) -> Tuple[str, int]:
+    """The build kind this card gets from a release, and its download size."""
+    from .release_files import pick
+    for kind in dict.fromkeys([backend] + (["vulkan"] if backend == "cuda" else []) + ["cpu"]):
+        bins, runtime, _cuda = pick(assets, kind)
+        if bins:
+            return kind, int(bins.get("size") or 0) + int((runtime or {}).get("size") or 0)
+    return "", 0
+
+
+def list_builds(limit: int = 6) -> Dict[str, Any]:
+    """For Models, Engine: the image engine in use and recent releases built for
+    this system, as the chat engine's list reads."""
+    from .llmserver import engine_build_of
+    from .release_files import for_this_system
+    rels, got = _releases()
+    have = {p.parent.name: p for p in installed()}
+    now = installed()
+    builds = []
+    for rel in rels:
+        if not for_this_system(rel.get("assets")):
+            continue
+        tag = rel.get("tag_name") or ""
+        kind, size = _sizes(rel.get("assets") or [], _backend())
+        if not kind:
+            continue
+        builds.append({"tag": tag, "backend": kind, "size_mb": round(size / 1e6),
+                       "published": (rel.get("published_at") or "")[:10], "url": rel.get("html_url") or "",
+                       "installed": tag in have, "current": bool(now) and now[0].parent.name == tag})
+        if len(builds) >= limit:
+            break
+    listed = {b["tag"] for b in builds}
+    for tag, exe in have.items():
+        if tag not in listed:
+            builds.append({"tag": tag, "backend": engine_build_of(exe), "size_mb": 0, "published": "",
+                           "url": f"https://github.com/{REPO}/releases/tag/{tag}", "installed": True,
+                           "current": now[0] == exe})
+    cur = now[0] if now else None
+    return {"ok": bool(rels), "builds": builds, "stale": got["stale"], "limited": got["limited"], "error": got["error"],
+            "current": {"tag": cur.parent.name, "backend": engine_build_of(cur), "path": str(cur),
+                        "running": running(), "pinned": _pinned()} if cur else None}
+
+
+def use_build(tag: str) -> Dict[str, Any]:
+    """Run this installed build from now on ('' for the newest); the engine restarts on its next use."""
+    from .web import _load_settings, _save_settings
+    if tag and not any(p.parent.name == tag for p in installed()):
+        return {"ok": False, "error": f"{tag} isn't installed"}
+    s = _load_settings()
+    s["sd_build"] = tag
+    _save_settings(s)
+    if running():
+        stop()
+    return {"ok": True}
+
+
+def install(on_progress: Optional[Callable[[int, int], None]] = None, force: bool = False,
+            tag: str = "") -> Dict[str, Any]:
+    """Fetch the newest build for this system and card, or the one named. NVIDIA on
+    Linux, where no CUDA build is published, gets the Vulkan one, which its driver runs."""
     from . import llmserver as L
     from .release_files import for_this_system, pick
     _cancel.clear()
     try:
-        rel = _latest_release()
+        rel = _latest_release(tag=tag)
     except Exception as e:
         return {"ok": False, "error": f"couldn't reach GitHub releases: {e}"}
     if not rel:
@@ -225,7 +298,19 @@ def install(on_progress: Optional[Callable[[int, int], None]] = None, force: boo
     for old in sorted((d for d in builds_dir().iterdir() if d.is_dir() and not d.name.startswith(".") and d != dest),
                       key=lambda p: p.stat().st_mtime, reverse=True)[1:]:
         shutil.rmtree(old, ignore_errors=True)
+    try:
+        use_build(tag if rel.get("tag_name") != _latest_tag() else "")   # an older build picked stays in use
+    except Exception:
+        pass
     return {"ok": True, "dir": str(dest), "tag": tag, "backend": backend}
+
+
+def _latest_tag() -> str:
+    try:
+        rel = _latest_release()
+        return (rel or {}).get("tag_name") or ""
+    except Exception:
+        return ""
 
 
 def cancel_install() -> Dict[str, Any]:
@@ -1024,9 +1109,10 @@ def _packaged_repos() -> List[str]:
     url = f"https://huggingface.co/api/models?author={PACKAGER}&limit=1000"
     req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
     with urllib.request.urlopen(req, timeout=15) as r:
-        ids = [m.get("id") for m in json.loads(r.read().decode("utf-8")) if m.get("id")]
-    _REPOS.update(ids=ids, at=time.time())
-    return ids
+        got = [m for m in json.loads(r.read().decode("utf-8")) if m.get("id")]
+    _REPOS.update(ids=[m["id"] for m in got], downloads={m["id"]: int(m.get("downloads") or 0) for m in got},
+                  at=time.time())
+    return _REPOS["ids"]
 
 
 def _repo_files(repo: str) -> List[dict]:
@@ -1136,6 +1222,97 @@ def download_plan(recipe_id: str, recipe: Optional[Dict[str, Any]] = None,
     return {"ok": not missing, "repo": home, "parts": parts, "missing": missing,
             "bytes": sum(p["size"] for p in parts if not p["have"]), "url": recipe.get("model_url") or "",
             "error": ("still needs " + ", ".join(missing)) if missing else ""}
+
+
+def blurb(recipe: Dict[str, Any]) -> str:
+    """What a family does, in a few plain words, from its id and kind (the
+    engine's own description is a note for whoever wires the files up)."""
+    rid = str(recipe.get("id") or "").lower()
+    video = "video_frames" in (recipe.get("defaults") or {}) or bool(recipe.get("video"))
+    if video:
+        if "flf2v" in rid:
+            return "Makes a short video between a first and last picture"
+        if "s2v" in rid:
+            return "Makes a short video of a picture speaking to a sound"
+        if "ti2v" in rid:
+            return "Makes short videos from text or a picture"
+        if "i2v" in rid or "fl2va" in rid or "ref2va" in rid:
+            return "Brings a picture to life as a short video"
+        return "Makes short videos from text"
+    if "edit" in rid or "kontext" in rid or "pix2pix" in rid:
+        return "Edits pictures you give it"
+    if "inpaint" in rid or "fill" in rid:
+        return "Fills in or replaces part of a picture"
+    if "controlnet" in rid or "canny" in rid or "depth" in rid:
+        return "Makes pictures that follow a sketch or outline"
+    if "ip-adapter" in rid or "photomaker" in rid or "pulid" in rid:
+        return "Makes pictures in the likeness of one you give it"
+    if "layered" in rid:
+        return "Makes pictures in separate layers"
+    if "turbo" in rid or "schnell" in rid or "lightning" in rid:
+        return "Makes pictures from text, in a few steps"
+    return "Makes pictures from text"
+
+
+_SETS_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "image_sets.json")
+_SETS_LOCK = threading.Lock()
+_SETS_RUN: Dict[str, Any] = {"thread": None}
+
+
+def _sets_build(recipes: List[dict]) -> None:
+    """Find a whole download for every family the engine runs, and keep them."""
+    out = []
+    for r in recipes:
+        try:
+            p = download_plan(r["id"], r, roots=[])
+        except Exception:
+            p = {"ok": False}
+        out.append({"id": r["id"], "name": r.get("name") or r["id"], "video": "video_frames" in (r.get("defaults") or {}),
+                    "blurb": blurb(r), "url": r.get("model_url") or "", "ok": bool(p.get("ok")),
+                    "repo": p.get("repo") or "", "downloads": int((_REPOS.get("downloads") or {}).get(p.get("repo") or "", 0)),
+                    "parts": [{k: x[k] for k in ("slot", "kind", "label", "repo", "path", "category", "name", "size")}
+                              for x in p.get("parts") or []] if p.get("ok") else []})
+    os.makedirs(os.path.dirname(_SETS_PATH), exist_ok=True)
+    tmp = _SETS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"at": time.time(), "ids": sorted(r["id"] for r in recipes), "sets": out}, f)
+    os.replace(tmp, _SETS_PATH)
+
+
+def catalog_sets(roots: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Discover's image and video rows: every family the engine runs, each with
+    the parts of its whole download (or none, `ok` False) and which are on this
+    PC already. Found once a day in the background; `ready` False until then."""
+    if not installed():
+        return {"installed": False, "ready": True, "sets": []}
+    try:
+        with open(_SETS_PATH, encoding="utf-8") as f:
+            kept = json.load(f)
+    except (OSError, ValueError):
+        kept = {}
+    fresh = kept.get("sets") is not None and time.time() - float(kept.get("at") or 0) < 86400
+    if not fresh:
+        with _SETS_LOCK:
+            t = _SETS_RUN["thread"]
+            if t is None or not t.is_alive():
+                def work():
+                    try:
+                        if not (running() or start().get("ok")):
+                            return
+                        got = api("GET", "/sdcpp/v1/recipes")
+                        if got.get("recipes"):
+                            _sets_build(got["recipes"])
+                    except Exception:
+                        pass
+                _SETS_RUN["thread"] = threading.Thread(target=work, daemon=True, name="image-sets")
+                _SETS_RUN["thread"].start()
+    sets = kept.get("sets") or []
+    roots = model_roots() if roots is None else roots
+    for s in sets:
+        for p in s.get("parts") or []:
+            p["have"] = any(os.path.isfile(os.path.join(root, p["category"], p["name"])) for root in roots)
+        s["bytes"] = sum(p["size"] for p in s.get("parts") or [] if not p["have"])
+    return {"installed": True, "ready": bool(sets), "updating": not fresh, "sets": sets}
 
 
 import atexit as _atexit  # noqa: E402

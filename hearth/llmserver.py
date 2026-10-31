@@ -1661,18 +1661,61 @@ def discard_llama_download() -> Dict[str, Any]:
 _LLAMA_LATEST_CACHE = Path(os.path.expanduser("~/.hearth/llamacpp_latest.json"))
 
 
+def github_releases(repo: str, per_page: int = 10, ttl: float = 6 * 3600,
+                    timeout: float = 12) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """A repo's recent releases from GitHub's API, kept on disk.
+
+    Without a token GitHub allows 60 API requests an hour per network, shared by
+    every app on it, and the update check, engine installs and the build lists
+    each ask. So the answer is kept, asked again only after `ttl` and then with
+    its ETag (an unchanged answer doesn't count against the limit), and the kept
+    one is used when GitHub says no. (releases, {"stale", "limited", "error"})."""
+    import urllib.error
+    import urllib.request
+    slug = re.sub(r"[^a-z0-9]+", "_", repo.lower())
+    path = Path(os.path.expanduser(f"~/.hearth/github/{slug}_{per_page}.json"))
+    try:
+        kept = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        kept = {}
+    data = kept.get("data") if isinstance(kept.get("data"), list) else None
+    if data is not None and time.time() - float(kept.get("at") or 0) < ttl:
+        return data, {"stale": False, "limited": False, "error": ""}
+    headers = {"User-Agent": "Inglen", "Accept": "application/vnd.github+json"}
+    if data is not None and kept.get("etag"):
+        headers["If-None-Match"] = kept["etag"]
+    req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page={per_page}", headers=headers)
+    etag = kept.get("etag") or ""
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data, etag = json.load(r), r.headers.get("ETag") or ""
+    except urllib.error.HTTPError as e:
+        if e.code != 304 or data is None:
+            limited = e.code in (403, 429) and "rate limit" in str(e.reason or "").lower()
+            if data is not None:
+                return data, {"stale": True, "limited": limited, "error": f"HTTP {e.code}"}
+            return [], {"stale": False, "limited": limited, "error": f"HTTP {e.code}: {e.reason}"}
+    except Exception as e:
+        if data is not None:
+            return data, {"stale": True, "limited": False, "error": type(e).__name__}
+        return [], {"stale": False, "limited": False, "error": f"{type(e).__name__}: {e}"}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": time.time(), "etag": etag, "data": data}), encoding="utf-8")
+    except OSError:
+        pass
+    return data if isinstance(data, list) else [], {"stale": False, "limited": False, "error": ""}
+
+
 def _latest_build_release(timeout: float = 12, repo: str = _LLAMA_CPP_REPO) -> Optional[Dict[str, Any]]:
     """The newest numbered build (bNNNNN) that ships Windows files.
 
     The repository's "latest" release is not always a build: it has pointed at
     a v0.5.0 tag carrying one file and nothing for Windows, which made every
     engine install fail with "no cuda Windows assets"."""
-    import urllib.request
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/releases?per_page=15",
-        headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        rels = json.load(r)
+    rels, got = github_releases(repo, 15, ttl=600, timeout=timeout)
+    if not rels and got["error"]:
+        raise OSError("GitHub's hourly limit for this network was reached" if got["limited"] else got["error"])
     shape = r"^b\d+$" if repo == _LLAMA_CPP_REPO else r"."
     for rel in rels if isinstance(rels, list) else []:
         tag = (rel.get("tag_name") or "").strip()
@@ -1825,16 +1868,7 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
     """Recent llama.cpp releases and the Windows CUDA variants each one ships,
     so a build that regresses on some GPU can be rolled back to a known-good
     tag instead of leaving the user stuck on latest."""
-    import urllib.request
-    import re
-    try:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{_LLAMA_CPP_REPO}/releases?per_page={max(1, min(limit, 30))}",
-            headers={"User-Agent": "Inglen", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=12) as r:
-            rels = json.load(r)
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}", "builds": []}
+    rels, got = github_releases(_LLAMA_CPP_REPO, max(1, min(limit, 30)))
     installed = set(installed_llama_tags())
     health = _engine_health()
     bad = {Path(k).parent.name for k, v in health.items() if v.get("ok") is False}
@@ -1900,8 +1934,8 @@ def list_llama_builds(limit: int = 4) -> Dict[str, Any]:
     # asset name only carries the CUDA toolkit version, and the real kernel list
     # is only printed once the server runs. Report the card instead and let the
     # health verdict speak for compatibility.
-    return {"ok": True, "builds": builds,
-            "gpu_compute_cap": detect_gpu_compute_cap()}
+    return {"ok": bool(rels), "builds": builds, "gpu_compute_cap": detect_gpu_compute_cap(),
+            "stale": got["stale"], "limited": got["limited"], "error": got["error"]}
 
 
 def _archive_ok(path: Path) -> bool:
