@@ -42,6 +42,17 @@ if getattr(_socket.getaddrinfo, "__name__", "") != "_getaddrinfo_v4_first":
     _socket.getaddrinfo = _getaddrinfo_v4_first
 
 # ---------------------------------------------------------------------------
+# Children (npm agents, their updates, npx MCP servers) get a PATH cmd.exe can
+# read: quotes and blanks out, node's folder first. One broken entry otherwise
+# hides node from everything started through cmd.
+# ---------------------------------------------------------------------------
+try:
+    from . import node_env as _node_env
+    _node_env.fix_process_path()
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
 # Undo an update that was cut off partway through, before anything else loads.
 # A patch replaces these files one at a time; losing the process in the middle
 # of that leaves two versions mixed together and the app does not come back up.

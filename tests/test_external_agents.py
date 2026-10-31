@@ -179,8 +179,8 @@ else:
     with open(fake_npm, "w", encoding="utf-8") as f:
         f.write(f'#!/bin/sh\nexec "{sys.executable}" "{fake_npm_py}" "$@"\n')
     os.chmod(fake_npm, 0o755)
-real_shutil_which = xa.shutil.which
-xa.shutil.which = lambda n: fake_npm if n in ("npm.cmd", "npm") else real_shutil_which(n)
+real_npm = xa._node_env.npm
+xa._node_env.npm = lambda: fake_npm
 xa.NPM_PACKAGES["stand-in"] = "stand-in-pkg"
 seen = []
 watch = threading.Thread(target=lambda: [seen.append(xa.jobs()) or time.sleep(0.2) for _ in range(12)], daemon=True)
@@ -203,7 +203,7 @@ runner.join(10)
 check(f"an install or update can be stopped part-way ({got.get('error')})",
       stopped and got.get("ok") is False and "Stopped" in got.get("error", "") and time.time() - t0 < 10
       and any(j["id"] == "stand-in" and j["status"] == "cancelled" for j in xa.jobs()))
-xa.shutil.which = real_shutil_which
+xa._node_env.npm = real_npm
 del xa.NPM_PACKAGES["stand-in"]
 
 # npm installs CLIs as .cmd shims; the prompt must never go through cmd.exe.

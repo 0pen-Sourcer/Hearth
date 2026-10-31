@@ -253,6 +253,9 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
     # block, which is a deliberate choice rather than a silent default.
     env = {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
     env.update({str(k): str(v) for k, v in (spec.get("env") or {}).items()})
+    from . import node_env
+    env = node_env.child_env(env)
+    command = node_env.resolve(command)
     if not command:
         with _BRIDGES_LOCK:
             _BRIDGES[safe].update(state="error",
