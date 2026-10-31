@@ -46,7 +46,7 @@ def lifted(resumed: Dict[str, Any], cwd: str) -> Dict[str, Any]:
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
-              drain: Optional[Callable[[], List[str]]] = None) -> int:
+              drain: Optional[Callable[[], List[str]]] = None, model: str = "") -> int:
     """Resume thread `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _step
     from .channel_core import _what, out_of
@@ -82,6 +82,8 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
             raise RuntimeError("Codex gave no session id")
         emit("session", agent="codex", id=tid)
         override = lifted(got, cwd)
+        if model:
+            _NEXT_MODEL.setdefault(tid, model)
 
         async def begin(words: str) -> Optional[str]:
             """Start what `words` ask for: Codex's own commands as its app-server takes them,
@@ -270,6 +272,10 @@ async def follow(path: str, emit: Emit, *, queue_more: Optional[Callable[[str], 
                 if said:
                     emit("text", text=said)
                     return 0
+                why = str((p.get("error") or {}).get("message") or "").strip() if isinstance(p.get("error"), dict) else ""
+                if why:
+                    emit("error", message=f"Codex stopped: {why}"[:600])
+                    return 1
                 emit("error", message="Codex finished on your PC without a reply. Open the session there to see why "
                                       "(a usage limit, or it was stopped).")
                 return 1

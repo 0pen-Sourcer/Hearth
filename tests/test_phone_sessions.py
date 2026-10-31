@@ -22,6 +22,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.environ.get("HEARTH_SRC") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -384,6 +385,41 @@ relay.ask_voice("room", "Run the command?", "perm_9", False)
 relay.ask("room", "May it delete old.log?")
 check(f"a step the brain asks about in its own words shows quietly; one asked from the card is read out ({c.did})",
       c.did == ["quiet", "aloud"])
+
+# An agent's error reads as plain words from that agent, on the phone and in its notification.
+said = [RB.stopped_note("Claude Code", "You've hit your 5-hour limit · resets 5:30pm"),
+        RB.stopped_note("Codex", "You've hit your usage limit. Upgrade to Pro or try again at Nov 4th, 2026 2:59 PM.")]
+check(f"a usage limit says when it resets ({said})",
+      said == ["Claude Code stopped: its usage limit resets at 5:30 pm",
+               "Codex stopped: its usage limit resets at Nov 4th, 2026 2:59 pm"])
+
+# A session open on the PC that stops on its own error (a usage limit) ends the phone's turn there and then.
+tpath = os.path.join(tempfile.mkdtemp(), "s.jsonl")
+open(tpath, "w").close()
+
+
+def fake_deliver(inbox, words):
+    with open(tpath, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user", "origin": {"kind": "peer"}, "isMeta": True, "message": {
+            "role": "user", "content": f"Another Claude session sent a message:\n{S.PHONE_MARK} {words}"}}) + "\n")
+        f.write(json.dumps({"type": "assistant", "isApiErrorMessage": True, "message": {
+            "role": "assistant", "model": "<synthetic>", "stop_reason": "stop_sequence",
+            "content": [{"type": "text", "text": "You've hit your 5-hour limit · resets 5:30pm"}]}}) + "\n")
+    return True
+
+
+real_deliver, claude_sessions.deliver = claude_sessions.deliver, fake_deliver
+got_ev: list = []
+t0 = time.time()
+try:
+    rc = asyncio.run(asyncio.wait_for(claude_sessions.live({"pid": 1, "pipe": "x", "token": "t", "busy": False}, tpath,
+                                                           "hi", lambda k, **f: got_ev.append((k, f))), 30))
+except asyncio.TimeoutError:
+    rc = None
+claude_sessions.deliver = real_deliver
+errs = [f.get("message") for k, f in got_ev if k == "error"]
+check(f"a live session that stops on a usage limit ends the turn at once with that error ({time.time() - t0:.1f} s, {errs})",
+      rc == 1 and bool(errs) and "5-hour limit" in errs[0] and time.time() - t0 < 10)
 
 print()
 if FAILS:

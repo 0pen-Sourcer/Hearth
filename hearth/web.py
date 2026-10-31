@@ -2875,7 +2875,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             # Plus: the licence, the relay, paired phones and a pairing in progress.
             from . import plus as _plus, relay_bridge as _rb
             return self._send_json(200, {**_plus.status(), "relay": bool(_rb.relay_url()), "phones": _rb.phones(),
-                                         "pairing": _rb.pairing_status(), "bridge": _bridge_running("relay")})
+                                         "pairing": _rb.pairing_status(), "bridge": _bridge_running("relay"),
+                                         "live": _rb.live()})
         if path == "/api/install-count":
             # The opt-in install count: whether it is on, and exactly what it sends.
             from . import install_count

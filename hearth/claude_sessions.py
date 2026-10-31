@@ -18,24 +18,24 @@ from typing import Any, Callable, Dict, List, Optional
 Emit = Callable[..., None]
 
 
-def args_for(exe: List[str], sid: str, mode: str) -> List[str]:
+def args_for(exe: List[str], sid: str, mode: str, model: str = "") -> List[str]:
     from .shared_memory import NAME, launch
     # Inglen's tools for agents ride along (memory, and call_me so "call me when you're done" works).
     tools = json.dumps({"mcpServers": {NAME: {"type": "stdio", **launch()}}})
     return list(exe) + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                         "--include-partial-messages", "--permission-prompt-tool", "stdio",
-                        "--permission-mode", mode, "--mcp-config", tools] + (["--resume", sid] if sid else [])
+                        "--permission-mode", mode, "--mcp-config", tools] + (["--model", model] if model else []) + (["--resume", sid] if sid else [])
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
-              mode: str = "default", drain: Optional[Callable[[], List[str]]] = None) -> int:
+              mode: str = "default", drain: Optional[Callable[[], List[str]]] = None, model: str = "") -> int:
     """Resume session `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _result_text, _steps_of
     from .channel_core import _what, out_of
     from .claude_brain import _QUIET_TOOLS, hearth_view
 
     proc = await asyncio.create_subprocess_exec(
-        *args_for(exe, sid, mode), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        *args_for(exe, sid, mode, model), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
         creationflags=0x08000000 if sys.platform == "win32" else 0)
     errs = asyncio.ensure_future(proc.stderr.read())
@@ -234,6 +234,11 @@ async def live(inbox: Dict[str, Any], path: str, text: str, emit: Emit, *,
                     if isinstance(b, dict) and b.get("type") == "tool_result":
                         emit("step_out", out=out_of(_result_text(b.get("content"))))
                 continue
+            if o.get("isApiErrorMessage") or m.get("model") == "<synthetic>":
+                # The session stopped on its own error (a usage limit, an outage): that is the turn's end.
+                why = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict)).strip()
+                emit("error", message=f"Claude Code stopped: {why or 'it hit an error'}"[:600])
+                return 1
             used = wrote = False
             for b in content:
                 if not isinstance(b, dict):
