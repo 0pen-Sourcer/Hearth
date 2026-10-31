@@ -249,6 +249,21 @@ def note_body(s: Any, limit: int = 200) -> str:
     return out
 
 
+def stopped_note(name: str, error: Any) -> str:
+    """An agent's error as a notification says it: "Claude Code stopped: its usage limit
+    resets at 5:30 pm", not the agent's own banner ("You've hit your 5-hour limit · resets 5:30pm")."""
+    t = plain_text(error)
+    if re.search(r"\blimit\b", t, re.I):
+        m = re.search(r"(?:resets|try again)(?:\s+(?:at|on))?\s+([^·(]+?)\s*(?:\(|·|\.(?:\s|$)|$)", t, re.I)
+        when = m.group(1).strip(" .,") if m else ""
+        when = re.sub(r"(\d)\s*([ap])\.?m\.?\b", lambda g: f"{g.group(1)} {g.group(2).lower()}m", when, flags=re.I)
+        return f"{name} stopped: its usage limit " + (f"resets at {when}" if when else "was reached")
+    t = re.sub(r"^(?:API Error|Error)\s*:?\s*", "", t, flags=re.I)
+    if not t:
+        return f"{name} stopped."
+    return f"{name} stopped: " + (t[0].lower() + t[1:] if t[1:2].islower() else t)
+
+
 _ASKED = re.compile(r"^(?:Before I go on: may I |[\w .-]{1,40} asks: may it )", re.I)
 _RUNS = re.compile(r"^(run|start) `(.+)`\?\s*(.*)$", re.S | re.I)
 
@@ -360,6 +375,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "undo":
         from . import undo as _undo
         return _undo.undo(str(m.get("id") or ""))
+    if what == "about":
+        # The phone's About: the version of Inglen on this PC.
+        from .updater import HEARTH_VERSION
+        return {"version": HEARTH_VERSION}
     if what == "agent_catalog":
         from .agent_launch import catalog
         return catalog()
@@ -1041,6 +1060,8 @@ class AgentWatch:
                         "c": r["chat"]}
             return None                            # it ended on a step: still at work, or waiting on a tool
         text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
+        if last.get("error"):
+            text = stopped_note(r.get("label") or "The agent", text)
         return {"kind": "done", "title": who, "body": " ".join(text.split())[:240], "c": r["chat"]}
 
 
@@ -1212,6 +1233,15 @@ class Relay(cc.Adapter):
                 call.hang_up()                  # its goodbye is said, then the call ends
                 return
             call.step(words)
+        # Thinking still waiting on its pace goes first, so it sits above this step and not under the next.
+        t = cc.turn_context().get("t", "")
+        timer = self._later.pop(f"think:{t}", None)
+        if timer is not None:
+            timer.cancel()
+            newest = self._latest.get(f"think:{t}")
+            if newest is not None:
+                self._think_at[t] = time.time()
+                self._push(chat, {"type": "think", "text": newest})
         self._push(chat, {"type": "step", "words": words, "tool": tool, "site": site, **({"cmd": cmd} if cmd else {})})
 
     def call_note(self, chat, cid: str = "") -> str:
@@ -1273,7 +1303,7 @@ class Relay(cc.Adapter):
 
     def think(self, chat, text):
         """The reasoning so far, four times a second, folded on the phone like the window's."""
-        self._paced(chat, "think", text[-4000:], THINK_EVERY, self._think_at)
+        self._paced(chat, "think", text[-20000:], THINK_EVERY, self._think_at)
 
     def heard(self, chat, text, cid=""):
         """What a voice note said, so the phone shows the words instead of "Voice note"."""
@@ -1508,7 +1538,13 @@ class Room:
                 if self.peer_up and self.chan is not None:
                     adapter._push(chat, obj)
 
+            from . import agent_sessions
+
             def say(text):
+                if agent_sessions.parse_chat(cid):
+                    # A call from a coding agent's session talks to that agent, in that session.
+                    self.bridge.agent_say(self, {"chat": cid, "text": text, "spoken": True})
+                    return "ran"
                 return self.bridge.hub.receive(chat, "phone", text, name="Phone", cid=cid, spoken=True)
 
             def save(changed):
@@ -1645,7 +1681,14 @@ class Bridge:
             return
         from . import agent_sessions
         if agent_sessions.parse_chat(str(m.get("chat") or "")):
-            self.agent_say(room, m)
+            # Pictures and files sent into a coding agent's session go with the message, saved where it can open them.
+            paths = []
+            for f in m.get("files") or []:
+                try:
+                    paths.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
+                except Exception:
+                    continue
+            self.agent_say(room, dict(m, paths=paths))
             return
         files = []
         for f in m.get("files") or []:
@@ -1713,7 +1756,7 @@ class Bridge:
         no while it waits on a question answers the question."""
         from . import agent_sessions
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
-        text = str(m.get("text") or "").strip()
+        text = (str(m.get("text") or "").strip() + agent_sessions.attached(m.get("paths") or [])).strip()
         # The model picked under the phone's message box for this session ('' is the session's own).
         model = re.sub(r"[^\w.:/@\[\]-]", "", str(m.get("model") or ""))[:120]
         turn = secrets.token_hex(5)
@@ -1752,9 +1795,24 @@ class Bridge:
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
 
+        def on_call():
+            c = getattr(room, "call", None)
+            return c if c is not None and not c.ended and c.cid == cid else None
+
         def emit(kind: str, **f: Any) -> None:
             nonlocal cid
             now = time.time()
+            if kind == "error" and str(f.get("message") or "").startswith(f"{name} stopped:"):
+                # Said the same on the call, in the chat and in the notification.
+                f["message"] = stopped_note(name, str(f["message"])[len(name) + 9:])
+            call = on_call()
+            if call is not None:
+                if kind == "live":
+                    call.live(f.get("text") or "")
+                elif kind == "step":
+                    call.step(f.get("words") or "")
+                elif kind in ("text", "error"):
+                    call.done(f.get("text") or f.get("message") or "")
             if kind == "session":
                 # A new session's own id: the phone moves the chat it opened onto it.
                 real = agent_sessions.chat_id(str(f.get("agent") or agent), str(f.get("id") or ""))
@@ -1764,6 +1822,10 @@ class Bridge:
                     run["keys"].append(real)
                     push({"type": "agent_session", "from": was, "chat": real})
             elif kind == "step":
+                if thought and sent.get("thought_n") != len(thought):
+                    # The thinking before this step reaches the phone before the step, so it sits above it.
+                    sent["thought_n"] = len(thought)
+                    push({"type": "think", "text": "".join(thought)[-20000:]})
                 push({"type": "step", "words": f.get("words") or "", "tool": f.get("tool") or "",
                       **({"cmd": f["cmd"]} if f.get("cmd") else {})})
             elif kind == "step_out" and f.get("out"):
@@ -1774,8 +1836,8 @@ class Bridge:
             elif kind == "think":
                 thought.append(str(f.get("text") or ""))
                 if now - sent["think"] >= THINK_EVERY:
-                    sent["think"] = now
-                    push({"type": "think", "text": "".join(thought)[-4000:]})
+                    sent["think"], sent["thought_n"] = now, len(thought)
+                    push({"type": "think", "text": "".join(thought)[-20000:]})
             elif kind == "note":
                 # Inglen saying what it did ("Sent to Codex on your PC"), not the agent: drawn muted.
                 push({"type": "text", "text": f.get("text") or "", "note": True})
@@ -1787,7 +1849,10 @@ class Bridge:
             elif kind == "error":
                 _log(f"{name} session {cid[-8:]} stopped: {f.get('message') or ''}"[:300])
                 _activity("agent_session_error", agent=agent, chat=cid, message=str(f.get("message") or "")[:300])
-                push({"type": "text", "text": f.get("message") or "It stopped.", "error": True})
+                said = str(f.get("message") or "")
+                push({"type": "text", "text": said or "It stopped.", "error": True})
+                if said:
+                    self.adapter.finished(room.chat, name, said, cid, turn)
 
         def ask(question: str) -> bool:
             run["q"], run["answer"] = threading.Event(), False
@@ -1811,6 +1876,9 @@ class Bridge:
 
         def go() -> None:
             try:
+                call = on_call()
+                if call is not None:
+                    call.begin()                     # its reply is spoken on the call
                 push({"type": "typing"})
                 asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain, model=model))
             finally:
@@ -1977,9 +2045,14 @@ class Bridge:
                     pass
             # A session open on a phone shows what its agent wrote since, without reopening it,
             # and that its agent is at work (the phone shows it working until it goes quiet).
-            for c, busy_now in [(c, True) for c in watch.moved] + [(c, False) for c in watch.quiet]:
+            for c, busy_now in [(c, None) for c in watch.moved] + [(c, False) for c in watch.quiet]:
                 if c in self.agent_runs:
                     continue
+                if busy_now is None:
+                    # Written to: at work unless what it wrote last is its finished reply.
+                    got = agent_sessions.parse_chat(c)
+                    d = agent_sessions.read(*got) if got else {}
+                    busy_now = agent_sessions.working(d.get("messages") or [], agent_sessions._mtime(d.get("path") or ""))
                 prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
                 try:
                     for chat in list(self.adapter.rooms):

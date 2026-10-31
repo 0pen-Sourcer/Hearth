@@ -22,6 +22,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 
 ROOT = os.environ.get("HEARTH_SRC") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -273,6 +274,58 @@ fact = next(f for f in RB.memory_view({})["facts"] if f["name"] == "Receipts")
 check(f"Memory sends the phone a fact's whole text to open, not a cut ({len(fact['more'])} of {len(long.strip())})",
       fact["text"] == "Where receipts go" and fact["more"].strip() == long.strip())
 
+# ------------------------------------------------------------ "call me when you're done", from any agent
+
+from hearth import call_me, live_bus, memory_mcp  # noqa: E402
+
+rung = []
+live_bus.publish = lambda ev: rung.append(ev)
+call_me.quiet_now = lambda r, now=None: False
+call_me.at_pc = lambda idle=None: False
+said = memory_mcp.call_me("The tests pass and the branch is pushed.")
+check(f"an agent's call_me rings the phone through Inglen, even with Inglen's own calls off ({said})",
+      rung and rung[-1]["kind"] == "call_me" and "tests pass" in rung[-1]["say"] and said.startswith("Calling"))
+call_me.at_pc = lambda idle=None: True
+check("not while they're at the PC, and it says so", memory_mcp.call_me("done").startswith("Not calling") and len(rung) == 1)
+args = claude_sessions.args_for(["claude"], "s1", "default")
+check("a Claude Code session started from the phone gets Inglen's agent tools", "--mcp-config" in args
+      and "hearth-memory" in args[args.index("--mcp-config") + 1])
+check("so does a Codex one", any("mcp_servers.hearth-memory.command" in a for a in codex_sessions.inglen_tools()))
+check("and an ACP one (OpenCode, Gemini CLI)", S.acp_tools()[0]["name"] == "hearth-memory")
+
+# ------------------------------------------------------------ a goodbye, then the call ends
+
+from hearth import headless  # noqa: E402
+
+
+class Talky(CC.Adapter):
+    name, label = "relay", "Phone"
+
+    def __init__(self):
+        self.rooms, self.sent, self.written = {}, [], []
+
+    def send(self, chat, text, *a, **k):
+        self.sent.append(text)
+
+    def live(self, chat, text):
+        self.written.append(text)
+
+
+async def goodbye(prompt, *, emit, **k):
+    emit("assistant_chunk", content="No worries, catch you later.")
+    emit("tool_call", name="end_session", args={})
+    emit("done", reason="end_session")
+    return 0
+
+headless.run_once = goodbye
+ta = Talky()
+th = CC.Hub(ta, configured_senders=["phone"])
+th.receive("room", "phone", "that's all, thanks", cid="bye1")
+for t in list(th.threads):
+    t.join(30)
+check(f"a goodbye said before end_session is the reply, not the couldn't-get-a-response line ({ta.sent})",
+      ta.sent and ta.sent[-1].startswith("No worries, catch you later.") and "couldn't get a response" not in " ".join(ta.sent))
+
 # ------------------------------------------------------------ approvals on a call
 
 
@@ -332,6 +385,41 @@ relay.ask_voice("room", "Run the command?", "perm_9", False)
 relay.ask("room", "May it delete old.log?")
 check(f"a step the brain asks about in its own words shows quietly; one asked from the card is read out ({c.did})",
       c.did == ["quiet", "aloud"])
+
+# An agent's error reads as plain words from that agent, on the phone and in its notification.
+said = [RB.stopped_note("Claude Code", "You've hit your 5-hour limit · resets 5:30pm"),
+        RB.stopped_note("Codex", "You've hit your usage limit. Upgrade to Pro or try again at Nov 4th, 2026 2:59 PM.")]
+check(f"a usage limit says when it resets ({said})",
+      said == ["Claude Code stopped: its usage limit resets at 5:30 pm",
+               "Codex stopped: its usage limit resets at Nov 4th, 2026 2:59 pm"])
+
+# A session open on the PC that stops on its own error (a usage limit) ends the phone's turn there and then.
+tpath = os.path.join(tempfile.mkdtemp(), "s.jsonl")
+open(tpath, "w").close()
+
+
+def fake_deliver(inbox, words):
+    with open(tpath, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user", "origin": {"kind": "peer"}, "isMeta": True, "message": {
+            "role": "user", "content": f"Another Claude session sent a message:\n{S.PHONE_MARK} {words}"}}) + "\n")
+        f.write(json.dumps({"type": "assistant", "isApiErrorMessage": True, "message": {
+            "role": "assistant", "model": "<synthetic>", "stop_reason": "stop_sequence",
+            "content": [{"type": "text", "text": "You've hit your 5-hour limit · resets 5:30pm"}]}}) + "\n")
+    return True
+
+
+real_deliver, claude_sessions.deliver = claude_sessions.deliver, fake_deliver
+got_ev: list = []
+t0 = time.time()
+try:
+    rc = asyncio.run(asyncio.wait_for(claude_sessions.live({"pid": 1, "pipe": "x", "token": "t", "busy": False}, tpath,
+                                                           "hi", lambda k, **f: got_ev.append((k, f))), 30))
+except asyncio.TimeoutError:
+    rc = None
+claude_sessions.deliver = real_deliver
+errs = [f.get("message") for k, f in got_ev if k == "error"]
+check(f"a live session that stops on a usage limit ends the turn at once with that error ({time.time() - t0:.1f} s, {errs})",
+      rc == 1 and bool(errs) and "5-hour limit" in errs[0] and time.time() - t0 < 10)
 
 print()
 if FAILS:

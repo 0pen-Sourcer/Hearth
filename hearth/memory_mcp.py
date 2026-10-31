@@ -30,7 +30,8 @@ mcp = FastMCP(
         "Before asking them something about themselves, their setup or their work, look here "
         "(memory_recall, search_chats). When they tell you something lasting about themselves "
         "or their work, save it (memory_save) so their other agents know it too. "
-        "whats_going_on says what is in motion lately."
+        "whats_going_on says what is in motion lately. When they ask to be called (\"call me when "
+        "you're done\") or something can't wait, call_me rings their phone through Inglen."
     ),
 )
 
@@ -91,6 +92,15 @@ def whats_going_on() -> str:
     if not rows:
         return "Nothing going on right now."
     return "\n".join(f"- {memory_cards.card_text(c)} ({c.get('ago')}, chat {c.get('chat')})" for c in rows)
+
+
+@mcp.tool()
+def call_me(message: str) -> str:
+    """Ring the person's phone through Inglen and say `message` when they answer. Use it when they
+    asked to be called ("call me when you're done", "call me if it fails") or something can't wait.
+    One or two short spoken sentences: what is done, or what you need from them."""
+    from hearth import call_me as _call_me
+    return _call_me.ask_for(message)
 
 
 if __name__ == "__main__":
