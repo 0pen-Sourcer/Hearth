@@ -39,11 +39,19 @@ def _env_for(provider: str) -> Dict[str, str]:
     if provider == "opencode":
         # Its shell, edits and fetches ask first, so they come to Hearth; MCP calls
         # wait as long as a person takes to answer. Turning a tool off instead would
-        # make OpenCode's free models refuse the request.
+        # make OpenCode's free models refuse the request. A read of a place that
+        # holds keys asks too.
+        from .secret_places import opencode_read
         extra["OPENCODE_CONFIG_CONTENT"] = json.dumps({
-            "permission": {"edit": "ask", "bash": "ask", "webfetch": "ask", "external_directory": "ask"},
+            "permission": {"edit": "ask", "bash": "ask", "webfetch": "ask", "external_directory": "ask",
+                           "read": opencode_read()},
             "experimental": {"mcp_timeout": 900000}})
     return extra
+
+
+def _agent_env(provider: str) -> Dict[str, str]:
+    from .keystore import agent_env
+    return agent_env(_env_for(provider))
 
 
 def _mcp_servers() -> List[Dict[str, Any]]:
@@ -59,7 +67,7 @@ async def _start(provider: str, cwd: str, extra: Optional[List[str]] = None):
     return await asyncio.create_subprocess_exec(
         *exe, *_base.ACP[provider].get("args", []), *(extra or []), cwd=cwd, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
-        env=dict(os.environ, **_env_for(provider)), creationflags=_NO_WINDOW)
+        env=_agent_env(provider), creationflags=_NO_WINDOW)
 
 
 async def _hello(rpc: _Rpc) -> Dict[str, Any]:

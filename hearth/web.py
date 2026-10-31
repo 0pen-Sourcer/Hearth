@@ -281,11 +281,8 @@ def _bridge_config(ch: str) -> dict:
           "whatsapp": "whatsapp_bridge.json"}.get(ch)
     if not fn:
         return {}
-    try:
-        with open(os.path.join(os.path.expanduser("~"), ".hearth", fn), encoding="utf-8") as f:
-            return json.load(f) or {}
-    except Exception:
-        return {}
+    from . import keystore
+    return keystore.read_json(os.path.join(os.path.expanduser("~"), ".hearth", fn))
 
 
 def _bridge_configured(ch: str, cfg: Optional[dict] = None) -> bool:
@@ -915,8 +912,8 @@ def load_local_brain(model_path: str, body: Optional[Dict[str, Any]] = None) -> 
                 # Kept through an eject: what to start when voice or
                 # chat needs a model and none is set to autoboot.
                 saved["last_local_model"] = model_path
-                os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
-                _atomic_write_json(SETTINGS_PATH, saved, indent=2)
+                from . import keystore
+                keystore.write_settings(saved, SETTINGS_PATH)
         except Exception:
             pass  # best-effort — preference is a nice-to-have
     return result
@@ -999,11 +996,9 @@ def _provider_key(provider: str) -> str:
     banked = (s.get("provider_keys") or {}).get(provider)
     if banked:
         return str(banked).strip()
-    try:
-        with open(os.path.join(WORKSPACE, "brain_keys.json"), encoding="utf-8") as f:
-            return str(((json.load(f) or {}).get(provider) or {}).get("key") or "").strip()
-    except (OSError, ValueError):
-        return ""
+    from . import keystore
+    return str((keystore.brain_keys(os.path.join(WORKSPACE, "brain_keys.json")).get(provider) or {}).get("key")
+               or "").strip()
 
 
 def _saved_providers() -> List[Dict[str, Any]]:
@@ -1630,9 +1625,8 @@ def _load_settings() -> Dict:
     if not os.path.isfile(SETTINGS_PATH):
         return defaults
     try:
-        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        defaults.update(saved)
+        from . import keystore
+        defaults.update(keystore.read_settings(SETTINGS_PATH))
     except Exception:
         pass
     # Apply device prefs as env vars BEFORE models load
@@ -1903,8 +1897,9 @@ def _save_settings_locked(d: Dict) -> Dict:
         cur["llm_model"] = ""
     os.makedirs(os.path.dirname(SETTINGS_PATH) or WORKSPACE, exist_ok=True)
     # Atomic: a truncated settings.json (power cut, AV lock mid-write) would
-    # lose the brain, workspace pointer and voice prefs in one go.
-    _atomic_write_json(SETTINGS_PATH, cur, indent=2)
+    # lose the brain, workspace pointer and voice prefs in one go. Keys sealed.
+    from . import keystore
+    keystore.write_settings(cur, SETTINGS_PATH)
     # Brain switched cloud → local: ditch the cached disk_models and rescan
     # in the background so the Models tab reflects what's actually on disk
     # without making the user think the GUI froze.
@@ -2799,12 +2794,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             out = {}
             for ch, fn in {"telegram": "phone_bridge.json", "discord": "discord_bridge.json",
                            "whatsapp": "whatsapp_bridge.json"}.items():
-                cfg = {}
-                try:
-                    with open(os.path.join(base, fn), encoding="utf-8") as f:
-                        cfg = _j.load(f) or {}
-                except Exception:
-                    cfg = {}
+                from . import keystore
+                cfg = keystore.read_json(os.path.join(base, fn))
                 if ch == "whatsapp":
                     configured = bool(cfg.get("allowed_numbers") or cfg.get("allow_self_chat"))
                 else:
@@ -4054,9 +4045,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             import json as _j
             base = os.path.join(os.path.expanduser("~"), ".hearth")
             try:
-                os.makedirs(base, exist_ok=True)
-                with open(os.path.join(base, fn), "w", encoding="utf-8") as f:
-                    _j.dump(dict(body.get("config") or {}), f, indent=2)
+                from . import keystore
+                keystore.write_json(os.path.join(base, fn), dict(body.get("config") or {}))
                 return self._send_json(200, {"ok": True})
             except Exception as e:
                 return self._send_json(500, {"ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -6598,7 +6588,8 @@ def _warm_imports() -> None:
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
     """Start the server (non-blocking) and return the server instance.
-    Used by hearth.desktop to embed the same backend in a PyWebView window."""
+    Used by hearth.desktop to embed the same backend in a PyWebView window.
+    Sealing saved keys is turned on by the app's own start (keystore.app_start), not here."""
     server = _QuietHTTPServer((host, port), HearthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     _warm_imports()
@@ -6662,6 +6653,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[hearth.web] FATAL: UI file missing at {_UI_PATH}", file=sys.stderr)
         return 1
 
+    try:
+        from . import keystore
+        keystore.app_start()               # keys an older version saved as plain text get sealed
+    except Exception:
+        pass
     server = ThreadingHTTPServer((args.host, args.port), HearthHandler)
     url = f"http://{args.host}:{args.port}/"
     print(f"\n  Inglen UI on {url}")

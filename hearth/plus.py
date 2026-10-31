@@ -52,20 +52,13 @@ def _file() -> str:
 
 
 def _read() -> Dict[str, Any]:
-    try:
-        with open(_file(), encoding="utf-8") as f:
-            d = json.load(f)
-            return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    from . import keystore
+    return keystore.read_json(_file(), keystore.FIELDS["plus.json"])
 
 
 def _write(d: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(_file()), exist_ok=True)
-    tmp = _file() + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=1)
-    os.replace(tmp, _file())
+    from . import keystore
+    keystore.write_json(_file(), d, keystore.FIELDS["plus.json"], indent=1)
 
 
 def _post(path: str, body: Dict[str, Any], timeout: float = 15) -> Dict[str, Any]:

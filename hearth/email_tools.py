@@ -59,12 +59,8 @@ def _env(*names: str) -> str:
 
 def _config() -> Dict[str, Any]:
     """Merge env vars over an optional ~/.hearth/email.json."""
-    cfg: Dict[str, Any] = {}
-    try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            cfg = json.load(f) or {}
-    except (OSError, json.JSONDecodeError):
-        cfg = {}
+    from . import keystore
+    cfg: Dict[str, Any] = keystore.read_json(_CONFIG_PATH, keystore.FIELDS["email.json"])
     addr = _env("HEARTH_EMAIL_ADDRESS", "JARVIS_EMAIL_ADDRESS") or cfg.get("address", "")
     pwd = _env("HEARTH_EMAIL_PASSWORD", "JARVIS_EMAIL_PASSWORD") or cfg.get("password", "")
     domain = addr.rsplit("@", 1)[-1].lower() if "@" in addr else ""
@@ -105,9 +101,8 @@ def save_config(address: str, password: str, imap_host: str = "",
     except (TypeError, ValueError):
         return {"ok": False, "error": "ports must be numbers"}
     try:
-        os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
-        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        from . import keystore
+        keystore.write_json(_CONFIG_PATH, data, keystore.FIELDS["email.json"])
     except OSError as e:
         return {"ok": False, "error": f"could not save: {e}"}
     return {"ok": True}

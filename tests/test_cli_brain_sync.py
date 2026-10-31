@@ -10,6 +10,8 @@ whole catalog. So any settings write on a cloud brain, the terminal's own
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import io
 import os
 import sys

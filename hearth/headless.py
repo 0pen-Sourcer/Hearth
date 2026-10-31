@@ -74,8 +74,8 @@ def _brain_from_settings() -> dict:
     else."""
     try:
         base = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
-        with open(os.path.join(base, "settings.json"), encoding="utf-8") as f:
-            s = json.load(f) or {}
+        from . import keystore
+        s = keystore.read_settings(os.path.join(base, "settings.json"))
     except Exception:
         return {}
     out = {}
@@ -2314,8 +2314,9 @@ async def _run_once(
                         })
                         continue
                 elif is_risky(name, args):
-                    from .tools import sends_out as _sends_out
-                    if _env.get("AUTO_APPROVE", "1") == "0" or (
+                    from .tools import sends_out as _sends_out, reads_secret as _reads_secret
+                    # Reading keys needs a person's yes: auto-approve doesn't cover it.
+                    if _env.get("AUTO_APPROVE", "1") == "0" or _reads_secret(name, args) or (
                             _sends_out(name, args) and os.environ.get("HEARTH_AUTO_APPROVE") != "1"):
                         tool_result = (
                             f"Not run: '{name}' needs approval and nobody is here to "

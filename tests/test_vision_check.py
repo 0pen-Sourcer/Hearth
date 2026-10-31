@@ -10,6 +10,8 @@ projector loaded, and a "gemma-3" with no projector as seeing. llama.cpp's
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import http.server
 import json
 import os

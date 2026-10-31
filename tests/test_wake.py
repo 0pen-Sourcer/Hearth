@@ -16,6 +16,8 @@ log. Stand-in audio devices; no mic needed.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 import sys
 import tempfile

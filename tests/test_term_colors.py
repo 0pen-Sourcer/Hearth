@@ -6,6 +6,8 @@ diff lines keep their own red and green.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import importlib
 import os
 import re

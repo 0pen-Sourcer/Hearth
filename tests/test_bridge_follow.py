@@ -5,6 +5,8 @@ started another on the same bot, so each message got two replies."""
 
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 import subprocess
 import sys

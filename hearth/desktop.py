@@ -77,6 +77,11 @@ def main(argv: Optional[list] = None) -> int:
             singleton.announce_secondary_and_exit()
 
     port = args.port or _free_port(singleton.DEFAULT_PORT)
+    try:
+        from . import keystore
+        keystore.app_start()          # saved keys are sealed; an older version's plain ones get sealed now
+    except Exception:
+        pass
     server = web_backend.serve(host="127.0.0.1", port=port)
     url = f"http://127.0.0.1:{port}/"
 

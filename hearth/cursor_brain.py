@@ -309,7 +309,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
+            stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024, env=_base.agent_env(),
             creationflags=0x08000000 if sys.platform == "win32" else 0)
         proc.stdin.write(text_in.encode("utf-8"))
         await proc.stdin.drain()

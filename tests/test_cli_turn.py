@@ -16,6 +16,8 @@ leaves the machine and no model is loaded.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import http.server
 import json
 import os

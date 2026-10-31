@@ -8,6 +8,8 @@ It now shrinks the prompt before each retry, as the window already did.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import asyncio
 import io
 import os

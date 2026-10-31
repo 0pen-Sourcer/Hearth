@@ -733,11 +733,10 @@ _OWNER_KEYS = {"telegram": "allowed_chat_ids", "discord": "allowed_user_ids", "w
 
 
 def config_of(channel: str) -> Dict[str, Any]:
-    try:
-        with open(os.path.join(os.path.expanduser("~"), ".hearth", CONFIG_FILES[channel]), encoding="utf-8") as f:
-            return json.load(f) or {}
-    except (KeyError, OSError, ValueError):
+    if channel not in CONFIG_FILES:
         return {}
+    from . import keystore
+    return keystore.read_json(os.path.join(os.path.expanduser("~"), ".hearth", CONFIG_FILES[channel]))
 
 
 def owner_of(channel: str) -> str:
@@ -849,8 +848,8 @@ def use_saved_brain(log: Callable[[str], None] = print) -> None:
         return
     try:
         from .tools import WORKSPACE
-        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-            s = json.load(f)
+        from . import keystore
+        s = keystore.read_settings(os.path.join(WORKSPACE, "settings.json"))
     except Exception:
         return
     for key, env in (("llm_url", "LOCAL_API_BASE"), ("llm_key", "LOCAL_API_KEY"), ("llm_model", "LOCAL_MODEL")):
@@ -866,8 +865,8 @@ def follow_saved_brain() -> Dict[str, Any]:
     engine itself; a model server's address, key and name are set here."""
     try:
         from .tools import WORKSPACE
-        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-            s = json.load(f)
+        from . import keystore
+        s = keystore.read_settings(os.path.join(WORKSPACE, "settings.json"))
     except Exception:
         return {}
     url = str(s.get("llm_url") or "").strip()
@@ -950,6 +949,17 @@ def shown_result(content: Any, limit: int = 4000) -> str:
             content = str(content)
     t = str(content or "")
     return t if len(t) <= limit else t[:limit].rstrip() + "\n..."
+
+
+def question_for(who: str, name: str, args: Dict[str, Any]) -> str:
+    """An agent's permission question, with why it asks whatever the mode (keys it would read)."""
+    q = f"{who} asks: may it {_what(name, args)}?"
+    try:
+        from .tools import sends_out
+        why = sends_out(name, args)
+    except Exception:
+        why = ""
+    return f"{q} {why}" if why else q
 
 
 def _what(name: str, args: Dict[str, Any]) -> str:

@@ -8,6 +8,8 @@ catalog, without Off where it can't stop reasoning.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import asyncio
 import contextlib
 import io

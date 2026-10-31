@@ -5,6 +5,8 @@ Goose, Grok Build, Pi and the rest could only take tasks as helpers."""
 
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import asyncio
 import json
 import os

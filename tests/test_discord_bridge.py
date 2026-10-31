@@ -6,6 +6,8 @@ kept, voice messages handed over to be written down, bots ignored.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import asyncio
 import os
 import sys
