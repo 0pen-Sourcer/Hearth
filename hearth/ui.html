@@ -5665,7 +5665,7 @@
       <div class="ob-step" data-step="1">
         <div class="ob-hero"><span class="ob-h" aria-hidden="true"><svg class="hm-nook" viewBox="-2 -2 64 64" fill="none" aria-hidden="true"><path class="hm-bracket" d="M16 40V22a6 6 0 0 1 6-6h18" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><circle class="hm-dot" cx="38" cy="38" r="9" fill="currentColor"/></svg><svg class="hm-i" viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor" transform="translate(32 31) scale(1.2) translate(-32 -31)"><rect x="25" y="30" width="14" height="22" rx="3.5"/><path transform="translate(9.6 -7.5) scale(.7)" d="M32 25c4.6 5.2 9 9.4 9 16.2C41 46.6 37 50 32 50s-9-3.4-9-8.8c0-4.2 2.3-7.3 5-10.2.3 3.6 1.7 5.8 4 6.6-1.3-4.3-.9-8.5 0-12.6z"/></g></svg></span></div>
         <h1 class="ob-title">Hey, I'm <span class="ob-agent-name">Inglen</span>.</h1>
-        <p class="ob-sub">I run on your PC and do real things on it.</p>
+        <p class="ob-sub ob-welcome">I run on your PC and do real things on it, with a model on this PC, a cloud key, or Claude Code and Codex. Whichever thinks, one switch decides what I may do without asking. I remember what matters, file changes can be undone, and your phone can reach me.</p>
       </div>
 
       <!-- ---- step 2: pick a brain ---- -->
@@ -5747,13 +5747,15 @@
         </div>
         <div class="ob-status-row" id="ob-voice-status"><span class="ob-dot"></span><span>checking voice…</span></div>
 
+        <!-- The language we talk in, asked whether or not I speak: replies follow it too. -->
+        <div class="ob-section" style="margin:18px 0 0">
+          <label for="ob-lang" class="ob-label" style="display:block">Language we talk in</label>
+          <select id="ob-lang" class="ob-select"></select>
+          <div class="ob-lang-note" id="ob-lang-note"></div>
+        </div>
+
         <!-- Voice picker, shown for "Talk and listen". A curated subset; Settings, Voice has all. -->
         <div id="ob-voice-picker" hidden style="margin-top:18px; padding:14px; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r);">
-          <div style="margin-bottom:12px;">
-            <label for="ob-lang" style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Language</label>
-            <select id="ob-lang" class="ob-select" style="width:100%;"></select>
-            <div class="ob-lang-note" id="ob-lang-note"></div>
-          </div>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:end;">
             <div>
               <label style="display:block; font-size:11px; color:var(--fg-faint); margin-bottom:6px;">Voice</label>
@@ -21642,6 +21644,8 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
     // Hidden on text-only so the card doesn't crowd people who don't want voice.
     const picker = document.getElementById('ob-voice-picker');
     if (picker) picker.hidden = obState.voice !== 'full';
+    const lang = document.getElementById('ob-lang');
+    if (lang) lang.dispatchEvent(new Event('change'));      // its note says whether replies are read out
   });
 });
 
@@ -21659,16 +21663,19 @@ document.querySelectorAll('#ob-body [data-voice]').forEach(b => {
     + '<option value="">More than one, work it out each time</option>';
   const mine = String(navigator.language || 'en').slice(0, 2).toLowerCase();
   sel.value = [...sel.options].some(o => o.value === mine) ? mine : 'en';
+  // Replies follow the language too (a profile line, onboarding.apply), so the
+  // note says what changes: the reply, and whether a voice can read it out.
   const paint = () => {
-    const lang = sel.value;
+    const lang = sel.value, name = (sel.selectedOptions[0] || {}).textContent || '';
     const group = VOICES_FOR[lang] && [...document.querySelectorAll('#setting-voice-name optgroup')].find(g => g.label === VOICES_FOR[lang]);
-    if (group && group.children.length) {
-      voiceSel.innerHTML = group.innerHTML;
-      note.textContent = '';
-    } else {
-      if (voiceSel.querySelector('optgroup[label="Male"]') == null) voiceSel.innerHTML = english;
-      note.textContent = (lang === 'en' || !lang) ? '' : 'Replies are read in an English voice.';
-    }
+    const voiced = !!(group && group.children.length);
+    if (voiced) voiceSel.innerHTML = group.innerHTML;
+    else if (voiceSel.querySelector('optgroup[label="Male"]') == null) voiceSel.innerHTML = english;
+    note.textContent = !lang ? "I'll answer in the language you write in."
+      : lang === 'en' ? ''
+      : obState.voice === 'text' ? `I'll answer in ${name}.`
+      : voiced ? `I'll answer in ${name}, out loud too.`
+      : `I'll answer in ${name}. Out loud, only an English voice for now.`;
   };
   sel.addEventListener('change', paint);
   paint();
@@ -21786,7 +21793,7 @@ async function obFinish(skipped) {
       approval_mode: _obSegValue('approval'),
       install_count: _obSegValue('count') === 'yes',
       audio: voiceOn ? (obState.audio || undefined) : undefined,
-      language: voiceOn && $('ob-lang') ? $('ob-lang').value : undefined,
+      language: $('ob-lang') ? $('ob-lang').value : undefined,     // replies follow it, spoken or not
     };
     if (obState.voice) answers.voice = obState.voice;
     if (!skipped) Object.assign(answers, { name, role, tone, browser });
@@ -22830,23 +22837,26 @@ const TOUR_STOPS = [
     try: 'Open it and see what this PC has.' },
   { sel: '#input', title: 'Ask for real things', text: 'Type, or press the mic and say it. I act on this PC: files, apps, the web.',
     try: 'Find the biggest files in my Downloads folder.' },
-  { sel: '#btn-mode', title: 'Before I act', text: 'Ask, Auto-edit or Auto: how much runs without asking. Deleting your files, sending and installing wait for your OK, and Logs shows every step I took.',
+  { sel: '#btn-mode', title: 'Before I act', text: 'Ask, Auto-edit or Auto: how much runs without asking. The same switch holds whatever I think with, Claude Code and Codex too. Deleting, sending and installing wait for your OK, and a file I changed can be put back with /undo.',
     try: 'Click it, or press Shift+Tab, to switch.' },
-  { sel: '.nav-btn[data-view="team"]', title: 'Helpers', text: 'Bigger jobs go to helpers working side by side. Watch them here, and click one to see what it is doing.',
+  { sel: '.nav-btn[data-view="team"]', title: 'Helpers', text: 'Bigger jobs go to helpers working side by side. Click one to see what it is doing. A coding agent works on its own copy of your repo, and you bring its changes in or throw them away.',
     try: 'Compare three note-taking apps, with helpers.' },
   { sel: '.nav-btn[data-view="memory"]', title: 'What I remember', text: 'What I have learned about you and your work, whichever brain you use. Read it, change it, or delete it.',
     try: 'Tell me something about yourself, then look here.' },
-  { sel: '.nav-btn[data-view="settings"]', title: 'Your phone and chat apps', text: 'Settings, Plus puts me on your phone, end to end encrypted, with Allow and Deny for risky steps. Connectors adds Telegram, Discord, WhatsApp and email. Name, voice and look are there too; this tour is under About.',
-    try: 'Open Settings, Plus to pair your phone.' },
+  { sel: '.settings-side-btn[data-st="plus"]', view: 'settings', title: 'Your phone', text: 'Plus puts me on your phone from anywhere, end to end encrypted. Your chats, calls with me, and Allow or Deny for a risky step while you are away.',
+    try: 'Turn on Plus here, then scan the code with your phone.' },
+  { sel: '.settings-side-btn[data-st="connect"]', view: 'settings', title: 'Chat apps and email', text: 'Free ways to reach me: a Telegram or Discord bot, WhatsApp, or email. Anyone new needs a code you approve. This tour is under About if you want it again.',
+    try: 'Set up a Telegram bot here.' },
 ];
 function startTour() {
   if (document.getElementById('tour-ring')) return;
   const ring = document.createElement('div'); ring.id = 'tour-ring';
   const card = document.createElement('div'); card.id = 'tour-card';
   document.body.append(ring, card);
-  let at = -1, last = null;
+  let at = -1, last = null, shown = 'chat';
   const end = () => {
     ring.remove(); card.remove();
+    if (shown !== 'chat') showView('chat');
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('resize', place);
     try { localStorage.setItem('hearth_tour_done', '1'); } catch {}
@@ -22877,6 +22887,10 @@ function startTour() {
     at += step;
     if (at >= TOUR_STOPS.length) { end(); return; }
     const st = TOUR_STOPS[at];
+    // A stop inside another view opens it first; the ring then moves there.
+    const view = st.view || 'chat';
+    if (view !== shown) { showView(view); shown = view; }
+    if (st.view === 'settings') { const b = document.querySelector(st.sel); if (b) b.click(); }   // its pane behind the card
     card.innerHTML = `<b>${esc(st.title)}</b><p>${esc(st.text)}</p>${st.try ? `<p class="tour-try">Try: ${esc(st.try)}</p>` : ''}
       <div class="tour-row"><span>${at + 1} of ${TOUR_STOPS.length}</span><button type="button" data-t="skip">Skip</button><button type="button" class="primary" data-t="next">${at === TOUR_STOPS.length - 1 ? 'Done' : 'Next'}</button></div>`;
     if (!_reduceMotion()) card.animate([{ opacity: 0.3, filter: 'blur(5px)' }, { opacity: 1, filter: 'blur(0)' }], { duration: 220, easing: 'ease-out' });
