@@ -1120,7 +1120,7 @@ def _mode() -> str:
         return "ask"
 
 
-async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
+async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None, model: str = "") -> int:
     """Send `text` into a session: its agent program carries it on in the session's own
     folder, with the session's own model and permissions. What the agent asks about
     comes to `ask`; what `drain` gives while it works reaches the turn it is on (Codex
@@ -1143,7 +1143,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
     draft = agent_launch.DRAFTS.pop(cid, None)
     if draft:
         try:
-            return await agent_launch.start(draft, text, emit, ask, drain=drain)
+            return await agent_launch.start(draft, text, emit, ask, drain=drain, model=model)
         finally:
             _remember(ran)
     d = read(agent, sid)
@@ -1174,7 +1174,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
         emit("error", message=f"{name} isn't installed on this PC any more.")
         return 2
     try:
-        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain)
+        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain, model=model)
     finally:
         _remember(ran)
 
@@ -1194,18 +1194,19 @@ def _remember(ran: List[Tuple[str, str]]) -> None:
 
 
 async def run_in(agent: str, exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ask, *,
-                 drain=None) -> int:
-    """Run `text` in the agent's own harness: session `sid`, or a new one in `cwd` when sid is empty."""
+                 drain=None, model: str = "") -> int:
+    """Run `text` in the agent's own harness: session `sid`, or a new one in `cwd` when sid is empty.
+    `model` (one of claude_brain.agent_models' ids) runs this turn on that model; '' keeps the session's."""
     try:
         if agent == "claude-code":
             from . import claude_sessions
             return await claude_sessions.run(exe, sid, cwd, text, emit, ask,
                                              mode="acceptEdits" if _mode() in ("edits", "auto") else "default",
-                                             drain=drain)
+                                             drain=drain, model=model)
         if agent == "codex":
             from . import codex_sessions
-            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain)
-        return await _say_acp(agent, sid, cwd, text, emit, ask)
+            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain, model=model)
+        return await _say_acp(agent, sid, cwd, text, emit, ask, model=model)
     except Exception as e:
         emit("error", message=f"{label(agent)} didn't run: {type(e).__name__}: {e}")
         return 1
@@ -1230,7 +1231,7 @@ async def _queue_codex(exe: List[str], sid: str, cwd: str, text: str) -> bool:
             await proc.wait()
 
 
-async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: Ask) -> int:
+async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: Ask, model: str = "") -> int:
     from . import acp_brain as A
     name = label(agent)
     proc = await A._start(agent, cwd)
@@ -1251,13 +1252,15 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
             if not how:
                 emit("error", message=f"{name} can't reopen a session from outside it.")
                 return 2
-            await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": []}, 120)
+            got_s = await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": []}, 120) or {}
         else:
-            opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
+            got_s = opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
             sid = str(opened.get("sessionId") or "")
             if not sid:
                 raise RuntimeError(f"{name} did not return a session ID")
         emit("session", agent=agent, id=sid)
+        if model:
+            await A.use_model(rpc, agent, sid, got_s, model)
         while not rpc.inbox.empty():           # loading replays the old messages: already shown
             m = rpc.inbox.get_nowait()
             if m and "id" in m and "method" in m:
