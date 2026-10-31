@@ -1152,9 +1152,17 @@ def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
     except OSError:
         mtime = 0
     return {"chat": cid, "title": d.get("title") or "", "source": agent, "agent": agent, "label": label(agent),
-            "working": working(msgs, mtime),
+            "working": working(msgs, mtime), **_reach(agent, sid, d.get("path") or ""),
             "cwd": d.get("cwd") or "", "messages": msgs[-last:], "more": max(0, len(msgs) - last),
             **({"earlier": True} if cut else {})}
+
+
+def _reach(agent: str, sid: str, path: str) -> Dict[str, str]:
+    """Said when a session is opened: open on the PC in a program the phone can't send into."""
+    if agent == "claude-code" and sid in _claude_live() and not claude_inbox(sid):
+        return {"reach": "This session is open in Claude Code on your PC, which doesn't take messages from "
+                         "outside it. Close it there, or start a new session here."}
+    return {}
 
 
 # ---------------------------------------------------------------- carrying on
