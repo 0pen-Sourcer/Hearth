@@ -31,8 +31,11 @@ def first_sentence(desc: str, cap: int = 160) -> str:
     return s or "(no description)"
 
 
-def main() -> int:
-    defs = hearth.TOOL_DEFINITIONS
+def main(dest: str = "") -> int:
+    # Built-ins only: plugin files in this PC's workspace aren't Inglen's tools.
+    from hearth import plugins
+    local = plugins._plugin_names(t.WORKSPACE)
+    defs = [d for d in hearth.TOOL_DEFINITIONS if d["name"] not in local]
     by_name = {d["name"]: d for d in defs}
     cat_of = dict(t._TOOL_CATEGORY)
     order = list(t._CATEGORY_ORDER)
@@ -85,7 +88,7 @@ def main() -> int:
             desc = desc.replace("|", "\\|")
             out.append(f"| `{name}`{mark} | {desc} |")
 
-    dest = os.path.join(ROOT, "docs", "TOOLS.md")
+    dest = dest or os.path.join(ROOT, "docs", "TOOLS.md")
     with open(dest, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
     print(f"wrote {dest}: {total} tools across {len(ordered_cats)} categories "
