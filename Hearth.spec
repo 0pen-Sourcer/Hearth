@@ -68,11 +68,18 @@ if not os.path.isfile(ICON_PATH):
     if not os.path.isfile(ICON_PATH):
         ICON_PATH = None
 
-# Version resource so the exe reports "Hearth" (not "Hearth.exe"/"Python") in
-# Task Manager Startup, file properties, and toast attribution.
-VERSION_PATH = os.path.join(REPO_ROOT, "assets", "version_info.txt")
-if not os.path.isfile(VERSION_PATH):
-    VERSION_PATH = None
+# A version resource per exe, written from the app's version, so Windows calls
+# each one Inglen (taskbar, Task Manager, file properties) though the files stay
+# Hearth*.exe for the updater (scripts/version_info.py).
+_vi_spec = __import__("importlib.util").util.spec_from_file_location(
+    "version_info", os.path.join(REPO_ROOT, "scripts", "version_info.py"))
+_vi = __import__("importlib.util").util.module_from_spec(_vi_spec)
+_vi_spec.loader.exec_module(_vi)
+_VI_DIR = os.path.join(REPO_ROOT, "build", "version_info")
+
+
+def VERSION_FOR(exe):
+    return _vi.write(_VI_DIR, exe, REPO_ROOT)
 
 # Datas: bundle ui.html, persona, anything in hearth/ that isn't a .py
 DATAS = [
@@ -492,7 +499,7 @@ exe_tray = EXE(
     console=False,         # GUI — no console window
     disable_windowed_traceback=False,
     icon=ICON_PATH,
-    version=VERSION_PATH,
+    version=VERSION_FOR("Hearth.exe"),
     onefile=False,
 )
 
@@ -522,7 +529,7 @@ exe_cli = EXE(
     upx=False,
     console=True,          # CLI — keep the console
     icon=ICON_PATH,
-    version=VERSION_PATH,
+    version=VERSION_FOR("Hearth-cli.exe"),
     onefile=False,
 )
 
@@ -556,7 +563,7 @@ exe_window = EXE(
     upx=False,
     console=False,        # GUI subprocess — no console
     icon=ICON_PATH,
-    version=VERSION_PATH,
+    version=VERSION_FOR("_HearthWindow.exe"),
     onefile=False,
 )
 
