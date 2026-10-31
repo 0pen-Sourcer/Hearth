@@ -1,8 +1,8 @@
 # Tools
 
-Inglen gives the model **109 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
+Inglen gives the model **110 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
 
-To keep the prompt small, **36** core tools load with their full description and **73** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **74** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -128,12 +128,13 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 
 | Tool | What it does |
 |---|---|
+| `call_phone` † | Ring the user's phone (the Inglen app, paired through Plus): when they answer, they hear `message` and can talk to you in the call |
 | `cancel_reminder` † | Cancel a scheduled reminder by id |
 | `connectors` † | The chat apps people reach this PC from: Telegram, Discord, WhatsApp |
 | `list_reminders` | List all upcoming (un-fired) reminders |
 | `notify` † | Show a desktop notification now |
 | `pause_reminder` † | Pause a reminder so it stops firing without deleting it, or resume it (paused=false) |
-| `send_to_phone` † | Send a message or a file (a screenshot, a photo, a PDF) from this PC to the user's phone |
+| `send_to_phone` † | Send a message or a file (a screenshot, a photo, a PDF) from this PC to the user's phone, where it arrives with a notification |
 | `set_reminder` | Schedule a desktop notification, optionally running a tool at the same moment (action_tool with action_args) |
 | `snooze_reminder` † | Push a reminder's due time forward by N minutes (default 10) |
 
