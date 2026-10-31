@@ -15,6 +15,8 @@ import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+import _home  # noqa: E402,F401  (never the real ~/.hearth: its Plus and paired phone)
 WS = tempfile.mkdtemp(prefix="hearth-channels-")
 os.environ["HEARTH_WORKSPACE"] = os.environ["JARVIS_WORKSPACE"] = WS
 os.environ["HEARTH_NO_ACTIVITY_LOG"] = "1"

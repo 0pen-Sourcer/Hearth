@@ -4798,7 +4798,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Speakers mode</div>
-            <div class="hint">For /listen in the terminal on speakers. Say "<span data-agent-name>JARVIS</span>, stop" to cut in.</div>
+            <div class="hint">For /listen in the terminal on speakers. Say "<span data-agent-name>Inglen</span>, stop" to cut in.</div>
           </div>
           <div class="switch" data-key="voice_half_duplex"></div>
         </div>
@@ -5477,10 +5477,10 @@
         </p>
         <div id="plus-body"><div class="models-empty">Checking…</div></div>
         <div id="callme" hidden>
-          <h4 style="margin:22px 0 8px;font-size:13px">Calls from <span data-agent-name>JARVIS</span></h4>
+          <h4 style="margin:22px 0 8px;font-size:13px">Calls from <span data-agent-name>Inglen</span></h4>
           <div class="field">
-            <div class="label"><div class="name">Let <span data-agent-name>JARVIS</span> call me</div>
-              <div class="hint">On your paired phone, when something below happens. Off until you turn it on: each call runs <span data-agent-name>JARVIS</span> like a chat does.</div></div>
+            <div class="label"><div class="name">Let <span data-agent-name>Inglen</span> call me</div>
+              <div class="hint">On your paired phone, when something below happens. Off until you turn it on: each call runs <span data-agent-name>Inglen</span> like a chat does.</div></div>
             <div class="switch" data-key="call_me"></div>
           </div>
           <div id="callme-more">
@@ -5496,7 +5496,7 @@
             </div>
             <div class="field">
               <div class="label"><div class="name">A question waits for you</div>
-                <div class="hint">When <span data-agent-name>JARVIS</span> has asked to go ahead and nobody has answered for
+                <div class="hint">When <span data-agent-name>Inglen</span> has asked to go ahead and nobody has answered for
                   <select id="callme-wait" style="min-width:0;padding:2px 6px;margin:0 2px;background:var(--bg-2);color:var(--fg);border:1px solid var(--border);border-radius:6px;font:inherit"></select>. You can answer it in the call.</div></div>
               <div class="switch" data-key="call_me_questions"></div>
             </div>
@@ -8161,7 +8161,7 @@ async function pollSubagentCompletions() {
 
 function _agentName() {
   // Source of truth for the displayed agent name (avatar letter + label).
-  // Falls back to JARVIS if settings haven't loaded yet - same default the
+  // Falls back to the app's default name until settings load - same default the
   // backend uses, so first render before settings load doesn't flicker.
   return (STATE.settings && STATE.settings.agent_name) || _defaultAgentName();
 }

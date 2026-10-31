@@ -874,6 +874,11 @@ def follow_saved_brain() -> Dict[str, Any]:
         s = keystore.read_settings(os.path.join(WORKSPACE, "settings.json"))
     except Exception:
         return {}
+    # A rename in the window reaches a bridge's next turn too, as it does the window's.
+    from . import default_agent_name, persona
+    name = str(s.get("agent_name") or "").strip() or default_agent_name()
+    os.environ["HEARTH_PERSONA_NAME"] = name
+    persona.NAME = name
     url = str(s.get("llm_url") or "").strip()
     if not url:
         return s

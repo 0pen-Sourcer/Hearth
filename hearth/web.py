@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 from . import env as _env
 from . import live_bus
-live_bus.IN_WINDOW = True              # this process serves /api/events
 import asyncio
 import base64
 import io
@@ -6575,6 +6574,12 @@ class _QuietHTTPServer(ThreadingHTTPServer):
     # browser waits on them for many seconds.
     request_queue_size = 128
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # This process serves /api/events now. Not set on import: a bridge or the terminal
+        # imports this module for its helpers, and its events must still go to the window.
+        live_bus.IN_WINDOW = True
+
     def handle_error(self, request, client_address):
         import sys
         exc = sys.exc_info()[1]
@@ -6697,7 +6702,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         keystore.app_start()               # keys an older version saved as plain text get sealed
     except Exception:
         pass
-    server = ThreadingHTTPServer((args.host, args.port), HearthHandler)
+    server = _QuietHTTPServer((args.host, args.port), HearthHandler)
     url = f"http://{args.host}:{args.port}/"
     print(f"\n  Inglen UI on {url}")
     print(f"  Model endpoint: {LOCAL_API_BASE}  (default; point it at a real brain in Settings)")

@@ -185,12 +185,47 @@ def paired() -> bool:
         return False
 
 
+NO_PLUS = "Inglen Plus isn't on here (Settings > Plus)"
+NO_PHONE = "no phone is paired with this PC (Settings > Plus)"
+HINT_FILE = "plus_hint.json"
+
+
+def plus_hint(chat: str) -> str:
+    """Once per chat, when they asked for something only the phone could do and Plus or a paired
+    phone is missing: what to tell them. '' after the first time in that chat."""
+    try:
+        from .tools import WORKSPACE
+        path = os.path.join(WORKSPACE, HINT_FILE)
+        try:
+            with open(path, encoding="utf-8") as f:
+                said = json.load(f)
+            said = said if isinstance(said, dict) else {}
+        except (OSError, ValueError):
+            said = {}
+        key = str(chat or "_")
+        if key in said:
+            return ""
+        said[key] = int(time.time())
+        if len(said) > 500:
+            said = dict(sorted(said.items(), key=lambda kv: kv[1])[-400:])
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(said, f)
+        os.replace(path + ".tmp", path)
+    except Exception:
+        return ""
+    return (" Tell them once, in a plain sentence: with Inglen Plus and their phone paired, you could send "
+            "things to their phone and call them; it's turned on in Settings > Plus. Don't bring it up "
+            "again in this chat.")
+
+
 def reach() -> str:
     """'' when a paired phone can be reached now, else why not, in a few words."""
     try:
-        from . import live_bus, relay_bridge
+        from . import live_bus, plus, relay_bridge
+        if not plus.active(fresh=False):
+            return NO_PLUS
         if not relay_bridge.phones():
-            return "no phone is paired with this PC (Settings > Plus)"
+            return NO_PHONE
         # The bridge hears of a call or a message through the window's event stream.
         if not relay_bridge.bridge_up() or not (live_bus.IN_WINDOW or live_bus.window_url()):
             return "the phone link isn't running; it runs while Inglen is open on this PC"
@@ -216,6 +251,9 @@ def ask_for(why: str, chat: str = "", asked: bool = True) -> str:
     on. Neither in their quiet hours, nor while they are at the PC. What happened, in a line for the agent."""
     try:
         r = rules()
+        no = reach()
+        if no in (NO_PLUS, NO_PHONE):
+            return f"Couldn't call: {no}." + (plus_hint(chat) if asked else "")
         if not asked and not r.get("call_me"):
             return (f"Not calling: they haven't let {agent_name(r)} call on its own (Settings > Plus). "
                     "Send it to the phone as a message instead.")
@@ -223,7 +261,6 @@ def ask_for(why: str, chat: str = "", asked: bool = True) -> str:
             return "Not calling: it's their quiet hours. Send it as a message instead."
         if at_pc():
             return "Not calling: they're at the PC right now. Tell them here."
-        no = reach()
         if no:
             return f"Couldn't call: {no}."
         from . import live_bus
