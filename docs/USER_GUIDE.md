@@ -75,7 +75,7 @@ A switch beside the send box decides what runs without asking:
 
 - **Ask** checks before anything acts on your machine.
 - **Auto-edit** lets file edits inside the workspace through.
-- **Auto** runs routine work on its own, and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs.
+- **Auto** runs routine work on its own. Deleting, moving, sending, uploading, pushing, publishing and installing ask, unless you asked for exactly that step or Inglen made the file in the past week (both below).
 
 In Auto, a reviewer reads your own messages in the chat and lets a step through without asking when you clearly asked for exactly that step ("delete the old log"). It never reads the brain's words or what a tool brought back. A model is used as the reviewer only once it has passed a check, which runs on its own the first time Auto meets it; Settings, Behavior, Auto's reviewer shows the result and turns it off. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask.
 

@@ -3748,7 +3748,7 @@ class JarvisCLI:
             from hearth.tools import approval_mode, APPROVAL_MODES
             words = {"ask": "Ask: asks before anything that acts on your machine",
                      "edits": "Auto-edit: file edits in the workspace go through; commands still ask",
-                     "auto": "Auto: routine work runs; deletes, sends, uploads, pushes and installs still ask"}
+                     "auto": "Auto: routine work runs; deletes, sends, pushes and installs ask unless you asked for exactly that"}
             arg = low[5:].strip()
             if not arg:
                 from hearth import term_pick
@@ -4904,7 +4904,7 @@ class JarvisCLI:
         print(f"  {C_TOOL}Before I change things on your PC:{C_RESET}")
         print(f"  {C_DIM}    1  ask me every time{C_RESET}")
         print(f"  {C_DIM}    2  just edit files in my folder, ask before commands{C_RESET}")
-        print(f"  {C_DIM}    3  go ahead, ask only before deleting or risky commands{C_RESET}")
+        print(f"  {C_DIM}    3  go ahead; deleting, sending and installing ask, unless you asked for exactly that{C_RESET}")
         m = ask("Pick 1-3 (Enter for 1)")
         answers["approval_mode"] = {"2": "edits", "3": "auto"}.get(m, "ask")
         return answers

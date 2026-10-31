@@ -5866,7 +5866,7 @@
           <div class="ob-seg ob-seg-3" id="ob-approval">
             <button type="button" data-approval="ask">Ask me<small>Every edit and command waits for your OK</small></button>
             <button type="button" data-approval="edits">Just edit files<small>Edits in my folder go ahead, commands still ask</small></button>
-            <button type="button" data-approval="auto">Go ahead<small>Deleting, sending, installing and risky commands still ask</small></button>
+            <button type="button" data-approval="auto">Go ahead<small>Deleting, sending and installing ask, unless you asked for exactly that</small></button>
           </div>
         </div>
         <div class="ob-section">
@@ -6738,7 +6738,7 @@ const APPROVAL_MODES = [
   { id: 'edits', name: 'Auto-edit', short: 'auto-edit', dot: 'var(--accent)',
     what: 'File edits in your workspace go through. Commands and everything else still ask.' },
   { id: 'auto', name: 'Auto', short: 'auto', dot: 'var(--warn)',
-    what: 'Runs routine work without asking. Deleting, moving or stopping things, sending or uploading anything, pushing, publishing and installing still ask.' },
+    what: 'Runs routine work without asking. Deleting, moving, sending, pushing and installing ask, unless you asked for exactly that or Inglen made the file this week. Power, disk, account and security changes always ask.' },
 ];
 function approvalMode() {
   const st = STATE.settings || {};
