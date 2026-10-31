@@ -117,6 +117,19 @@ routine = ["git status", "git reset HEAD notes.txt", "git branch -d merged", "gi
 stopped = [c for c in routine if not tools.mode_allows("run_command", {"command": c})]
 check("routine git still runs on Auto (stopped: %s)" % stopped, not stopped)
 
+# What each surface says Auto does matches the rules above: a delete or send
+# goes when the person asked for exactly it (the reviewer), not "always asks".
+import re                                                            # noqa: E402
+_here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ui = open(os.path.join(_here, "hearth", "ui.html"), encoding="utf-8").read()
+_cli = open(os.path.join(_here, "hearth_cli.py"), encoding="utf-8").read()
+_m = re.search(r"data-approval=\"auto\">Go ahead<small>([^<]+)</small>", _ui)
+check("onboarding's Auto says asking for exactly that lets it through", bool(_m) and "unless you asked" in _m.group(1))
+_m = re.search(r"\{ id: 'auto',[^}]*what: '([^']+)'", _ui)
+check("the mode menu's Auto says the same", bool(_m) and "unless you asked" in _m.group(1))
+check("the terminal's /mode and first run say the same",
+      _cli.count("unless you asked for exactly that") >= 2 and "risky commands" not in _cli)
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

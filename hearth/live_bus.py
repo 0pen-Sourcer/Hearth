@@ -136,9 +136,10 @@ def turn_event(chat: Optional[str], frm: str, turn: str, kind: str, f: Dict[str,
     if kind in ("thinking_chunk", "think"):
         return dict(base, type="think", text=str(f.get("content") or f.get("text") or ""))
     if kind == "tool_call" and f.get("name"):
-        from .term_render import tool_words
+        from .step_words import words
         from .channel_core import detail_of
-        return dict(base, type="step", words=tool_words(f["name"], f.get("args")), tool=f["name"],
+        w = f.get("words") if isinstance(f.get("words"), dict) else words(f["name"], f.get("args"), str(f.get("says") or ""))
+        return dict(base, type="step", words=w.get("done") or "", doing=w.get("doing") or "", tool=f["name"],
                     cmd=detail_of(f.get("args")))
     if kind == "tool_result":
         from .channel_core import out_of

@@ -55,7 +55,7 @@ check("setup is told speech is available exactly when the voice module says it i
 
 with sync_playwright() as pw:
     try:
-        browser = pw.chromium.launch(channel="msedge")
+        browser = pw.chromium.launch(channel="msedge", args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
     except Exception as e:
         print(f"skipped: no browser to run the page in ({type(e).__name__})")
         srv.shutdown()

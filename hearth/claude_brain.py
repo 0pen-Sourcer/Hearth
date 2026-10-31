@@ -588,6 +588,15 @@ def hearth_view(tool: str, inp: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     return tool, inp
 
 
+def says_of(tool: str, inp: Dict[str, Any]) -> str:
+    """What Claude Code says a step of its own is for (the `description` it writes
+    on a command or a task). Inglen's own tools' arguments are theirs, so not those."""
+    if tool.startswith("mcp__") or not isinstance(inp, dict):
+        return ""
+    d = inp.get("description")
+    return " ".join(d.split())[:120] if isinstance(d, str) else ""
+
+
 # Claude Code's bookkeeping, not work the user needs to see.
 _QUIET_TOOLS = {"ToolSearch", "TodoWrite", "mcp__hearth__approve"}
 
@@ -1382,7 +1391,8 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
                         name, shown = hearth_view(b.get("name", ""), b.get("input") or {})
                         tool_names[b.get("id", "")] = (name, time.time())
                         gap = True
-                        emit("tool_call", name=name, args=shown, id=b.get("id", ""))
+                        emit("tool_call", name=name, args=shown, id=b.get("id", ""),
+                             says=says_of(b.get("name", ""), b.get("input") or {}))
                     elif b.get("type") == "text" and not streamed and b.get("text"):
                         text_parts.append(b["text"])
                         emit("assistant_chunk", content=b["text"])

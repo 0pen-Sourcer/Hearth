@@ -878,7 +878,19 @@ def overview(start_engine: bool = True) -> Dict[str, Any]:
         path = file_path(fid, roots)
         return os.path.getsize(path) if path else 0
 
+    def parts_of(r: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Each file a model is made of, said as what it is: diffusion model, text encoder, VAE, LoRA."""
+        slots = {s["id"]: s for s in (cat["raw"].get(r["id"]) or {}).get("slots") or []}
+        out_parts = []
+        for sid, fid in (r["picks"] or {}).items():
+            s = slots.get(sid) or {}
+            out_parts.append({"kind": part_kind(sid, str(fid).split("/")[0]), "label": s.get("label") or sid,
+                              "file": str(fid).split("/")[-1]})
+        order = ["Diffusion model", "Text encoder", "Vision projector", "Tokenizer", "VAE", "Audio VAE", "LoRA"]
+        return sorted(out_parts, key=lambda p: order.index(p["kind"]) if p["kind"] in order else len(order))
+
     out["recipes"] = [{**{k: r[k] for k in ("id", "name", "description", "url", "video", "ready", "missing", "picks")},
+                       "parts": parts_of(r),
                        "has_model": any(s in (r["picks"] or {}) for s in _MAIN_SLOTS),
                        "size_gb": round(sum(size_of(f) for f in (r["picks"] or {}).values()) / 1e9, 1),
                        "own": bool(_own_main_file(r["picks"] or {}))}
@@ -980,6 +992,150 @@ def set_folder(path: str, add: bool = True) -> Dict[str, Any]:
     if running():
         stop()                 # the folders are given at start
     return {"ok": True, "roots": model_roots()}
+
+
+# ---------------------------------------------------------------- whole sets from Hugging Face
+# The engine's recipes name the parts a family needs but not where to get them.
+# ComfyUI's own repackaged repos (the Comfy-Org account) keep each family's files
+# split into the same category folders the engine reads (split_files/diffusion_models,
+# text_encoders, vae, loras), so a recipe is matched to the repo named like it and
+# each part it needs to the file in that folder that fits the part.
+PACKAGER = "Comfy-Org"
+_REPOS: Dict[str, Any] = {}
+
+# What each slot is, in a word people know.
+_PART_KIND = {"model": "Diffusion model", "diffusion_model": "Diffusion model",
+              "high_noise_diffusion_model": "Diffusion model", "uncond_diffusion_model": "Diffusion model",
+              "llm": "Text encoder", "t5xxl": "Text encoder", "clip_l": "Text encoder", "clip_g": "Text encoder",
+              "llm_vision": "Vision projector", "tokenizer": "Tokenizer", "vae": "VAE", "tae": "VAE",
+              "audio_vae": "Audio VAE"}
+
+
+def part_kind(slot_id: str, category: str = "") -> str:
+    if str(category).lower() == "loras":
+        return "LoRA"
+    return _PART_KIND.get(slot_id, str(slot_id).replace("_", " ").capitalize())
+
+
+def _packaged_repos() -> List[str]:
+    """The repackaged repos on Hugging Face, kept an hour."""
+    if _REPOS.get("at", 0) > time.time() - 3600 and _REPOS.get("ids"):
+        return _REPOS["ids"]
+    url = f"https://huggingface.co/api/models?author={PACKAGER}&limit=1000"
+    req = urllib.request.Request(url, headers={"User-Agent": "Inglen/0.7.6"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        ids = [m.get("id") for m in json.loads(r.read().decode("utf-8")) if m.get("id")]
+    _REPOS.update(ids=ids, at=time.time())
+    return ids
+
+
+def _repo_files(repo: str) -> List[dict]:
+    """A repo's model files as the engine would see them: {id, name, category, size, path}."""
+    from .llmserver import _repo_siblings
+    out = []
+    for sib in _repo_siblings(repo):
+        path = str(sib.get("rfilename") or "")
+        parts = path.split("/")
+        if len(parts) < 2 or not path.lower().endswith(_MODEL_EXT + (".json",)):
+            continue
+        cat = parts[-2].lower()
+        out.append({"id": f"{cat}/{parts[-1]}", "name": parts[-1], "category": cat,
+                    "size": int(sib.get("size") or (sib.get("lfs") or {}).get("size") or 0), "path": path})
+    return out
+
+
+def _needed_slots(recipe: Dict[str, Any]) -> List[dict]:
+    slots = recipe.get("slots") or []
+    needed = [s for s in slots if s.get("required")]
+    for group in recipe.get("required_any") or []:
+        if not any(s["id"] in group for s in needed):
+            pick = "vae" if "vae" in group else group[0]
+            needed += [s for s in slots if s["id"] == pick]
+    return needed
+
+
+def _extra(name: str, known: set) -> int:
+    """Words in a file name beyond the ones that matter: the plainest file is
+    the full-precision one every engine reads (not an fp4 or int8 variant)."""
+    return len(_words(name) - known)
+
+
+def _pick(slot: dict, files: List[dict], recipe: Dict[str, Any], needed: List[dict], used: set) -> Optional[dict]:
+    cats = _slot_cats(slot)
+    options = [f for f in files if f["category"] in cats and f["id"] not in used]
+    if not options:
+        return None
+    rw = _recipe_words(recipe)
+    mine = _words(slot.get("label") or "") | _words(slot["id"].replace("_", " "))
+    others = set()
+    for s in needed:
+        if s is not slot:
+            others |= _words(s.get("label") or "") | _words(s["id"].replace("_", " "))
+    others -= mine
+
+    def score(f: dict) -> tuple:
+        w = _words(f["name"])
+        fit = _fit(w, recipe) if slot["id"] in _MAIN_SLOTS or "diffusion_model" in slot["id"] else (0, 0)
+        return (fit, len(w & mine) - len(w & others), -_extra(f["name"], rw | mine), -len(f["name"]))
+    if slot["id"] in _MAIN_SLOTS or "diffusion_model" in slot["id"]:
+        # The model file carries every word of the recipe's id: flux1-fill-dev isn't FLUX.1 Schnell.
+        idw = _words(str(recipe.get("id") or "")) - {"checkpoint"}
+        options = [f for f in options if _fit(_words(f["name"]), recipe)[0] > 0
+                   and all(w in _compact(f["name"]) for w in idw)]
+        if not options:
+            return None
+    return max(options, key=score)
+
+
+def download_plan(recipe_id: str, recipe: Optional[Dict[str, Any]] = None,
+                  roots: Optional[List[str]] = None) -> Dict[str, Any]:
+    """The files that make a recipe whole, from the repackaged repo named like it:
+    {ok, repo, parts: [{slot, kind, label, repo, path, category, size, have}], missing, bytes}.
+    A part already in a model folder is marked `have` and not fetched again."""
+    if recipe is None:
+        got = api("GET", "/sdcpp/v1/recipes")
+        recipe = next((r for r in got.get("recipes") or [] if r.get("id") == recipe_id), None)
+        if recipe is None:
+            return {"ok": False, "error": got.get("error") or f"the engine has no recipe '{recipe_id}'"}
+    try:
+        repos = _packaged_repos()
+    except Exception as e:
+        return {"ok": False, "error": f"Hugging Face didn't answer: {type(e).__name__}"}
+    rw = _recipe_words(recipe)
+    ranked = sorted(((_fit(_words(r.split("/")[-1]), recipe), -_extra(r.split("/")[-1], rw), r) for r in repos),
+                    reverse=True)
+    ranked = [r for fit, _x, r in ranked if fit[0] > 0][:3]
+    needed = _needed_slots(recipe)
+    parts, used, home = [], set(), ""
+    for repo in ranked:                      # the best-named repo that has the model itself
+        try:
+            files = _repo_files(repo)
+        except Exception:
+            continue
+        main = next((s for s in needed if s["id"] in _MAIN_SLOTS), None)
+        if main is not None and _pick(main, files, recipe, needed, set()) is None:
+            continue
+        home = repo
+        for s in needed:
+            f = _pick(s, files, recipe, needed, used)
+            if f is not None:
+                used.add(f["id"])
+                parts.append({"slot": s["id"], "kind": part_kind(s["id"], s.get("category") or ""),
+                              "label": s.get("label") or s["id"], "repo": repo, "path": f["path"],
+                              "category": str(s.get("category") or f["category"]).lower(),
+                              "name": f["name"], "size": f["size"]})
+        break
+    if not home:
+        return {"ok": False, "error": f"no download set for {recipe.get('name') or recipe_id} was found",
+                "url": recipe.get("model_url") or ""}
+    roots = model_roots() if roots is None else roots
+    for p in parts:
+        p["have"] = any(os.path.isfile(os.path.join(root, p["category"], p["name"])) for root in roots)
+    got_slots = {p["slot"] for p in parts}
+    missing = [s.get("label") or s["id"] for s in needed if s["id"] not in got_slots]
+    return {"ok": not missing, "repo": home, "parts": parts, "missing": missing,
+            "bytes": sum(p["size"] for p in parts if not p["have"]), "url": recipe.get("model_url") or "",
+            "error": ("still needs " + ", ".join(missing)) if missing else ""}
 
 
 import atexit as _atexit  # noqa: E402

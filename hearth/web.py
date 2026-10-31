@@ -1959,6 +1959,19 @@ def _save_settings_locked(d: Dict) -> Dict:
     return cur
 
 
+def _model_folders() -> Dict[str, Any]:
+    """Every folder models are read from, for My Models and /models: the chat
+    models folder (one, changeable) and the folders other apps keep GGUFs in,
+    and the image and video folders (Inglen's own plus any added)."""
+    from . import llmserver, sdserver
+    chat = [{"path": str(p), "from": llmserver._source_label(p)} for p in llmserver._scan_paths_for_gguf()]
+    own = os.path.normcase(str(sdserver.models_dir()))
+    images = [{"path": d, "own": os.path.normcase(d) == own}
+              for d in sdserver.model_roots() if os.path.basename(d.rstrip("\\/")) != sdserver.VIEW]
+    return {"chat": llmserver.get_models_dir(), "chat_also": chat, "images": images,
+            "forge": sdserver.forge_models()}
+
+
 def _list_files(rel_path: str = "", place: str = "inglen") -> Dict:
     """List a folder inside one of the Files tab's places (the workspace by
     default). Never leaves that place's folder."""
@@ -2858,6 +2871,13 @@ class HearthHandler(BaseHTTPRequestHandler):
             # The image and video engine, its model folders and which models are ready.
             from . import sdserver
             return self._send_json(200, sdserver.overview(start_engine=self._query().get("start", ["1"])[0] != "0"))
+        if path == "/api/images/plan":
+            # The files that make one image or video model whole, for Discover's Download.
+            from . import sdserver
+            return self._send_json(200, sdserver.download_plan(self._query().get("recipe", [""])[0]))
+        if path == "/api/model-folders":
+            # Every folder models are read from: chat (GGUF) and image or video.
+            return self._send_json(200, _model_folders())
         if path == "/api/connectors/access":
             # Who asked to talk on a chat app, and who is let in.
             from . import channel_core as _cc
@@ -2872,6 +2892,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             # The opt-in install count: whether it is on, and exactly what it sends.
             from . import install_count
             return self._send_json(200, {"on": install_count.on(), "payload": install_count.payload()})
+        if path == "/api/notify-targets":
+            # Where a reminder for the phone would go now: the Inglen app (Plus) and the chat apps.
+            from . import reminders as _rem
+            return self._send_json(200, _rem.phone_targets())
         if path == "/api/cards":
             # Where each chat stands, for the Memory tab's "Going on".
             from . import memory_cards
@@ -3401,7 +3425,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/events":
             # Another process (a bridge, the terminal) saying what changed; passed to every listener.
             ev = self._read_json()
-            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn"):
+            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn", "phone_notice"):
                 live_bus.publish(ev)
             return self._send_json(200, {"ok": True})
         if path == "/api/cancel":
@@ -4975,7 +4999,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 from . import sdserver
                 if category == "auto":
                     category = sdserver.folder_for(os.path.basename(filename))
-                if category not in sdserver.CATEGORIES or category == "recipes":
+                # The engine's category folders (a recipe may name one beyond the usual few).
+                if not re.fullmatch(r"[a-z][a-z_]{1,39}", category) or category == "recipes":
                     return self._stream_model_download("", "", error=f"no such model folder '{category}'")
                 return self._stream_model_download(repo, filename, dest_dir=str(sdserver.models_dir() / category),
                                                    save_as=os.path.basename(filename))

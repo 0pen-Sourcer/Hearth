@@ -424,7 +424,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                 if e.get("name") == "web_search" and not args.get("query") and e.get("result"):
                     # Codex steps saved before their query was read kept it as the result.
                     args = {"query": str(e.get("result"))[:90]}
-                step = {"w": tool_words(e.get("name") or "", args), "tool": e.get("name") or "",
+                said = e.get("words") if isinstance(e.get("words"), dict) else {}
+                step = {"w": said.get("done") or tool_words(e.get("name") or "", args), "tool": e.get("name") or "",
                         "site": cc.site_of(args)}
                 if cc.detail_of(args):
                     step["cmd"] = cc.detail_of(args)
@@ -720,7 +721,7 @@ def story(agent_id: str) -> Dict[str, Any]:
     """One helper's work so far, as the window's panel beside the room shows
     it, each step already said in words."""
     from . import subagents
-    from .term_render import _VERB
+    from .step_words import lead
     got = _window("GET", "/api/team/story?id=" + urllib.parse.quote(agent_id, safe=""), timeout=10)
     if "steps" not in got:
         got = subagents.agent_story(agent_id)
@@ -730,8 +731,7 @@ def story(agent_id: str) -> Dict[str, Any]:
     for st in (got.get("steps") or [])[-60:]:
         st = dict(st)
         if st.get("tool"):
-            verb = _VERB.get(st["tool"], (str(st["tool"]).replace("_", " ").capitalize(), ""))[0]
-            st["w"] = f"{verb} {st.get('what') or ''}".strip()
+            st["w"] = f"{lead(st['tool'], st.get('result') is not None)} {st.get('what') or ''}".strip()
         if st.get("result") is not None:
             st["result"] = str(st["result"])[:300]
         steps.append(st)
@@ -2123,6 +2123,13 @@ class Bridge:
             # Checked again here: the rules may have changed since it was asked for.
             if call_me.may_call(str(ev.get("reason") or ""))[0]:
                 threading.Thread(target=self.ring, args=(ev,), daemon=True, name="relay-ring").start()
+            return
+        if kind == "phone_notice":
+            # A reminder (or the notify tool) for the phone: a notification on each paired phone.
+            note = {"kind": "reminder", "title": str(ev.get("title") or "Inglen"),
+                    "body": str(ev.get("body") or ""), "c": str(ev.get("c") or "")}
+            threading.Thread(target=lambda: [self.adapter.notify(chat, note, urgent=True) for chat in phones],
+                             daemon=True, name="relay-notice").start()
             return
         out: Optional[Dict[str, Any]] = None
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):

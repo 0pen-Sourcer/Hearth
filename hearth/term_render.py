@@ -66,53 +66,10 @@ def plain(s: str) -> str:
 
 
 # ---------------------------------------------------------------- words
-_VERB = {
-    "run_command": ("Ran", "command"), "start_job": ("Started", "command"),
-    "read_file": ("Read", "path"), "write_file": ("Wrote", "path"), "edit_file": ("Edited", "path"),
-    "list_dir": ("Listed", "path"), "delete_file": ("Deleted", "path"), "move_file": ("Moved", "src"),
-    "find_files": ("Searched for", "pattern"), "grep": ("Searched for", "pattern"),
-    "grep_search": ("Searched for", "pattern"), "find_file": ("Looked for", "name"),
-    "web_search": ("Searched the web for", "query"), "fetch_url": ("Opened", "url"), "browse": ("Opened", "url"),
-    "web_fetch": ("Read", "url"), "open_url": ("Opened", "url"), "search_chats": ("Searched past chats for", "query"),
-    "read_chat": ("Read an earlier chat", ""), "load_model": ("Loaded", "model"), "list_models": ("Listed the models", ""),
-    "memory_save": ("Remembered", "name"), "memory_recall": ("Looked up", "query"), "memory_forget": ("Forgot", "name"),
-    "set_reminder": ("Set a reminder:", "what"), "open_app": ("Opened", "name"), "screenshot": ("Took a screenshot", ""),
-    "view_image": ("Looked at", "path"), "spawn_subagent": ("Started a helper:", "persona"),
-    "generate_image": ("Made an image:", "prompt"), "disk_usage": ("Measured", "path"),
-}
-_ARG_KEYS = ("command", "path", "query", "url", "name", "pattern", "prompt", "what", "text", "app")
-
-
-def tool_words(name: str, args: Optional[Dict[str, Any]]) -> str:
-    """A tool call said plainly: "Ran echo hi", "Read notes.txt"."""
-    args = args if isinstance(args, dict) else {}
-    if name == "agent_sessions":
-        act = str(args.get("action") or "list")
-        who = _session_agent(args.get("session"))
-        return {"read": f"Read {who}'s session", "send": f"Sent a message to {who}"}.get(
-            act, "Looked at the coding agents' sessions")
-    verb, key = _VERB.get(name, (name.replace("_", " ").capitalize(), ""))
-    val = args.get(key) if key else None
-    if val is None and name not in _VERB:
-        val = next((args[k] for k in _ARG_KEYS if args.get(k)), None)
-    val = " ".join(str(val).split()) if val else ""
-    if key == "path" and val:
-        val = val.replace(os.path.expanduser("~"), "~")
-    if key in ("pattern", "query") and val and name not in ("web_search", "search_chats", "memory_recall"):
-        val = f"\u201c{val[:88]}\u201d"          # a pattern like round( reads as what it is
-    if key == "url" and val:
-        val = re.sub(r"^https?://(www\.)?", "", val).rstrip("/")
-    return f"{verb} {val[:90]}".strip() if val else verb
-
-
-def _session_agent(cid: Any) -> str:
-    """The agent a session id (as_<agent>_<id>) belongs to, by its name."""
-    try:
-        from .agent_sessions import label, parse_chat
-        got = parse_chat(str(cid or ""))
-        return label(got[0]) if got else "a coding agent"
-    except Exception:
-        return "a coding agent"
+def tool_words(name: str, args: Optional[Dict[str, Any]], says: str = "") -> str:
+    """A finished tool call said plainly: "Ran echo hi", "Read notes.txt" (hearth/step_words.py)."""
+    from .step_words import done
+    return done(name, args, says)
 
 
 # ---------------------------------------------------------------- markdown
@@ -153,7 +110,7 @@ class Turn:
         self.stats: Dict[str, Any] = {}
         self.usage: Dict[str, Any] = {}
         self.context: Dict[str, Any] = {}       # the engine's last context count
-        self.pending_tools: Dict[str, str] = {}
+        self.waiting: List[tuple] = []          # steps running: (id, tool, words once done)
         self._said_hint = False
         self.ended = False             # the model said goodbye (end_session)
         self.table: List[str] = []     # table lines of the reply, drawn when it ends
@@ -271,22 +228,44 @@ class Turn:
 
     def _on_tool_call_partial(self, name: str = "", **_):
         self._end_thinking()
-        self.status = "Writing " + tool_words(name, {}).lower()
+        from .step_words import doing
+        self.status = doing(name, {})
 
-    def _on_tool_call(self, name: str = "", args: Any = None, id: str = "", **_):
+    def _on_tool_call(self, name: str = "", args: Any = None, id: str = "", words: Any = None, says: str = "", **_):
         self._flush_text()
         self._end_thinking()
         if name == "end_session":           # the goodbye itself is the reply; the terminal closes after
             self.ended = True
             return
-        self.status = tool_words(name, args if isinstance(args, dict) else {})
-        self.out(f"{ACCENT}●{RESET} {self.status}")
-        if id:
-            self.pending_tools[id] = name
+        if not isinstance(words, dict):
+            from .step_words import words as _words
+            words = _words(name, args if isinstance(args, dict) else {}, says)
+        # Said in the present while it runs; its line goes up in the past once it is done.
+        self.status = words.get("doing") or words.get("done") or name
+        self.waiting.append((id or "", name, words.get("done") or self.status))
 
-    def _on_tool_result(self, name: str = "", content: Any = "", ok: Any = None, error: Any = None, **f):
+    def _take(self, name: str, id: str = "") -> str:
+        """The finished words of the step this result belongs to."""
+        for i, (wid, wname, said) in enumerate(self.waiting):
+            if (id and wid == id) or (not id and wname == name):
+                del self.waiting[i]
+                return said
+        if self.waiting and not id:
+            return self.waiting.pop(0)[2]
+        from .step_words import done
+        return done(name, {})
+
+    def _flush_waiting(self) -> None:
+        """Steps that never said they finished still get their line."""
+        for _wid, _name, said in self.waiting:
+            self.out(f"{ACCENT}●{RESET} {said}")
+        self.waiting = []
+
+    def _on_tool_result(self, name: str = "", content: Any = "", ok: Any = None, error: Any = None,
+                        id: str = "", **f):
         if name == "end_session":
             return
+        self.out(f"{ACCENT}●{RESET} {self._take(name, id)}")
         text = str(content if content is not None else f.get("result") or "")
         bad = ok is False or bool(error) or text.lstrip().lower().startswith(("error", "denied", "refused"))
         first = " ".join(text.split())[:100] or ("failed" if bad else "done")
@@ -324,7 +303,8 @@ class Turn:
         self.status = message
 
     def _on_slow_tool(self, name: str = "", **_):
-        self.status = f"{tool_words(name, {})} (taking a while)"
+        from .step_words import doing
+        self.status = f"{doing(name, {})} (taking a while)"
 
     def _on_subagent_done(self, **f):
         who = f.get("name") or f.get("persona") or "a helper"
@@ -346,11 +326,13 @@ class Turn:
             self.out(f"{DIM}↳ remembered: {', '.join(map(str, names))[:120]}{RESET}")
 
     def _on_cancelled(self, **_):
+        self._flush_waiting()
         self._flush_text()
         self._end_thinking()
         self.out(f"{DIM}■ stopped{RESET}")
 
     def _on_error(self, message: str = "", **_):
+        self._flush_waiting()
         self._flush_text()
         self._end_thinking()
         self.out(f"{ERR}{message}{RESET}")
@@ -363,6 +345,7 @@ class Turn:
         self.turn_messages = list(messages or [])
 
     def _on_done(self, stats: Any = None, **f):
+        self._flush_waiting()
         self._flush_text()
         self._end_thinking()
         if isinstance(stats, dict):

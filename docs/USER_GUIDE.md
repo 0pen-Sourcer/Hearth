@@ -75,7 +75,7 @@ A switch beside the send box decides what runs without asking:
 
 - **Ask** checks before anything acts on your machine.
 - **Auto-edit** lets file edits inside the workspace through.
-- **Auto** runs routine work on its own, and still asks before anything that deletes, moves, sends, uploads, pushes, publishes or installs.
+- **Auto** runs routine work on its own. Deleting, moving, sending, uploading, pushing, publishing and installing ask, unless you asked for exactly that step or Inglen made the file in the past week (both below).
 
 In Auto, a reviewer reads your own messages in the chat and lets a step through without asking when you clearly asked for exactly that step ("delete the old log"). It never reads the brain's words or what a tool brought back. A model is used as the reviewer only once it has passed a check, which runs on its own the first time Auto meets it; Settings, Behavior, Auto's reviewer shows the result and turns it off. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask.
 
@@ -113,7 +113,7 @@ Say it however you like. Inglen works out the exact time and reads back the day 
 | `next monday at 10am` | the coming Monday, 10:00 |
 | `every weekday at 9am` | a recurring reminder |
 
-When it's time you get a Windows notification, and Inglen says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone too** on (Settings, Connectors), it reaches your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what Inglen knows about you.
+When it's time you get a Windows notification, and Inglen says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone** on (Settings, Behavior, Notifications), it reaches the Inglen app on your phone (with Plus) and your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what Inglen knows about you.
 
 ---
 
@@ -153,7 +153,7 @@ Type `@` in the message box to pick a past chat by its title or a file or folder
 
 ## Images and video
 
-Ask for a picture or a short video in plain words. **Models, My Models** lists image and video models beside the chat ones (filter by Chat, Images or Video), each with Load, Unload and Delete. If the image engine (stable-diffusion.cpp) isn't on your PC yet, the same page installs it for your graphics card. It finds models in `~/.hearth/image-models` or in a ComfyUI or WebUI models folder you add under **Image and video setup**, which also says what each model family still needs. A ready model on your PC is used first; with a key for xAI Grok, OpenAI or Google Gemini saved, the cloud works too, whatever the brain. Say "on my PC" or "in the cloud" to choose. A model is recognised by its file name for now, so one with a name all its own isn't listed yet.
+Ask for a picture or a short video in plain words. **Models, My Models** lists image and video models beside the chat ones (filter by Chat, Images or Video), each with Load, Unload and Delete. If the image engine (stable-diffusion.cpp) isn't on your PC yet, the same page installs it for your graphics card. **Models, Discover, Image & video** lists every model family the engine runs, and Download fetches one whole: the diffusion model, its text encoder, its VAE and any LoRA it needs, through the Downloads list. It finds models in `~/.hearth/image-models` or in a ComfyUI or WebUI models folder you add under **My Models, Model folders**, where the chat models folder is set too. A ready model on your PC is used first; with a key for xAI Grok, OpenAI or Google Gemini saved, the cloud works too, whatever the brain. Say "on my PC" or "in the cloud" to choose. A model is recognised by its file name for now, so one with a name all its own isn't listed yet.
 
 ---
 

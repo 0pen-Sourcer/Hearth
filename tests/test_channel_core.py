@@ -196,6 +196,32 @@ check("reminders stay off the phone unless asked", len(posted) == n)
 with open(os.path.join(WS, "settings.json"), "w", encoding="utf-8") as f:
     json.dump({"onboarded": True, "approval_mode": "ask", "phone_reminders": True}, f)
 check("and go to it when asked", reminders._push_phone("Stretch", "stand up") and len(posted) == n + 1)
+# The Inglen app on a paired phone (Plus) gets it too, through the phone bridge.
+from hearth import live_bus, relay_bridge  # noqa: E402
+_bus, _phones = [], relay_bridge.phones
+real_publish = live_bus.publish
+live_bus.publish = lambda ev: _bus.append(ev)
+relay_bridge.phones = lambda: [{"id": "p1", "name": "Phone"}]
+reminders._push_phone("Stretch", "stand up", reminders.chat_id_for({"id": "r9"}))
+got = [e for e in _bus if e.get("kind") == "phone_notice"]
+check(f"a paired phone's app is sent the reminder ({got})",
+      bool(got) and got[-1]["body"] == "stand up" and got[-1]["c"] == "rem_r9")
+check("where it goes is said", reminders.phone_targets() == {"app": 1, "chat_apps": ["telegram"]})
+told = []
+_br = relay_bridge.Bridge.__new__(relay_bridge.Bridge)
+_br.adapter = type("A", (), {"rooms": {"p1": object()}, "name": "relay",
+                             "notify": lambda s, chat, obj, urgent=False: told.append((chat, obj, urgent))})()
+if got:
+    _br.on_window_event(got[-1])
+for _ in range(50):
+    if told:
+        break
+    __import__("time").sleep(0.05)
+check(f"the phone bridge shows it as a notification ({told})",
+      bool(told) and told[0][0] == "p1" and told[0][1]["kind"] == "reminder" and told[0][1]["title"] == "Stretch")
+live_bus.publish, relay_bridge.phones = real_publish, _phones
+with open(os.path.join(WS, "settings.json"), "w", encoding="utf-8") as f:
+    json.dump({"onboarded": True, "approval_mode": "ask", "phone_reminders": False}, f)
 urllib.request.urlopen = real_urlopen
 
 check("looking at the connectors never asks", tools.mode_allows("connectors", {"action": "status"})

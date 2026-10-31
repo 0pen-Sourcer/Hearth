@@ -1,8 +1,8 @@
 # Tools
 
-Inglen gives the model **109 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
+Inglen gives the model **108 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
 
-To keep the prompt small, **36** core tools load with their full description and **73** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **36** core tools load with their full description and **72** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -179,9 +179,3 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `ask_user` † | Ask the person to choose between options before going on: two valid approaches, which of several matches to act on, an ambiguous file or folder |
 | `end_session` † | Call this when the user is clearly wrapping up the conversation (says bye, goodbye, see you, thanks that's all, etc.) |
 | `worklog` † | Your scratch pad for a long task: note findings as you go and read them back instead of re-reading the sources |
-
-## Other
-
-| Tool | What it does |
-|---|---|
-| `system_vibe` † | Quick PC health snapshot: CPU %, RAM, top processes, GPU VRAM, and a vibe-check verdict |

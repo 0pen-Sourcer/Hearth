@@ -26,6 +26,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import env as _env
+from . import node_env as _node_env
 from . import keystore as _keystore
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -433,7 +434,8 @@ def _run_job(aid: str, kind: str, argv: List[str], timeout: float) -> Tuple[int,
     lines: List[str] = []
     try:
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                text=True, encoding="utf-8", errors="replace", creationflags=_NO_WINDOW)
+                                text=True, encoding="utf-8", errors="replace", creationflags=_NO_WINDOW,
+                                env=_node_env.child_env(_agent_env()))
     except Exception as e:
         job.update(status="error", ended=time.time(), error=f"{type(e).__name__}: {e}")
         with _JOBS_LOCK:
@@ -484,7 +486,7 @@ def _update(aid: str) -> Dict[str, Any]:
     package = NPM_PACKAGES.get(aid)
     if not package or aid not in AGENTS or not find(aid):
         return {"ok": False, "error": "that agent isn't one Inglen can update"}
-    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    npm = _node_env.npm()
     if not npm:
         return {"ok": False, "error": "npm isn't on this PC, so the update can't run"}
     code, lines, cancelled = _run_job(aid, "update", [npm, "install", "-g", package + "@latest", "--loglevel", "http"], 600)
@@ -556,7 +558,7 @@ def how_to_get(aid: str) -> str:
     PC), or "site" (its maker's page)."""
     if aid in SETUP:
         return "setup"
-    if aid in NPM_PACKAGES and (shutil.which("npm.cmd") or shutil.which("npm")):
+    if aid in NPM_PACKAGES and _node_env.npm():
         return "install"
     return "site"
 
@@ -593,7 +595,7 @@ def _install(aid: str) -> Dict[str, Any]:
         argv = (["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", line]
                 if sys.platform == "win32" else ["bash", "-lc", line])
     else:
-        npm = shutil.which("npm.cmd") or shutil.which("npm")
+        npm = _node_env.npm()
         if not npm or not how.get("npm"):
             return {"ok": False, "error": how.get("needs") or "there is no installer for it on this system"}
         argv = [npm, "install", "-g", how["npm"], "--loglevel", "http"]
@@ -776,7 +778,7 @@ def _direct_argv(exe: str) -> List[str]:
     if script.lower().endswith(".exe"):           # newer shims wrap a native binary
         return [script] if os.path.isfile(script) else [exe]
     node = os.path.join(os.path.dirname(exe), "node.exe")
-    node = node if os.path.isfile(node) else shutil.which("node")
+    node = node if os.path.isfile(node) else _node_env.node()
     if node and os.path.isfile(script):
         return [node, script]
     return [exe]

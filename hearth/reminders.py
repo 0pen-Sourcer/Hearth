@@ -23,7 +23,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .tools import WORKSPACE, atomic_write_json
 
@@ -432,16 +432,44 @@ _watcher_thread: Optional[threading.Thread] = None
 _watcher_stop = threading.Event()
 
 
-def _push_phone(title: str, body: str) -> bool:
-    """With "send reminders to my phone too" on (Settings > Connectors), the
-    reminder also goes to the chat app they connected. Never raises."""
+def phone_targets() -> Dict[str, Any]:
+    """Where a notice for the phone would go now: the Inglen app on paired phones
+    (Plus, through the relay) and the chat apps connected with someone let in."""
+    out: Dict[str, Any] = {"app": 0, "chat_apps": []}
+    try:
+        from . import relay_bridge
+        out["app"] = len(relay_bridge.phones())
+    except Exception:
+        pass
+    try:
+        from . import channel_core
+        out["chat_apps"] = [ch for ch in ("telegram", "discord")
+                            if channel_core.config_of(ch).get("bot_token") and channel_core.owner_of(ch)]
+    except Exception:
+        pass
+    return out
+
+
+def _push_phone(title: str, body: str, chat: str = "") -> bool:
+    """With "send reminders to my phone" on (Settings > Behavior > Notifications),
+    a notice also goes to the Inglen app on paired phones and to the chat app
+    they connected. Never raises."""
     try:
         from .tools import WORKSPACE as _WS
         with open(os.path.join(_WS, "settings.json"), encoding="utf-8") as _sf:
             if not json.load(_sf).get("phone_reminders"):
                 return False
-        from . import channel_core
-        return channel_core.push_any(f"{title}: {body}" if title and title != "Inglen" else body)
+        where = phone_targets()
+        sent = False
+        if where["app"]:
+            # The phone bridge passes it on as a notification (relay_bridge.on_window_event).
+            from . import live_bus
+            live_bus.publish({"kind": "phone_notice", "title": title or "Inglen", "body": body, "c": chat})
+            sent = True
+        if where["chat_apps"]:
+            from . import channel_core
+            sent = channel_core.push_any(f"{title}: {body}" if title and title != "Inglen" else body) or sent
+        return sent
     except Exception:
         return False
 
@@ -713,14 +741,15 @@ def desktop_notify(title: str, body: str, reminder_id: Optional[str] = None) -> 
     the watcher firing it on this thread) gets Snooze and Done where the
     desktop can show them, else the plain notice."""
     rid = reminder_id or getattr(_firing, "rid", None)
+    chat = chat_id_for({"id": rid}) if rid else ""      # a tap on the phone opens the reminder's chat
     if rid:
         try:
             if notify_reminder(rid, title, body):
-                _push_phone(title, body)
+                _push_phone(title, body, chat)
                 return True
         except Exception:
             pass
-    _push_phone(title, body)  # phone push gets the full text, it has no limit
+    _push_phone(title, body, chat)  # phone push gets the full text, it has no limit
     # The Windows tray-balloon struct caps the body at 256 chars and the title
     # at 64. Overshooting raises inside the notifier's own worker thread, which
     # no try/except here can catch, so the toast just never appeared. Trim first.

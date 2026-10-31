@@ -3644,10 +3644,13 @@ def download_from_hf_repo(repo: str, filename: str,
     never looks complete."""
     if not repo or not filename:
         return {"ok": False, "error": "repo and filename required"}
-    if not filename.lower().endswith(".gguf"):
+    # Chat models are GGUF; an image or video model's parts (given a folder of their own) can also be safetensors.
+    image_part = bool(dest_dir) and filename.lower().endswith((".safetensors", ".sft", ".ckpt", ".pt", ".pth", ".bin", ".json"))
+    if not filename.lower().endswith(".gguf") and not image_part:
         return {"ok": False, "error": "only .gguf files supported"}
     safe_name = (save_as or filename).split("/")[-1]
     dest = (Path(dest_dir) if dest_dir else MODELS_DIR) / safe_name
+    dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         record_model_source(str(dest), repo)   # backfill if it predates the map
         return {"ok": True, "path": str(dest), "already": True}
