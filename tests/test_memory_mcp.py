@@ -1,7 +1,7 @@
 """Hearth's memory as its own MCP server, for the coding agents on this PC.
 
 Started the way an agent starts it (shared_memory.launch), over stdio: it offers
-the memory tools and nothing else, a fact saved through it is in Hearth's own
+the memory tools and call_me and nothing else, a fact saved through it is in Hearth's own
 memory, and it can be read back. A throwaway workspace.
 
     .\\.venv\\Scripts\\python.exe tests\\test_memory_mcp.py
@@ -45,9 +45,9 @@ async def main():
         async with ClientSession(r, w) as s:
             await s.initialize()
             names = sorted(t.name for t in (await s.list_tools()).tools)
-            check(f"it offers the memory tools and nothing else {names}",
+            check(f"it offers the memory tools and call_me, and nothing else {names}",
                   names == sorted(["memory_recall", "memory_save", "memory_list", "memory_forget",
-                                   "search_chats", "read_chat", "whats_going_on"]))
+                                   "search_chats", "read_chat", "whats_going_on", "call_me"]))
             saved = await s.call_tool("memory_save", {"title": "editor-choice", "type": "user",
                                                       "description": "Uses VS Code with the Vim keys."})
             got = await s.call_tool("memory_recall", {"query": "editor"})
