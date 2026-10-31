@@ -145,6 +145,15 @@ with sync_playwright() as pw:
     pg.wait_for_selector("[data-plus-forget]", timeout=10000)
     check("Yes, confirm pairs the phone under its name", [p["name"] for p in RB.phones()] == ["Pixel"]
           and "Pixel" in pg.inner_text("#plus-body"))
+    check("with the phone link stopped, its row says so", "phone link isn't running" in pg.inner_text("#plus-body"))
+    _running_was = web._bridge_running
+    web._bridge_running = lambda ch: True
+    RB._seen(RB.phones()[0]["id"], True)
+    pg.evaluate("renderPlus()")
+    pg.wait_for_function("document.getElementById('plus-body').innerText.includes('connected')", timeout=10000)
+    check("a phone connected now says so in its row", "connected" in pg.inner_text("#plus-body"))
+    pg.screenshot(path=os.path.join(home, "plus_phone_status.png"))
+    web._bridge_running = _running_was
 
     # ------------------------------------------------ calls from the agent
     shots = os.environ.get("CALL_SHOTS") or home

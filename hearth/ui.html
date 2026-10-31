@@ -19130,8 +19130,17 @@ async function renderPlus() {
     const p = s.pairing || {};
     html += `<h4 style="margin:18px 0 8px;font-size:13px">Phones</h4>`;
     if (!s.relay) html += `<div class="engine-note">This build doesn't have the relay's address yet, so phones can't be paired.</div>`;
-    html += (s.phones || []).map(ph => row(esc(ph.name), 'paired ' + (ph.at ? new Date(ph.at * 1000).toLocaleDateString() : ''),
-      `<button class="model-action is-secondary" data-plus-forget="${esc(ph.id)}">Forget</button>`)).join('');
+    // Each phone as the phone link last saw it: connected now, or when it was last here.
+    const ago = (t) => { const m = Math.round((Date.now() / 1000 - t) / 60);
+      return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t * 1000).toLocaleDateString(); };
+    html += (s.phones || []).map(ph => {
+      const l = (s.live || {})[ph.id];
+      const now = !s.bridge ? `<span style="color:var(--fg-faint)">The phone link isn't running</span>`
+        : l && l.on ? `<span class="model-badge badge-loaded">connected</span>`
+        : l ? `last here ${ago(l.at)}` : 'not connected yet';
+      return row(esc(ph.name), `${now} · paired ${ph.at ? new Date(ph.at * 1000).toLocaleDateString() : ''}`,
+        `<button class="model-action is-secondary" data-plus-forget="${esc(ph.id)}">Forget</button>`);
+    }).join('');
     if (p.state === 'confirm') {
       html += `<div class="server-card" style="text-align:center;padding:18px">
         <div style="color:var(--fg-dim);margin-bottom:10px">Does your phone show these numbers?</div>
@@ -19198,6 +19207,8 @@ async function renderPlus() {
       else _plusPoll = setTimeout(watch, 1500);
     };
     _plusPoll = setTimeout(watch, 1500);
+  } else if ((s.phones || []).length && (s.pairing || {}).state === 'none' && pane && !pane.hidden) {
+    _plusPoll = setTimeout(() => { if (!pane.hidden) renderPlus(); }, 10000);   // a phone coming and going
   }
 }
 let _plusQR = null;

@@ -137,6 +137,65 @@ def cancel_pairing() -> Dict[str, Any]:
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- what happened, where the rest is
+
+LIVE_FILE = os.path.join(os.path.expanduser("~"), ".hearth", "relay_live.json")
+_LIVE_LOCK = threading.Lock()
+
+
+def _log(msg: str) -> None:
+    """One timestamped line; started from the window it goes to logs/relay_bridge.log,
+    which the window's phone logs show beside the other chat apps'."""
+    try:
+        print(time.strftime("%H:%M:%S ") + "[relay] " + msg, flush=True)
+    except Exception:
+        pass
+
+
+def _activity(what: str, **fields: Any) -> None:
+    """A line in Inglen's activity record, where every surface's tool calls already go."""
+    try:
+        from .tools import _log_activity
+        _log_activity("phone", what=what, **fields)
+    except Exception:
+        pass
+
+
+def _seen(chat: str, on: bool) -> None:
+    """Whether a phone is connected now, and since when: Settings > Plus shows it."""
+    with _LIVE_LOCK:
+        try:
+            with open(LIVE_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            d = d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            d = {}
+        phones_now = d.get("phones") if isinstance(d.get("phones"), dict) else {}
+        if chat == "*":
+            phones_now = {k: dict(v, on=False) for k, v in phones_now.items()}
+        else:
+            phones_now[chat] = {"on": on, "at": time.time()}
+        d = {"phones": phones_now, "bridge": time.time(), "pid": os.getpid()}
+        try:
+            os.makedirs(os.path.dirname(LIVE_FILE), exist_ok=True)
+            tmp = LIVE_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            os.replace(tmp, LIVE_FILE)
+        except OSError:
+            pass
+
+
+def live() -> Dict[str, Any]:
+    """Each paired phone's connection as the bridge last saw it: {id: {on, at}}."""
+    try:
+        with open(LIVE_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        return d.get("phones") or {} if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def phones() -> List[Dict[str, Any]]:
     return [{"id": phone_id(R.unb64(p["pub"])), "name": p.get("name") or "Phone", "at": p.get("at")}
             for p in _read().get("phones", [])]
@@ -1294,13 +1353,15 @@ class Room:
                         await self.on_frame(json.loads(raw))
             except Exception as e:
                 if "402" in str(e):
-                    print("[relay] the relay needs Inglen Plus for this PC; stopping.", flush=True)
+                    _log("the relay needs Inglen Plus for this PC; stopping.")
                     self.bridge.stopping = True
                     return
                 if "429" in str(e):
-                    print("[relay] this Plus licence is in use on too many PCs; stopping.", flush=True)
+                    _log("this Plus licence is in use on too many PCs; stopping.")
                     self.bridge.stopping = True
                     return
+            if self.peer_up and self.phone:
+                _seen(self.chat, False)
             self.ws, self.chan, self.peer_up = None, None, False
             if self.bridge.stopping or self.room not in self.bridge.wanted():
                 return
@@ -1310,8 +1371,11 @@ class Room:
     async def on_frame(self, f: Dict[str, Any]) -> None:
         t = f.get("t")
         if t == "peer":
-            self.peer_up = bool(f.get("up"))
+            was, self.peer_up = self.peer_up, bool(f.get("up"))
             if not self.peer_up:
+                if was and self.phone:
+                    _seen(self.chat, False)
+                    _log(f"phone {self.chat} went away")
                 self.chan = None
                 if self.call is not None:
                     # A phone that drops mid-call has a while to come back before the call ends.
@@ -1327,7 +1391,7 @@ class Room:
                 if (d.get("pending") or {}).get("room") == self.room:
                     d["pending"].update(phone=R.b64(phone), digits=digits)
                     _write(d)
-            print(f"[relay] a phone asks to pair; confirm {digits} on the PC", flush=True)
+            _log(f"a phone asks to pair; confirm {digits} on the PC")
             return
         if t == "hello":                      # a paired phone, connecting
             phone = R.unb64(f.get("phone") or "")
@@ -1340,6 +1404,8 @@ class Room:
             self.chan = R.Channel(to_phone, to_pc)
             self.peer_up = True
             self.bridge.adapter.rooms[self.chat] = self
+            _seen(self.chat, True)
+            _log(f"phone {self.chat} connected")
             await self.ws.send(json.dumps({"t": "hello", "eph": R.b64(R.raw_public(eph))}))
             from . import persona
             # The turns running now: the phone drops any other it still draws as
@@ -1408,6 +1474,7 @@ class Room:
         def run():
             said = speaker.speak(str(m["text"]), blocking=True)
             if said == "no_voice":
+                _log("read aloud: voice isn't set up on this PC")
                 send({"type": "say.error", "detail": "Voice isn't set up on your PC"})
             send({"type": "say.end"})
             if self.saying is speaker:
@@ -1462,6 +1529,8 @@ class Room:
                 finally:
                     cc._TURN.ctx = prev
 
+            _log("a call from the phone" + (" (it answered a ring)" if ring else ""))
+            _activity("call", chat=cid)
             self.call = Call(send, say, cid=cid, save=save, ref=str(m.get("ref") or "")[:40],
                              opener=ring, post=post if ring and cid else None)
             self.call_gone_told = False
@@ -1681,6 +1750,8 @@ class Bridge:
             return
         if not text:
             return
+        _log(f"{name} session {cid[-8:]}: a message from the phone" + (f" (on {model})" if model else ""))
+        _activity("agent_session", agent=agent, chat=cid, text=text[:200], **({"model": model} if model else {}))
         run = self.agent_runs[cid] = {"q": None, "answer": False, "t": turn, "steer": queue.Queue(), "keys": [cid]}
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
@@ -1715,7 +1786,11 @@ class Bridge:
             elif kind == "text":
                 push({"type": "text", "text": f.get("text") or ""})
                 self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)
+                _log(f"{name} session {cid[-8:]} replied")
+                _activity("agent_session_reply", agent=agent, chat=cid, chars=len(f.get("text") or ""))
             elif kind == "error":
+                _log(f"{name} session {cid[-8:]} stopped: {f.get('message') or ''}"[:300])
+                _activity("agent_session_error", agent=agent, chat=cid, message=str(f.get("message") or "")[:300])
                 push({"type": "text", "text": f.get("message") or "It stopped.", "error": True})
 
         def ask(question: str) -> bool:
@@ -1723,6 +1798,7 @@ class Bridge:
             aid = secrets.token_hex(8)
             self.adapter.asks[cid] = aid
             p = ask_parts(name, question)
+            _activity("agent_session_ask", agent=agent, chat=cid, question=question[:300])
             push({"type": "ask", "text": question, "ask": aid, "who": name, "cmd": p["cmd"]})
             self.adapter.notify(room.chat, dict(ask_note(p), kind="ask", c=cid, ask=aid), urgent=True)
             run["q"].wait(cc.ASK_TIMEOUT_S)
@@ -1817,7 +1893,7 @@ class Bridge:
         t.daemon = True
         self._ring_timer = t
         t.start()
-        print(f"[relay] calling the phone: {got['reason']}", flush=True)
+        _log(f"calling the phone: {got['reason']}")
         return rid
 
     def _stopped(self, ring: Dict[str, Any], missed: bool) -> None:
@@ -2015,10 +2091,11 @@ class Bridge:
 
 def run() -> None:
     if not relay_url():
-        print("[relay] no relay address yet (Settings > Plus).", flush=True)
+        _log("no relay address yet (Settings > Plus).")
         return
-    cc.use_saved_brain(lambda s: print("[relay] " + s, flush=True))
-    print("[relay] up. Phones paired:", len(phones()), flush=True)
+    cc.use_saved_brain(_log)
+    _seen("*", False)
+    _log(f"up on {relay_url()}. Phones paired: {len(phones())}")
     Bridge().run()
 
 

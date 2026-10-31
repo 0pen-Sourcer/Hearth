@@ -76,5 +76,18 @@ r2 = FakeRpc()
 asyncio.run(acp_brain.use_model(r2, "opencode", "s1", opened, "a"))
 check("and doesn't when it's on that model already", r2.calls == [])
 
+RB._seen("ph1", True)
+check(f"a connected phone is said so for Settings > Plus ({RB.live()})", RB.live().get("ph1", {}).get("on") is True)
+RB._seen("*", False)
+check("and when the phone link starts again, none is taken as connected", RB.live().get("ph1", {}).get("on") is False)
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import re  # noqa: E402
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    RB._log("phone ph1 connected")
+check(f"its log lines have a time and the surface, as the other chat apps' ({buf.getvalue().strip()})",
+      re.match(r"^\d\d:\d\d:\d\d \[relay\] phone ph1 connected$", buf.getvalue().strip()) is not None)
+
 print("FAILED" if fails else "all passed")
 sys.exit(1 if fails else 0)
