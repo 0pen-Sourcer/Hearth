@@ -926,14 +926,17 @@ def working(msgs: List[Dict[str, Any]], mtime: float) -> bool:
     its last message is the person's or ends on a step (a command still running) and the
     file was written within STEP_S."""
     age = time.time() - (mtime or 0)
+    last = msgs[-1] if msgs else None
+    parts = (last or {}).get("parts") or []
+    if last and last.get("role") == "assistant" and parts and "text" in parts[-1] and not last.get("error") and age > 3:
+        # It has answered: what it writes after its reply (costs, its own notes) isn't work.
+        return False
     if age < WORKING_S:
         return True
-    last = msgs[-1] if msgs else None
     if not last or age > STEP_S:
         return False
     if last.get("role") == "user":
         return True
-    parts = last.get("parts") or []
     return bool(parts) and "text" not in parts[-1] and not last.get("error")
 
 

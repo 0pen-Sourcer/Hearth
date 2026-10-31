@@ -1884,9 +1884,14 @@ class Bridge:
                     pass
             # A session open on a phone shows what its agent wrote since, without reopening it,
             # and that its agent is at work (the phone shows it working until it goes quiet).
-            for c, busy_now in [(c, True) for c in watch.moved] + [(c, False) for c in watch.quiet]:
+            for c, busy_now in [(c, None) for c in watch.moved] + [(c, False) for c in watch.quiet]:
                 if c in self.agent_runs:
                     continue
+                if busy_now is None:
+                    # Written to: at work unless what it wrote last is its finished reply.
+                    got = agent_sessions.parse_chat(c)
+                    d = agent_sessions.read(*got) if got else {}
+                    busy_now = agent_sessions.working(d.get("messages") or [], agent_sessions._mtime(d.get("path") or ""))
                 prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
                 try:
                     for chat in list(self.adapter.rooms):
