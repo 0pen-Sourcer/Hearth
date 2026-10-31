@@ -1343,6 +1343,12 @@
     font-family: var(--mono); font-size: 12px;
     font-weight: 500;
   }
+  .img-parts { display: grid; gap: 4px; margin-top: 6px; }
+  .img-part { display: grid; grid-template-columns: 130px 1fr auto; gap: 10px; align-items: baseline; font-size: 12.5px; }
+  .img-part span { color: var(--fg-dim); }
+  .img-part code { font-family: var(--mono); font-size: 11.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .img-part em { font-style: normal; color: var(--fg-faint); font-size: 11.5px; font-family: var(--mono); }
+  .fold-label { font-size: 12px; font-weight: 600; color: var(--fg-dim); margin: 2px 0 8px; }
   .tool .t-name.t-said { font-family: inherit; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
   .tool .t-args {
     flex: 1; min-width: 0;
@@ -5038,6 +5044,16 @@
           </div>
         </div>
 
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Notifications</h4>
+        <div class="field" id="field-phone-notify">
+          <div class="label">
+            <div class="name">Send reminders to my phone</div>
+            <div class="hint">Each reminder also goes to the Inglen app on your phone (with Plus) and to the Telegram or Discord you connected.</div>
+            <div class="hint" id="phone-notify-where" style="margin-top:4px"></div>
+          </div>
+          <div class="switch" data-key="phone_reminders" role="switch" aria-label="Send reminders to my phone"></div>
+        </div>
+
         <details class="set-adv">
         <summary>Advanced</summary>
         <div class="field">
@@ -5086,16 +5102,6 @@
               <label><input type="checkbox" id="migrate-config"> include model/provider</label>
             </div>
           </div>
-        </div>
-
-        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Notifications</h4>
-        <div class="field" id="field-phone-notify">
-          <div class="label">
-            <div class="name">Send reminders to my phone</div>
-            <div class="hint">Each reminder also goes to the Inglen app on your phone (with Plus) and to the Telegram or Discord you connected.</div>
-            <div class="hint" id="phone-notify-where" style="margin-top:4px"></div>
-          </div>
-          <div class="switch" data-key="phone_reminders" role="switch" aria-label="Send reminders to my phone"></div>
         </div>
 
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
@@ -5300,15 +5306,12 @@
           </select>
         </div>
 
-        <div class="field" style="flex-direction:column; align-items:stretch; gap:6px;">
+        <div class="field">
           <div class="label">
-            <div class="name">Models folder</div>
-            <div class="hint">Where models are downloaded and scanned. Point it at a drive with space if your C is full, and your chats and memory stay where they are. Applies on the next launch; move existing models there or drop new ones in.</div>
+            <div class="name">Model folders</div>
+            <div class="hint">Chat models download to <code id="setting-models-dir-now">…</code>. This folder and the image and video folders are set in Models, My Models.</div>
           </div>
-          <div style="display:flex; gap:8px;">
-            <input type="text" id="setting-models-dir" placeholder="e.g. D:\Inglen\models" spellcheck="false" style="flex:1"/>
-            <button class="btn-mini" id="btn-models-dir-save">Save</button>
-          </div>
+          <button type="button" class="btn-mini" id="btn-models-folders">Open My Models</button>
         </div>
 
         <div class="hint" style="margin-top:18px; color:var(--fg-faint)">
@@ -16127,20 +16130,12 @@ async function refreshSettings() {
 
     // Models folder (relocatable to a drive with space). Loads the current path;
     // Save writes the pointer and takes effect on next launch.
-    const mdInput = $('setting-models-dir');
-    if (mdInput) {
-      if (st.models_dir && document.activeElement !== mdInput) mdInput.value = st.models_dir;
-      const mdBtn = $('btn-models-dir-save');
-      if (mdBtn && !mdBtn._wired) {
-        mdBtn._wired = true;
-        mdBtn.addEventListener('click', async () => {
-          const p = (mdInput.value || '').trim();
-          if (!p) { toast('Enter a folder path', 'e.g. D:\\Inglen\\models', 'warn'); return; }
-          const r = await api('/api/models/set-dir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) });
-          if (r.ok) toast('Models folder set', 'Applies on the next launch: ' + r.path, 'ok', 7000);
-          else toast("Couldn't use that folder", r.error || "It didn't say why.", 'err', 7000);
-        });
-      }
+    const mdNow = $('setting-models-dir-now');
+    if (mdNow && st.models_dir) mdNow.textContent = st.models_dir;
+    const mdBtn = $('btn-models-folders');
+    if (mdBtn && !mdBtn._wired) {
+      mdBtn._wired = true;
+      mdBtn.addEventListener('click', () => modelsOpenFolders());
     }
 
     // ----- Server pane: live status + settings binding -----
@@ -18970,8 +18965,9 @@ function _renderModelsPanes(s) {
 function _mineSkeleton() {
   const root = $('models-pane-mine');
   if (!$('mine-chat')) {
-    root.innerHTML = '<div class="engine-pills mine-kinds" id="mine-kinds"></div><div id="mine-chat"></div><div id="mine-images"></div>';
+    root.innerHTML = '<div class="engine-pills mine-kinds" id="mine-kinds"></div><div id="mine-chat"></div><div id="mine-images"></div><div id="mine-folders"></div>';
     _paintMineImages();
+    modelsRenderFolders();
   }
   return $('mine-chat');
 }
@@ -19430,7 +19426,7 @@ function _applyMineKind() {
     none.hidden = !rows.length || rows.some(r => !r.hidden);
     const sub = img.querySelector('[data-img-sub]');
     if (sub) sub.textContent = `${rows.filter(r => !r.hidden).length} ready on this PC${sub.dataset.loading ? ' · loading one…' : ''}`;
-    none.textContent = `No ${k === 'video' ? 'video' : 'image'} model is ready yet. Discover finds one; what each needs is under Image and video setup.`;
+    none.textContent = `No ${k === 'video' ? 'video' : 'image'} model is ready yet. Discover, Image & video downloads one whole.`;
   }
   // A section whose rows are all filtered out goes too.
   img.querySelectorAll('.models-section[data-img-sec]').forEach(s => {
@@ -19469,6 +19465,11 @@ function _paintMineImages() {
   }
   const kind = (r) => `<span class="model-badge badge-src">${r.video ? 'video' : 'image'}</span>`;
   const files = (r) => esc(Object.values(r.picks || {}).map(p => p.split('/').pop()).join(' · '));
+  // What each file is: diffusion model, text encoder, VAE, LoRA.
+  const kinds = (r) => (r.parts || []).length ? esc(r.parts.map(x => x.kind).filter((k, i, a) => a.indexOf(k) === i).join(' · ')) : files(r);
+  const partList = (r) => (r.parts || []).length
+    ? `<div class="img-parts">${r.parts.map(x => `<div class="img-part"><span>${esc(x.kind)}</span><code title="${esc(x.label)}">${esc(x.file)}</code></div>`).join('')}</div>`
+    : `<div class="ex-desc" style="margin-top:8px">${files(r)}</div>`;
   let html = '';
   if (!o.installed) {
     html += `<div class="models-section"><div class="sec-head"><h3>Image and video models</h3><span class="sub">the engine isn't installed</span></div>
@@ -19494,15 +19495,15 @@ function _paintMineImages() {
     const rid = 'img-' + r.id.replace(/[^a-z0-9_-]/gi, '');
     return `<div class="model-row${r.id === loaded ? ' is-loaded' : ''}" data-row="${rid}" data-img-kind="${r.video ? 'video' : 'image'}">
       <div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}${r.id === loaded ? '<span class="model-badge badge-loaded">loaded</span>' : ''}</div>
-      <div class="model-meta">${files(r)}</div></div>
+      <div class="model-meta">${kinds(r)}</div></div>
       <div class="cell-size">${r.size_gb ? r.size_gb + ' GB' : ''}</div>
       ${r.id === loaded ? '<button class="model-action is-secondary" data-img-unload="1">Unload</button>'
         : `<button class="model-action" data-img-load="${esc(r.id)}" data-img-video="${r.video ? 1 : 0}">Load</button>`}
       <div class="model-expand" data-expand="${rid}">
         <div class="ex-head">${r.video ? 'Video' : 'Image'} model</div>
         ${r.description ? `<div class="ex-desc">${esc(r.description)}</div>` : ''}
-        <div class="ex-desc" style="margin-top:8px">Made of ${Object.keys(r.picks || {}).length} file${Object.keys(r.picks || {}).length === 1 ? '' : 's'}: ${files(r)}.
-          A picture or video request loads it by itself; Load gets it ready ahead of time.</div>
+        ${partList(r)}
+        <div class="ex-desc" style="margin-top:8px">A picture or video request loads it by itself; Load gets it ready ahead of time.</div>
         ${r.url ? `<div class="ex-desc" style="margin-top:8px"><a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">Model page &#8599;</a></div>` : ''}
         <div class="ex-actions">
           <button class="model-action is-secondary" data-cancel="${rid}">Close</button>
@@ -19510,15 +19511,14 @@ function _paintMineImages() {
         </div>
       </div></div>`;
   }).join('')
-    : `<div class="engine-note">No image or video model here yet. Find one in <b>Discover</b>, or put a model's files in
-       a folder under <b>Image and video setup</b> below, in the subfolder for each kind (checkpoints, diffusion_models,
-       text_encoders, vae). A ComfyUI or WebUI models folder you already have works as it is.</div>`;
+    : `<div class="engine-note">No image or video model here yet. <b>Discover, Image &amp; video</b> downloads one with every
+       part it needs. A ComfyUI or WebUI models folder you already have works as it is: add it under <b>Model folders</b> below.</div>`;
   html += '</div></div>';
   // A model file is here but the family needs more files beside it.
   if (started.length) {
     html += `<div class="models-section" data-img-sec="1"><div class="sec-head"><h3>Almost ready</h3><span class="sub">the model is here, a part is missing</span></div><div class="sec-body">` +
       started.map(r => `<div class="model-row" data-img-kind="${r.video ? 'video' : 'image'}"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
-        <div class="model-meta">${files(r)}</div>
+        <div class="model-meta">${kinds(r)}</div>
         <div class="model-meta">still needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">where to get it &#8599;</a>` : ''}</div></div>
         <div class="cell-size">${r.size_gb ? r.size_gb + ' GB' : ''}</div></div>`).join('') +
       '</div></div>';
@@ -19534,25 +19534,14 @@ function _paintMineImages() {
         <div class="model-meta">${f.family ? `${esc(f.family)}, which nothing here runs with the files on disk` : esc(f.note || "the engine couldn't read it")}</div></div></div>`).join('') +
       '</div></div>';
   }
-  // Setup: the engine, where it reads models from, and what else it can run.
-  html += `<div class="models-section"><div class="sec-head"><h3>Image and video setup</h3>
+  // The engine itself: which build, and the last thing that went wrong.
+  if (st.error || o.error) {
+    html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3>
       <span class="sub">stable-diffusion.cpp &middot; ${esc(o.build || '')}${o.backend ? ' &middot; ' + esc(o.backend) : ''}</span></div><div class="sec-body">` +
-    (st.error ? `<div class="engine-note" style="margin-bottom:10px;color:var(--err)">Last error: ${esc(st.error)}</div>` : '') +
-    (o.error ? `<div class="engine-note" style="margin-bottom:10px;color:var(--err)">${esc(o.error)}</div>` : '') +
-    `<div style="font-size:12px;font-weight:600;color:var(--fg-dim);margin:2px 0 8px">Model folders</div>` +
-    (o.forge ? `<div class="model-row"><div class="model-info"><div class="model-name">Forge is on this PC</div>
-      <div class="model-meta">Its checkpoints, VAEs and LoRAs in ${esc(o.forge)} can be used here, read where they are.</div></div>
-      <button class="model-action" data-img-forge="${esc(o.forge)}">Use them</button></div>` : '') +
-    (o.roots || []).map((d, i) => `<div class="model-row"><div class="model-info"><div class="model-name" style="font-family:var(--mono);font-size:12px">${esc(d)}</div>
-      <div class="model-meta">${i === 0 ? "Inglen's own" : 'yours, read in place'}</div></div>
-      ${i === 0 ? '<button class="model-action is-secondary" data-img-open="1">Open</button>'
-        : `<button class="model-action is-secondary" data-img-remove="${esc(d)}">Remove</button>`}</div>`).join('') +
-    `<div style="margin-top:8px"><button class="btn-mini" id="img-add-folder" style="width:auto;display:inline-flex">Add a folder</button></div>` +
-    (more.length ? `<details style="margin-top:14px"><summary style="cursor:pointer;color:var(--fg-dim)">What else it can run, and what each needs (${more.length})</summary>` +
-      more.map(r => `<div class="model-row"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
-        <div class="model-meta">needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">model page &#8599;</a>` : ''}</div></div></div>`).join('') +
-      '</details>' : '') +
-    '</div></div>';
+      (st.error ? `<div class="engine-note" style="color:var(--err)">Last error: ${esc(st.error)}</div>` : '') +
+      (o.error ? `<div class="engine-note" style="color:var(--err)">${esc(o.error)}</div>` : '') +
+      '</div></div>';
+  }
   box.innerHTML = html;
   box.querySelectorAll('.model-row[data-row]').forEach(row => row.addEventListener('click', (e) => {
     if (e.target.closest('button') || e.target.closest('.model-expand') || e.target.closest('a')) return;
@@ -19595,21 +19584,157 @@ function _paintMineImages() {
          modelsRenderImages(true); modelsResyncFromDisk();
        } }]);
   });
+  _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
+  if (_modelsState.tab === 'discover') _paintDiscoverImages();
+}
+
+// My Models, Model folders: every folder models are read from, chat and image
+// alike, changed here (Settings, Built-in server points here).
+async function modelsRenderFolders() {
+  const box = $('mine-folders'); if (!box) return;
+  let f;
+  try { f = await api('/api/model-folders'); } catch { return; }
+  const row = (path, meta, btn) => `<div class="model-row"><div class="model-info">
+      <div class="model-name" style="font-family:var(--mono);font-size:12px">${esc(path)}</div>
+      <div class="model-meta">${meta}</div></div>${btn || ''}</div>`;
+  const also = (f.chat_also || []).map(x => x.from).filter((v, i, a) => v && a.indexOf(v) === i);
+  box.innerHTML = `<div class="models-section"><div class="sec-head"><h3>Model folders</h3>
+      <span class="sub">where Inglen finds models and saves new ones</span></div><div class="sec-body">
+    <div class="fold-label">Chat models</div>
+    ${row(f.chat || '', 'Downloads go here' + (also.length ? `, and models from ${esc(also.join(', '))} are read where they are` : '') + '.',
+          '<button class="model-action is-secondary" id="fold-chat-change">Change</button>')}
+    <div class="fold-label" style="margin-top:14px">Image and video models</div>
+    ${(f.images || []).map(d => row(d.path, d.own ? "Inglen's own, with a folder for each kind of part" : 'Yours, read in place',
+        d.own ? '<button class="model-action is-secondary" data-img-open="1">Open</button>'
+              : `<button class="model-action is-secondary" data-img-remove="${esc(d.path)}">Remove</button>`)).join('')}
+    ${f.forge ? row(f.forge, 'Forge is on this PC: its checkpoints, VAEs and LoRAs can be read where they are.',
+                    `<button class="model-action" data-img-forge="${esc(f.forge)}">Use them</button>`) : ''}
+    <div style="margin-top:8px"><button class="btn-mini" id="img-add-folder" style="width:auto;display:inline-flex">Add a folder</button></div>
+    </div></div>`;
+  const done = () => { modelsRenderFolders(); modelsRenderImages(true); };
+  $('fold-chat-change').onclick = () => modelsChatFolderDialog(f.chat || '');
   box.querySelectorAll('[data-img-remove]').forEach(b => b.onclick = async () => {
     await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: b.dataset.imgRemove, remove: true }) }).catch(() => {});
-    modelsRenderImages(true);
+    done();
   });
   box.querySelectorAll('[data-img-forge]').forEach(b => b.onclick = async () => {
     const r = await api('/api/images/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: b.dataset.imgForge }) }).catch(e => ({ ok: false, error: e.message }));
     if (!r.ok) toast("That folder didn't work", r.error || '', 'err', 8000);
-    modelsRenderImages(true);
+    done();
   });
   box.querySelectorAll('[data-img-open]').forEach(b => b.onclick = () =>
     api('/api/images/open-folder', { method: 'POST' }).catch(e => toast("Couldn't open it", e.message, 'err')));
-  const add = $('img-add-folder'); if (add) add.onclick = imagesFolderDialog;
-  _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
+  $('img-add-folder').onclick = imagesFolderDialog;
+}
+function modelsChatFolderDialog(now) {
+  showModal('Chat models folder',
+    trustedHTML('<div style="line-height:1.55">Where chat models download to. A drive with space works; your chats and memory stay where they are. ' +
+    'It applies the next time Inglen starts.</div>' +
+    '<input id="fold-chat-path" type="text" spellcheck="false" style="width:100%;margin-top:12px;box-sizing:border-box">'),
+    [ { label: 'Cancel' },
+      { label: 'Use it', kind: 'primary', busyLabel: 'Saving…', onclick: async () => {
+        const v = ($('fold-chat-path')?.value || '').trim();
+        if (!v) return false;
+        const r = await api('/api/models/set-dir', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: v }) }).catch(e => ({ ok: false, error: e.message }));
+        if (!r.ok) { toast("Couldn't use that folder", r.error || '', 'err', 8000); return false; }
+        toast('Chat models folder set', 'Applies the next time Inglen starts: ' + r.path, 'ok', 7000);
+        const n = $('setting-models-dir-now'); if (n) n.textContent = r.path;
+        modelsRenderFolders();
+      } } ]);
+  setTimeout(() => { const i = $('fold-chat-path'); if (i) { i.value = now; i.focus(); i.select(); } }, 50);
+}
+function modelsOpenFolders() {
+  showView('models');
+  document.querySelector('.models-tab[data-tab="mine"]')?.click();
+  setTimeout(() => $('mine-folders')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
+}
+
+// Discover, Image & video: every family the image engine runs. Picking one
+// downloads all of it (model, text encoder, VAE, any LoRA it needs) through the
+// Downloads overlay, from the repackaged repo named like it.
+function _imgDiscoverHTML() {
+  const o = _modelsState.images;
+  const q = (_modelsState.hfQuery || '').trim().toLowerCase();
+  const head = (sub) => `<div class="models-section" id="disc-images"><div class="sec-head"><h3>Image &amp; video</h3><span class="sub">${sub}</span></div><div class="sec-body">`;
+  if (!o) return head('checking the image engine…') + '</div></div>';
+  if (!o.installed) return head('needs the image engine') + `<div class="engine-note" style="margin-bottom:10px">Pictures and short videos
+      are made on this PC by stable-diffusion.cpp, a one-time download for your graphics card. Then every model it runs shows here.</div>
+      <div><button class="model-action" id="disc-img-install">Install the engine</button></div></div></div>`;
+  const rows = (o.recipes || []).filter(r => !q || (r.name + ' ' + r.id + ' ' + (r.description || '')).toLowerCase().includes(q));
+  if (!rows.length) return q ? '' : head('the engine listed none') + '</div></div>';
+  const sorted = rows.slice().sort((a, b) => (b.ready - a.ready) || a.name.localeCompare(b.name));
+  return head(`${rows.length} model famil${rows.length === 1 ? 'y' : 'ies'} the image engine runs. Download gets every part each needs.`) +
+    sorted.map(r => {
+      const rid = 'di-' + r.id.replace(/[^a-z0-9_-]/gi, '');
+      return `<div class="model-row is-expandable" data-row="${rid}" data-img-recipe="${esc(r.id)}">
+        <div class="model-info"><div class="model-name">${esc(r.name)} <span class="model-badge badge-src">${r.video ? 'video' : 'image'}</span>${r.ready ? '<span class="model-badge badge-loaded">on this PC</span>' : ''}</div>
+        <div class="model-meta">${esc(r.description || '')}</div></div>
+        <span class="model-row-chevron" aria-hidden="true">▾</span>
+        <div class="model-expand" data-expand="${rid}">
+          <div class="ex-head">What it's made of</div>
+          <div data-img-plan="${esc(r.id)}"><div class="ex-hint" style="display:flex;align-items:center;gap:8px"><span class="hf-spinner"></span> Finding its files on Hugging Face…</div></div>
+          ${r.url ? `<div class="ex-desc" style="margin-top:8px"><a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">Model page &#8599;</a><span style="color:var(--fg-faint)"> &middot; licence and what it was trained for</span></div>` : ''}
+          <div class="ex-actions">
+            <button class="model-action is-secondary" data-cancel="${rid}">Cancel</button>
+            <button class="model-action" data-img-get="${esc(r.id)}" data-img-video="${r.video ? 1 : 0}" disabled>Download</button>
+          </div>
+        </div></div>`;
+    }).join('') + '</div></div>';
+}
+function _paintDiscoverImages() {
+  const pane = $('models-pane-discover'); if (!pane) return;
+  const html = _imgDiscoverHTML();
+  let box = $('disc-images-box');
+  if (!box) { box = document.createElement('div'); box.id = 'disc-images-box'; pane.appendChild(box); }
+  if (box._was === html) return;
+  box._was = html; box.innerHTML = html;
+  const inst = $('disc-img-install'); if (inst) inst.onclick = imagesInstall;
+  box.querySelectorAll('.model-row[data-img-recipe]').forEach(row => row.addEventListener('click', (e) => {
+    if (e.target.closest('button') || e.target.closest('.model-expand') || e.target.closest('a')) return;
+    modelsToggleRow(row);
+    if (row.classList.contains('is-open')) _imgPlanInto(row);
+  }));
+  box.querySelectorAll('[data-cancel]').forEach(b => b.onclick = (e) => {
+    e.stopPropagation(); box.querySelector(`.model-row[data-row="${b.dataset.cancel}"]`)?.classList.remove('is-open');
+  });
+  box.querySelectorAll('[data-img-get]').forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    const plan = b._plan; if (!plan) return;
+    imagesDownloadSet(plan, b.dataset.imgVideo === '1' ? 'video' : 'image');
+  });
+}
+const _GB = (n) => (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
+async function _imgPlanInto(row) {
+  const rid = row.dataset.imgRecipe, box = row.querySelector('[data-img-plan]'), btn = row.querySelector('[data-img-get]');
+  if (!box || box.dataset.loaded === '1') return;
+  let p;
+  try { p = await api('/api/images/plan?recipe=' + encodeURIComponent(rid)); } catch (e) { p = { ok: false, error: e.message }; }
+  box.dataset.loaded = '1';
+  const parts = (p.parts || []).map(x => `<div class="img-part"><span>${esc(x.kind)}</span><code title="${esc(x.label)}">${esc(x.name)}</code>
+      <em>${x.have ? 'on this PC' : _GB(x.size)}</em></div>`).join('');
+  if (!p.ok) {
+    if (btn) btn.hidden = true;             // nothing whole to download
+    box.innerHTML = (parts ? `<div class="img-parts">${parts}</div>` : '') + `<div class="ex-desc" style="margin-top:8px">There's no ready-made set
+      of its files on Hugging Face${p.missing && p.missing.length ? ` (still missing: ${esc(p.missing.join(', '))})` : ''}. Its model page says where each part is;
+      put them in a folder under <b>Model folders</b> and it shows in My Models.</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="img-parts">${parts}</div><div class="ex-desc" style="margin-top:8px">From ${esc(p.repo)}, ComfyUI's repackaged files.
+    ${p.bytes ? 'About ' + _GB(p.bytes) + ' to download.' : 'Everything is already on this PC.'}</div>`;
+  if (btn) { btn._plan = p; btn.disabled = !p.bytes; btn.textContent = p.bytes ? `Download all · ${_GB(p.bytes)}` : 'On this PC'; }
+}
+// One part after another through the Downloads overlay; a part that stops stops the set.
+async function imagesDownloadSet(plan, kind) {
+  const todo = (plan.parts || []).filter(x => !x.have);
+  for (const x of todo) {
+    const ok = await modelsDownloadHF(x.repo, x.path, {}, kind, x.category, true);
+    if (!ok) { toast("The set didn't finish", `${x.kind} (${x.name}) stopped. Resume it in Downloads, then download the set again for the rest.`, 'warn', 9000); return; }
+  }
+  toast(`${kind === 'video' ? 'Video' : 'Image'} model ready`, 'Every part is downloaded. It shows in My Models.', 'ok', 6000);
+  modelsRenderImages(true);
 }
 
 // Engine pane: what's running inference, and every llama.cpp build you can
@@ -19811,6 +19936,8 @@ async function modelsRenderDiscover() {
   // No search query: pre-populate with the most-downloaded GGUF repos so the
   // tab is useful out of the box. Cached so we don't hit HF on every tab switch.
   pane.innerHTML = '<div class="models-empty">' + (q ? 'Searching Hugging Face…' : 'Loading most-downloaded GGUF repos…') + '</div>';
+  _paintDiscoverImages();                   // shows while the search runs
+  if (!_modelsState.images) modelsRenderImages(true);
   let list;
   try {
     const url = q
@@ -19820,11 +19947,14 @@ async function modelsRenderDiscover() {
     list = r.results || [];
   } catch (e) {
     pane.innerHTML = '<div class="models-empty">Search failed: ' + esc(e.message) + '</div>';
+    _paintDiscoverImages();                 // the image engine's own list doesn't need Hugging Face's search
     return;
   }
   _modelsState.hfResults = list;
   if (!list.length) {
-    pane.innerHTML = '<div class="models-empty">No GGUF repos matched.</div>';
+    pane.innerHTML = `<div class="models-empty">No chat models matched${q ? ' “' + esc(q) + '”' : ''}.</div>`;
+    _paintDiscoverImages();
+    if (!_modelsState.images) modelsRenderImages(true);
     return;
   }
   const subText = q
@@ -19873,6 +20003,8 @@ async function modelsRenderDiscover() {
   html += '</div></div>';
   pane.innerHTML = html;
   modelsWireRowClicks(pane);
+  _paintDiscoverImages();
+  if (!_modelsState.images) modelsRenderImages(true);
 }
 
 function modelsWireRowClicks(pane) {
@@ -20436,7 +20568,7 @@ function dlToggle(force) {
           else if (kind === 'update') downloadUpdate();
           else if (kind === 'voice') _obFetchVoiceModels(null);
           else if (d.vision) modelsAddVision(d.vision, false);
-          else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {}, d.kind);
+          else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {}, d.kind, d.category);
         } else if (ds.dlact === 'cancel') {
           if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                            body: JSON.stringify({ id: d.agent }) }).catch(() => {});
@@ -20567,7 +20699,7 @@ async function modelsLoadHFFiles(repo, idx) {
 
 // `kind` is what Hugging Face says the repo does: an image or video model goes
 // to the image engine's folders and isn't loaded as a chat model afterwards.
-async function modelsDownloadHF(repo, filename, loadCfg, kind) {
+async function modelsDownloadHF(repo, filename, loadCfg, kind, category, quiet) {
   const media = kind === 'image' || kind === 'video';
   const dl = $('models-dl');
   dlToggle(true);  // progress shows in the downloads overlay, not the model list
@@ -20580,25 +20712,26 @@ async function modelsDownloadHF(repo, filename, loadCfg, kind) {
   detail.textContent = repo;
   // Per-download abort handle + repo, so the overlay Pause/Resume can act on it.
   const ctrl = new AbortController();
-  dlUpsert(filename, { name: filename, status: 'downloading', pct: 0, abort: ctrl, repo, filename, kind });
+  dlUpsert(filename, { name: filename.split('/').pop(), status: 'downloading', pct: 0, abort: ctrl, repo, filename, kind, category });
   let modelPath = null;
   try {
     const res = await fetch('/api/llmserver/download-hf', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(media ? { repo, filename, category: 'auto' } : { repo, filename }), signal: ctrl.signal,
+      body: JSON.stringify(media ? { repo, filename, category: category || 'auto' } : { repo, filename }), signal: ctrl.signal,
     });
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
     modelPath = await streamDownload(res, bar, label, detail, filename);
   } catch (e) {
-    if (e && e.name === 'AbortError') { dlUpsert(filename, { status: 'paused' }); return; }  // paused from the overlay; .part kept
-    if (e && e.name === 'TypeError') { dlUpsert(filename, { status: 'paused' }); return; }   // connection lost; the backend keeps going
-    label.textContent = 'Error'; detail.textContent = e.message; dlUpsert(filename, { status: 'error' }); return;
+    if (e && e.name === 'AbortError') { dlUpsert(filename, { status: 'paused' }); return false; }  // paused from the overlay; .part kept
+    if (e && e.name === 'TypeError') { dlUpsert(filename, { status: 'paused' }); return false; }   // connection lost; the backend keeps going
+    label.textContent = 'Error'; detail.textContent = e.message; dlUpsert(filename, { status: 'error' }); return false;
   }
   if (modelPath && media) {
-    toast(`${kind === 'video' ? 'Video' : 'Image'} model saved`, filename + ' is in My Models, which says if it needs anything else.', 'ok', 6000);
+    if (!quiet) toast(`${kind === 'video' ? 'Video' : 'Image'} model saved`, filename.split('/').pop() + ' is in My Models, which says if it needs anything else.', 'ok', 6000);
     modelsRenderImages(true);
-    return;
+    return true;
   }
+  if (!modelPath) return false;
   if (modelPath) {
     try { localStorage.removeItem('hearth_pending_dl'); } catch {}  // done — nothing to resume
     await startWithModel(modelPath, label, detail, loadCfg);
