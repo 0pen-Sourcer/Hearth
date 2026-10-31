@@ -28,7 +28,8 @@ from . import voice as _voice
 
 # Where a reply may be cut to start speaking: a sentence end, or for the first
 # piece a clause once it is long enough to sound whole.
-_SENTENCE = re.compile(r"[.!?]+[\"')\]]*\s|\n")
+# A danda (।) ends a Hindi sentence and is never part of a number, so it needs no space after.
+_SENTENCE = re.compile(r"[.!?]+[\"')\]]*\s|[।॥]+[\"')\]]*|\n")
 _CLAUSE = re.compile(r"[,;:]\s|\s[—–-]\s|—")
 _BREAK = re.compile(r"[,;:–-]\s|\s[—–-]\s|—")
 FIRST_CLAUSE = 24
@@ -375,6 +376,9 @@ class Call:
                 if not cut and first and len(rest) >= LONG_FIRST:
                     sp = rest.rfind(" ", QUICK_START, LONG_FIRST)
                     cut = sp + 1 if sp > 0 else (m.end() if m else 0)
+                    if m and 0 < m.end() - cut < QUICK_START:
+                        cut = m.end()                   # not a word or two left on its own
+
                 if not cut and first and len(rest) >= FIRST_CLAUSE:
                     c = None
                     for c in _CLAUSE.finditer(rest):

@@ -124,9 +124,10 @@ for _mdl, _lang, _want in (("base.en", "", "en"), ("base.en", "hi", "hi"),
 os.environ["JARVIS_STT_MODEL"] = "base.en"
 os.environ["JARVIS_STT_LANGUAGE"] = ""
 os.environ["HEARTH_VOICE"] = "hf_alpha"
+# Small: base writes Hindi in Urdu script, tiny in English.
 check("with no listening language set, a Hindi voice listens for Hindi or English, on the multilingual model",
       _listen._languages() == ["hi", "en"] and _listen._transcribe_language() is None
-      and _listen.model_size() == "base" and _rt._language() == "")
+      and _listen.model_size() == "small" and _rt._language() == "")
 
 # English said with a Hindi voice picked came back as Devanagari nonsense: forced
 # into Hindi. Detected as Hindi or English it stays; detected as something it

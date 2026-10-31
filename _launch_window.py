@@ -18,12 +18,19 @@ import multiprocessing
 # child re-launch before anything else. No-op for a normal launch.
 multiprocessing.freeze_support()
 
+# UTF-8 out, as in _launch_tray: the packaged app ignores PYTHONIOENCODING.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Same null-stderr safety as the tray launcher
 if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):
     _log_dir = os.path.join(os.path.expanduser("~"), "Jarvis", "logs")
     try:
         os.makedirs(_log_dir, exist_ok=True)
-        _f = open(os.path.join(_log_dir, "hearth_window.log"), "a", encoding="utf-8", buffering=1)
+        _f = open(os.path.join(_log_dir, "hearth_window.log"), "a", encoding="utf-8", errors="replace", buffering=1)
         sys.stdout = _f
         sys.stderr = _f
     except OSError:
