@@ -7363,6 +7363,12 @@ def _focus_window(p: Dict) -> str:
     return f"Brought '{title}' to the front (focus verified).{extra}"
 
 
+def _plus_hint(no: str) -> str:
+    """Once per chat: Plus would have reached the phone (only when Plus or the pairing is what's missing)."""
+    from . import call_me, memory
+    return call_me.plus_hint(memory.current_chat()) if no in (call_me.NO_PLUS, call_me.NO_PHONE) else ""
+
+
 def _send_to_phone(p: Dict) -> str:
     """Send a message or a file from this PC to the owner's phone. In a turn that
     came from the phone app or a chat app, that is this same conversation; from the
@@ -7399,7 +7405,7 @@ def _send_to_phone(p: Dict) -> str:
             what = " and ".join(x for x in ("the message" if message else "", os.path.basename(path) if path else "") if x)
             return f"Sent {what} to their phone, in the Inglen app, with a notification."
         if channel == "app":
-            return f"Error: couldn't reach the Inglen app: {no}."
+            return f"Error: couldn't reach the Inglen app: {no}." + _plus_hint(no)
     if not channel:
         for ch in ("telegram", "discord"):
             if channel_core.config_of(ch).get("bot_token") and channel_core.owner_of(ch):
@@ -7407,7 +7413,7 @@ def _send_to_phone(p: Dict) -> str:
                 break
         else:
             return ("Error: no phone to send to: the Inglen app isn't reachable (" + no + ") and no chat app "
-                    "is connected (Settings > Connectors).")
+                    "is connected (Settings > Connectors)." + _plus_hint(no))
     out = channel_core.push(channel, message) if message else ""
     if path and not out.startswith("Error"):
         out = channel_core.push_file(channel, path)

@@ -31,9 +31,12 @@ PLANS_URL = "https://inglen.app/#plus"
 
 
 def _setting(key: str) -> str:
+    # Read from the file, not through web.py: importing it marks this process as the window's
+    # (live_bus.IN_WINDOW), and a bridge or the terminal would then keep its events to itself.
     try:
-        from .web import _load_settings
-        return str((_load_settings() or {}).get(key) or "").strip()
+        from . import keystore
+        from .tools import WORKSPACE
+        return str((keystore.read_settings(os.path.join(WORKSPACE, "settings.json")) or {}).get(key) or "").strip()
     except Exception:
         return ""
 
