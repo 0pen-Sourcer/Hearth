@@ -948,6 +948,17 @@ def shown_result(content: Any, limit: int = 4000) -> str:
     return t if len(t) <= limit else t[:limit].rstrip() + "\n..."
 
 
+def question_for(who: str, name: str, args: Dict[str, Any]) -> str:
+    """An agent's permission question, with why it asks whatever the mode (keys it would read)."""
+    q = f"{who} asks: may it {_what(name, args)}?"
+    try:
+        from .tools import sends_out
+        why = sends_out(name, args)
+    except Exception:
+        why = ""
+    return f"{q} {why}" if why else q
+
+
 def _what(name: str, args: Dict[str, Any]) -> str:
     """A risky step in a few plain words, for the question: never the tool's own name."""
     a = args or {}

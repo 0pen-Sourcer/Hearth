@@ -17,9 +17,11 @@ Emit = Callable[..., None]
 
 
 def args_for(exe: List[str], sid: str, mode: str) -> List[str]:
+    from .claude_brain import claude_settings
     return list(exe) + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                         "--include-partial-messages", "--permission-prompt-tool", "stdio",
-                        "--permission-mode", mode] + (["--resume", sid] if sid else [])
+                        "--permission-mode", mode,
+                        "--settings", json.dumps(claude_settings())] + (["--resume", sid] if sid else [])
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
@@ -27,11 +29,11 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
     """Resume session `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _result_text, _steps_of
     from .channel_core import _what, out_of
-    from .claude_brain import _QUIET_TOOLS, hearth_view
+    from .claude_brain import _QUIET_TOOLS, hearth_view, agent_env
 
     proc = await asyncio.create_subprocess_exec(
         *args_for(exe, sid, mode), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
+        stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024, env=agent_env(),
         creationflags=0x08000000 if sys.platform == "win32" else 0)
     errs = asyncio.ensure_future(proc.stderr.read())
     sent, answered = 0, 0                    # user messages given, turns finished
@@ -85,8 +87,12 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
                 if req.get("subtype") == "can_use_tool":
                     name, args = str(req.get("tool_name") or ""), req.get("input") if isinstance(req.get("input"), dict) else {}
                     from .tools import mode_allows
-                    ok = mode_allows(*hearth_view(name, args)) or await asyncio.to_thread(
-                        ask, f"Claude Code asks: may it {_what(*hearth_view(name, args))}?")
+                    from .channel_core import question_for
+                    tname, targs = hearth_view(name, args)
+                    if tname == "run_command":
+                        targs = dict(targs, cwd=cwd)
+                    ok = mode_allows(tname, targs) or await asyncio.to_thread(
+                        ask, question_for("Claude Code", tname, targs))
                     answer = ({"behavior": "allow", "updatedInput": args} if ok
                               else {"behavior": "deny", "message": "Not allowed from the phone."})
                     send({"type": "control_response", "response": {"subtype": "success", "request_id": ev.get("request_id"),

@@ -840,6 +840,26 @@ def _safe_hearth_tools() -> List[str]:
         return []
 
 
+def agent_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """An agent program's environment, without the keys Inglen put in this one."""
+    from .keystore import agent_env as _clean
+    return _clean(extra)
+
+
+def claude_settings(fast: bool = False) -> Dict[str, Any]:
+    """Settings for Claude Code's --settings: a read of a place that holds keys
+    asks, so it comes to Inglen's check; Fast when picked."""
+    try:
+        from .secret_places import claude_rules
+        rules = claude_rules()
+    except Exception:
+        rules = []
+    out: Dict[str, Any] = {"permissions": {"ask": rules}}
+    if fast:
+        out["fastMode"] = True
+    return out
+
+
 def _permission_mode() -> str:
     """Hearth's switch as Claude Code's own mode. Everything Claude Code would
     ask about still comes back through Hearth, which applies the switch, so
@@ -1259,8 +1279,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
         args += ["--effort", effort]
     # Fast is a setting of Claude Code's own; it says afterwards whether it applied.
     want_fast = fast_on(PROVIDER) and not _no_fast().get(alias or "default")
-    if want_fast:
-        args += ["--settings", json.dumps({"fastMode": True})]
+    args += ["--settings", json.dumps(claude_settings(fast=want_fast))]
     cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
 
@@ -1281,7 +1300,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
+            stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024, env=agent_env(),
             creationflags=0x08000000 if sys.platform == "win32" else 0)
         proc.stdin.write(user_line(text_in))
         await proc.stdin.drain()

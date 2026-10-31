@@ -291,7 +291,7 @@ told = []
 asyncio.run(cb.run_turn("hello fast", emit=lambda t, **f: told.append((t, f)), history=[], permission_check=lambda n, a: "allow"))
 argv = json.loads(open(argv_log).read().splitlines()[before])["argv"]
 check(f"with Fast on, Claude Code is asked for fast mode {argv[argv.index('--settings') + 1] if '--settings' in argv else argv}",
-      all(offered) and "--settings" in argv and json.loads(argv[argv.index("--settings") + 1]) == {"fastMode": True})
+      all(offered) and "--settings" in argv and json.loads(argv[argv.index("--settings") + 1]).get("fastMode") is True)
 check("when it says fast mode wasn't on, that is said once and the model isn't offered Fast again",
       any(t == "heads_up" for t, f in told) and not cb.agent_models("claude-code")["models"][0].get("fast"))
 _cfg = _w._load_settings(); _cfg.pop("fast_claude-code", None); _w._save_settings(_cfg)

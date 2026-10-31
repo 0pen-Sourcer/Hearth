@@ -8987,13 +8987,30 @@ def is_risky(name: str, args=None) -> bool:
 
 
 def sends_out(name: str, args=None) -> str:
-    """Why this call asks in every mode, because it would send something out
-    after the chat took in content from outside; '' when it doesn't."""
+    """Why this call asks in every mode: it would read a place that holds keys
+    (hearth/secret_places.py), or send something out after the chat took in
+    content from outside (hearth/outbound.py); '' when neither."""
+    r = reads_secret(name, args)
+    if r:
+        return r
     try:
         from .outbound import reason
         return reason(name, args)
     except Exception:
         return ""
+
+
+def reads_secret(name: str, args=None) -> str:
+    """Why this call would read a place that holds keys; '' when it wouldn't.
+    Nothing lets it through without a person's yes: not the mode, the reviewer,
+    a standing yes or auto-approve."""
+    if not isinstance(args, dict):
+        return ""
+    try:
+        from .secret_places import reason
+        return reason(name, args)
+    except Exception as e:
+        return f"This couldn't be checked for keys it would read ({type(e).__name__}), so it asks."
 
 
 # ============================================================

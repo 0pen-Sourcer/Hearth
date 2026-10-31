@@ -26,8 +26,14 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import env as _env
+from . import keystore as _keystore
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
+
+
+def _agent_env(**extra: str) -> Dict[str, str]:
+    """A helper agent's environment, without the keys Inglen put in this one."""
+    return _keystore.agent_env(extra)
 _ANSI = __import__("re").compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
@@ -986,7 +992,7 @@ async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, 
         proc = await asyncio.create_subprocess_exec(
             *head, "app-server", *flags, cwd=work, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024, creationflags=_NO_WINDOW,
-            start_new_session=os.name != "nt", env=dict(os.environ, HEARTH_HELPER="1"))
+            start_new_session=os.name != "nt", env=_agent_env(HEARTH_HELPER="1"))
     except Exception:
         return False
     rpc = _Rpc(proc, who="Codex")
@@ -1150,7 +1156,7 @@ def spawn(agent: str, prompt: str, *, name: str = "", cwd: str = "",
                                         creationflags=_NO_WINDOW, start_new_session=os.name != "nt",
                                         # A helper does its task; it doesn't send helpers of its own.
                                         # PWD too: some agents trust it over the folder they start in.
-                                        env=dict(os.environ, HEARTH_HELPER="1", PWD=work))
+                                        env=_agent_env(HEARTH_HELPER="1", PWD=work))
                 with _OPEN_LOCK:
                     _PROCS[agent_id] = proc
                 listening = bool(spec.get("takes_messages"))

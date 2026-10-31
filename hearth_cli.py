@@ -6788,8 +6788,13 @@ class JarvisCLI:
                 _out = _sends_out(name, args)
             except Exception:
                 _out = ""
+            try:
+                from hearth.tools import reads_secret as _reads_secret
+                _auto = self.auto_approve and not _reads_secret(name, args)   # keys need a person's yes
+            except Exception:
+                _auto = False
             _will_prompt = (is_risky
-                            and not self.auto_approve
+                            and not _auto
                             and not _mode_ok
                             and (self.tool_perms.get(name) not in ("always", "never") or
                                  (_out and self.tool_perms.get(name) == "always")))
@@ -6826,12 +6831,14 @@ class JarvisCLI:
             decline_reason = ""
 
             if (_is_risky(name, args)
-                    and not self.auto_approve
+                    and not _auto
                     and not _mode_ok
                     and (self.tool_perms.get(name) != "always" or _out)):
                 if self.tool_perms.get(name) == "never":
                     denied = True
                 else:
+                    if _out:
+                        print(f"    {C_DIM}{_out}{C_RESET}")
                     print(f"    {C_WARN}allow this call?{C_RESET} "
                           f"{C_DIM}[y]es / [n]o / [a]lways / [N]ever / or type what to do instead{C_RESET}")
                     raw_choice = await self._read_choice(f"    {C_TOOL}>{C_RESET} ")

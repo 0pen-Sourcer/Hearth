@@ -1275,9 +1275,10 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
             if "id" in msg:
                 if meth == "session/request_permission":
                     tname, targs = A.hearth_call(prm.get("toolCall") or {})
-                    from .channel_core import _what
+                    from .channel_core import question_for
                     from .tools import mode_allows
-                    ok = mode_allows(tname, targs) or await asyncio.to_thread(ask, f"{name} asks: may it {_what(tname, targs)}?")
+                    targs = dict(targs, cwd=targs.get("cwd") or cwd) if tname in ("run_command", "start_job") else targs
+                    ok = mode_allows(tname, targs) or await asyncio.to_thread(ask, question_for(name, tname, targs))
                     kinds = ("allow_once", "allow_always") if ok else ("reject_once", "reject_always")
                     pick = next((o for k in kinds for o in prm.get("options") or [] if o.get("kind") == k), None)
                     rpc.send({"id": msg["id"], "result": {"outcome": {"outcome": "selected", "optionId": pick["optionId"]}}

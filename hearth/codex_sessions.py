@@ -36,13 +36,14 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
               drain: Optional[Callable[[], List[str]]] = None) -> int:
     """Resume thread `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _step
-    from .channel_core import _what, out_of
+    from .channel_core import _what, out_of, question_for
     from .codex_brain import _Rpc, _change_call, _shown_command
     from .tools import mode_allows
+    from .keystore import agent_env
 
     proc = await asyncio.create_subprocess_exec(
         *exe, "app-server", cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024,
+        stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024, env=agent_env(),
         creationflags=0x08000000 if sys.platform == "win32" else 0)
     rpc = _Rpc(proc)
     reader = asyncio.ensure_future(rpc.read())
@@ -125,13 +126,13 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
                 continue
             if "id" in msg:                  # Codex asks before doing something
                 if meth == "item/commandExecution/requestApproval":
-                    run = {"command": _shown_command(prm)}
-                    ok = mode_allows("run_command", run) or await may(f"Codex asks: may it {_what('run_command', run)}?")
+                    run = {"command": _shown_command(prm), "cwd": str(prm.get("cwd") or cwd)}
+                    ok = mode_allows("run_command", run) or await may(question_for("Codex", "run_command", run))
                 elif meth == "item/fileChange/requestApproval":
                     changes = (items.get(str(prm.get("itemId"))) or {}).get("changes") or []
                     ok = bool(changes)
                     for c in changes:
-                        if not (mode_allows(*_change_call(c)) or await may(f"Codex asks: may it {_what(*_change_call(c))}?")):
+                        if not (mode_allows(*_change_call(c)) or await may(question_for("Codex", *_change_call(c)))):
                             ok = False
                             break
                 else:
