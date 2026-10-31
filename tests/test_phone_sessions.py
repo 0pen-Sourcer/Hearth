@@ -282,6 +282,7 @@ rung = []
 live_bus.publish = lambda ev: rung.append(ev)
 call_me.quiet_now = lambda r, now=None: False
 call_me.at_pc = lambda idle=None: False
+call_me.reach = lambda: ""                          # a paired phone, its bridge up
 said = memory_mcp.call_me("The tests pass and the branch is pushed.")
 check(f"an agent's call_me rings the phone through Inglen, even with Inglen's own calls off ({said})",
       rung and rung[-1]["kind"] == "call_me" and "tests pass" in rung[-1]["say"] and said.startswith("Calling"))
