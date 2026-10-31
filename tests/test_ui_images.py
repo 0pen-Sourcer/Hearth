@@ -141,6 +141,12 @@ with sync_playwright() as pw:
              {"slot": "llm", "kind": "Text encoder", "label": "Qwen 3", "repo": "Comfy-Org/Z-Image-Turbo",
               "path": "split_files/text_encoders/q.safetensors", "category": "text_encoders", "name": "q.safetensors",
               "size": 2_000_000_000, "have": False}]},
+        # A huge set from a repackaged repo shared by two families, its downloads counting both.
+        *[{"id": f"minimax-{v}", "name": f"MiniMax H3 {v}", "video": True, "blurb": "Brings a picture to life as a short video",
+           "url": "", "ok": True, "repo": "Comfy-Org/MiniMax-H3", "downloads": 29_000_000, "bytes": 123_000_000_000, "parts": [
+               {"slot": "diffusion_model", "kind": "Diffusion model", "label": "Diffusion model", "repo": "Comfy-Org/MiniMax-H3",
+                "path": f"split_files/diffusion_models/m_{v}.safetensors", "category": "diffusion_models", "name": f"m_{v}.safetensors",
+                "size": 123_000_000_000, "have": False}]} for v in ("FL2VA", "Ref2VA")],
         {"id": "wan21-t2v", "name": "Wan 2.1 T2V", "video": True, "blurb": "Makes short videos from text", "url": "",
          "ok": False, "repo": "", "downloads": 0, "parts": []}]}))
     # Every folder models are read from, as My Models' Model folders lists them.
@@ -194,6 +200,10 @@ with sync_playwright() as pw:
         text: document.getElementById('models-pane-discover').innerText })""")
     check(f"chat and image models are one list in Discover {disc['rows']}",
           disc["sections"] == 1 and disc["rows"][0].startswith("unsloth/Qwen3.5") and disc["rows"][1].startswith("Z-Image Turbo"))
+    check("a set far past this PC goes last, whatever its repo's downloads",
+          len(disc["rows"]) == 4 and all(r.startswith("MiniMax H3") for r in disc["rows"][2:]))
+    check("a repo's downloads shared by several families aren't shown as one family's",
+          "29,000,000" not in disc["text"] and "2,90,00,000" not in disc["text"] and "400,000 downloads" in disc["text"].replace("4,00,000", "400,000"))
     check("a family with no whole download isn't in the list, only counted at the end",
           not any(r.startswith("Wan 2.1 T2V") for r in disc["rows"]) and "1 more the image engine can run" in disc["text"])
     check("the engine's own notes aren't the description", "Makes pictures from text, in a few steps" in disc["text"])

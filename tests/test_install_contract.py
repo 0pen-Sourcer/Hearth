@@ -87,8 +87,12 @@ _rels = [{"tag_name": "v0.5.0", "assets": [{"name": "something.tar.gz"}]},
          {"tag_name": "b11307", "assets": [{"name": f"llama-b11307-bin-{_OSW}-vulkan-x64.zip"},
                                             {"name": f"llama-b11307-bin-{_OSW}-cuda-12.4-x64.zip"}]},
          {"tag_name": "b11306", "assets": [{"name": f"llama-b11306-bin-{_OSW}-cpu-x64.zip"}]}]
+class _Reply(_io.BytesIO):
+    headers: dict = {}
+
+
 _real_open = _ur.urlopen
-_ur.urlopen = lambda req, timeout=0: _io.BytesIO(_json.dumps(_rels).encode())
+_ur.urlopen = lambda req, timeout=0: _Reply(_json.dumps(_rels).encode())
 try:
     rel = _ls._latest_build_release()
 finally:

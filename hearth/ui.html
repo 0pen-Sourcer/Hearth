@@ -19976,10 +19976,23 @@ async function modelsRenderDiscover() {
   const hit = (x) => words.every(w => (x.name + ' ' + x.id + ' ' + x.blurb + ' ' + (x.video ? 'video' : 'image')).toLowerCase().includes(w));
   const all = (sets && sets.sets) || [];
   const fams = q ? all.filter(hit) : all.filter(x => x.ok);
-  const entries = list.map((it, i) => ({ chat: it, i, dl: it.downloads || 0 }))
-    .concat(fams.map(x => ({ img: x, dl: x.downloads || 0 })));
-  if (!q) entries.sort((a, b) => b.dl - a.dl);
-  else entries.sort((a, b) => (a.img && !a.img.ok) - (b.img && !b.img.ok));   // what can't be downloaded whole goes last
+  // A repackaged repo's downloads count every family in it, and ComfyUI fetches
+  // add to them, so they don't compare with a GGUF repo's: each family gets its
+  // share, sets far past this card go last, and families sit between chat rows.
+  const perRepo = {};
+  for (const x of fams) if (x.repo) perRepo[x.repo] = (perRepo[x.repo] || 0) + 1;
+  const roomGb = Math.max(24, 3 * (STATE.gpuTotalGb || 8));
+  const tooBig = (x) => (x.parts || []).reduce((n, p) => n + p.size, 0) / 1e9 > roomGb;
+  const share = (x) => (x.downloads || 0) / (perRepo[x.repo] || 1);
+  const imgs = fams.map(x => ({ img: x, solo: perRepo[x.repo] === 1 }))
+    .sort((a, b) => (a.img.ok ? 0 : 2) + tooBig(a.img) - (b.img.ok ? 0 : 2) - tooBig(b.img) || share(b.img) - share(a.img));
+  const chats = list.map((it, i) => ({ chat: it, i }));
+  const entries = [];
+  while (chats.length || imgs.length) {
+    entries.push(...chats.splice(0, 2));
+    if (imgs.length && (!chats.length || !tooBig(imgs[0].img))) entries.push(imgs.shift());
+    if (!chats.length) entries.push(...imgs.splice(0));
+  }
   const lead = sets && sets.installed === false ? _imgEngineRow()
     : sets && !sets.ready ? _imgFindingRow() : '';
   if (!entries.length && !lead) {
@@ -19995,7 +20008,7 @@ async function modelsRenderDiscover() {
       <span class="sub">${subText}</span>
     </div>
     <div class="sec-body">` + lead;
-  for (const e of entries) html += e.chat ? _discoverChatRow(e.chat, e.i) : _discoverImageRow(e.img);
+  for (const e of entries) html += e.chat ? _discoverChatRow(e.chat, e.i) : _discoverImageRow(e.img, e.solo);
   const rest = q ? 0 : all.filter(x => !x.ok).length;
   if (rest) html += `<div class="disc-more">${rest} more the image engine can run need their files gathered by hand. Search for one by name to see it.</div>`;
   html += '</div></div>';
@@ -20045,7 +20058,7 @@ function _discoverChatRow(it, i) {
 // An image or video family, in a chat row's shape. Its parts are picked like
 // agent updates: a tick each, on unless the part is on this PC already.
 const _GB = (n) => (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
-function _discoverImageRow(x) {
+function _discoverImageRow(x, solo) {
   const rowId = 'di-' + x.id.replace(/[^a-z0-9_-]/gi, '');
   const kind = x.video ? 'video' : 'image';
   const total = (x.parts || []).reduce((n, p) => n + p.size, 0);
@@ -20056,7 +20069,7 @@ function _discoverImageRow(x) {
       <div class="model-row is-expandable" data-row="${rowId}" data-img-recipe="${esc(x.id)}">
         <div class="model-info">
           <div class="model-name">${esc(x.name)} <span class="model-badge badge-src">${kind}</span></div>
-          <div class="model-meta">${esc(x.blurb)}${x.ok ? ` · ${_GB(total)}` : ''}${x.downloads ? ` · ${x.downloads.toLocaleString()} downloads` : ''}</div>
+          <div class="model-meta">${esc(x.blurb)}${x.ok ? ` · ${_GB(total)}` : ''}${x.downloads && solo ? ` · ${x.downloads.toLocaleString()} downloads` : ''}</div>
         </div>
         <span class="model-row-chevron" aria-hidden="true">▾</span>
         <div class="model-expand" data-expand="${rowId}">
