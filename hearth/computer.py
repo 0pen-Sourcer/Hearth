@@ -173,6 +173,11 @@ def _press_button(button: str, down: bool):
         btn = {"left": _pyn_mouse.Button.left, "right": _pyn_mouse.Button.right,
                "middle": _pyn_mouse.Button.middle}.get(button, _pyn_mouse.Button.left)
         (_pyn_m.press if down else _pyn_m.release)(btn)
+    if _agc is not None:
+        try:
+            _agc.press(down)
+        except Exception:
+            pass
 
 
 def click(x=None, y=None, button: str = "left", double: bool = False):

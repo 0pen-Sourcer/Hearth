@@ -41,40 +41,85 @@ _INSTALL_HINT = (
 _worker: "Optional[_BrowserWorker]" = None
 _lock = threading.Lock()
 
-# A cursor dot that marks where the AGENT is acting. It is driven ONLY by
-# the agent's clicks (see _CURSOR_GLIDE_JS) — it deliberately does NOT follow the
-# user's physical mouse. (It used to: a mousemove listener made the dot chase the
-# real cursor, so when the user moved their mouse the agent's indicator jumped to
-# them and looked like they were hijacking it. Removed.) pointer-events:none so it
-# never blocks the user's own clicks. Starts hidden; appears on the first action.
+# The pointer that marks where the AGENT is acting: the brand mark, drawn as in
+# agent_cursor (the corner's tip just off the point, the dot fills on a click,
+# turns to face where it glides). Driven ONLY by the agent (see _CURSOR_GLIDE_JS),
+# never by the user's own mouse. pointer-events:none so it never takes a click.
 _CURSOR_JS = r"""
 (() => {
+  const K = 0.7, GAP = 2.5, REST = -135;            // px per mark unit, px to the point
+  const H = 22 - 9 / Math.SQRT2 - GAP / K / Math.SQRT2;   // tip of the mark, in its units
+  const E = 1.2 / K;                                // ink edge
   const add = () => {
     if (document.getElementById('__hearth_cursor')) return;
     const c = document.createElement('div');
     c.id = '__hearth_cursor';
-    // Visible from the moment the page loads so users see the agent is in
-    // control. Starts centered at top of viewport, glides on the first click.
-    c.style.cssText = 'position:fixed;left:50%;top:80px;width:18px;height:18px;'
-      + 'border:2px solid rgb(__RGB__);border-radius:50%;background:rgba(__RGB__,.25);'
-      + 'z-index:2147483647;pointer-events:none;margin:-9px 0 0 -9px;'
-      + 'box-shadow:0 0 12px rgb(__RGB__);opacity:.85;'
-      + 'transition:left .45s ease, top .45s ease, opacity .2s';
+    c.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;'
+      + 'pointer-events:none;transform-origin:0 0;opacity:0;will-change:transform,opacity;'
+      + '--hc:rgb(__RGB__)';
+    c.innerHTML = '<svg viewBox="0 0 60 60" width="' + 60 * K + '" height="' + 60 * K
+      + '" style="position:absolute;overflow:visible;left:' + (-H * K) + 'px;top:' + (-H * K) + 'px">'
+      + '<path d="M16 40V22a6 6 0 0 1 6-6h18" fill="none" stroke="#1f1c19" stroke-opacity=".62" '
+      + 'stroke-width="' + (6 + 2 * E) + '" stroke-linecap="round"/>'
+      + '<path d="M16 40V22a6 6 0 0 1 6-6h18" fill="none" stroke="#ecebe7" stroke-width="6" stroke-linecap="round"/>'
+      + '<g class="d" style="transform-origin:38px 38px">'
+      + '<circle cx="38" cy="38" r="' + (7.5 + E / 2) + '" fill="none" stroke="#1f1c19" '
+      + 'stroke-opacity=".62" stroke-width="' + (3 + E) + '"/>'
+      + '<circle class="r" cx="38" cy="38" r="7.5" fill="none" stroke="var(--hc)" stroke-width="3"/>'
+      + '<circle class="f" cx="38" cy="38" r="9" fill="var(--hc)" opacity="0"/></g></svg>';
     (document.body || document.documentElement).appendChild(c);
-    // Auto-fade if the agent doesn't act soon after load; a glide pops it back.
-    if (window.__hearthCursorFade) clearTimeout(window.__hearthCursorFade);
-    window.__hearthCursorFade = setTimeout(() => { c.style.opacity = '0'; }, 3000);
+    const dot = c.querySelector('.d'), ring = c.querySelector('.r'), fillc = c.querySelector('.f');
+    // Critically damped springs: they arrive without overshoot.
+    const s = (x, w) => ({x, v: 0, t: x, w});
+    const st = {px: s(innerWidth / 2, 16), py: s(80, 16), ang: s(REST, 28), fill: s(0, 42), op: s(0, 26),
+                pulses: [], free: 0, raf: 0, last: 0, fade: 0};
+    const step = (p, dt) => { for (let h; dt > 0; dt -= h) { h = Math.min(dt, 1 / 240);
+      p.v += (p.w * p.w * (p.t - p.x) - 2 * p.w * p.v) * h; p.x += p.v * h; } };
+    const still = (p, e) => Math.abs(p.t - p.x) < e && Math.abs(p.v) < e * 10;
+    const near = (to) => { const a = st.ang.x; return a + (((to - a + 180) % 360 + 360) % 360 - 180); };
+    const frame = (now) => {
+      const dt = Math.min(0.05, (now - (st.last || now)) / 1000); st.last = now;
+      const t = performance.now();
+      st.pulses = st.pulses.filter(p => p[1] > t);
+      st.fill.t = st.pulses.some(p => p[0] <= t) ? 1 : 0;
+      const sp = Math.hypot(st.px.v, st.py.v);
+      st.ang.t = near(sp > 60 ? Math.atan2(st.py.v, st.px.v) * 180 / Math.PI : REST);
+      for (const p of [st.px, st.py, st.ang, st.fill, st.op]) step(p, dt);
+      if (still(st.px, 0.3)) { st.px.x = st.px.t; st.px.v = 0; }
+      if (still(st.py, 0.3)) { st.py.x = st.py.t; st.py.v = 0; }
+      const f = Math.max(0, Math.min(1, st.fill.x));
+      c.style.transform = 'translate(' + st.px.x + 'px,' + st.py.x + 'px) rotate(' + (st.ang.x - REST) + 'deg)';
+      c.style.opacity = Math.max(0, Math.min(1, st.op.x));
+      dot.style.transform = 'scale(' + (1 + 0.1 * f) + ')';
+      ring.setAttribute('opacity', 1 - f);
+      fillc.setAttribute('opacity', f);
+      const busy = st.pulses.length || ![st.px, st.py, st.fill, st.op].every(p => still(p, 0.01))
+        || !still(st.ang, 0.2);
+      st.raf = busy ? requestAnimationFrame(frame) : 0;
+      if (!busy) st.last = 0;
+    };
+    const run = () => {
+      if (!c.isConnected) (document.body || document.documentElement).appendChild(c);
+      if (!st.raf) st.raf = requestAnimationFrame(frame);
+    };
+    const idle = (ms) => { clearTimeout(st.fade); st.fade = setTimeout(() => { st.op.t = 0; run(); }, ms); };
+    window.__hearthCursor = {
+      glide(x, y) { st.px.t = x; st.py.t = y; st.op.t = 1; idle(2500); run(); },
+      press() {
+        const t = Math.max(performance.now(), st.free);
+        st.pulses.push([t, t + 90]); st.free = t + 160; st.op.t = 1; idle(2500); run();
+      },
+      state: st,
+    };
+    // Shown from the moment the page loads so it reads as the agent's; fades if idle.
+    st.op.t = 0.85; idle(3000); run();
   };
   if (document.readyState !== 'loading') add();
   else document.addEventListener('DOMContentLoaded', add);
 })();
 """
 
-# Glide the overlay cursor to (x, y) via a CSS transition — a VISIBLE travel
-# the user can watch, independent of Playwright's slow_mo (a real stepped
-# mouse-move would be multiplied by slow_mo and crawl). Pair with a short sleep
-# before the click. This is the ONLY thing that moves the dot — so it always
-# represents the agent, never the user.
+
 def _cursor_js() -> str:
     """The cursor script in the accent of the look in use."""
     try:
@@ -85,19 +130,16 @@ def _cursor_js() -> str:
     return _CURSOR_JS.replace("__RGB__", f"{r},{g},{b}")
 
 
+# Glide the pointer to (x, y): a visible travel independent of Playwright's
+# slow_mo, settled within ~0.45 s. Pair with a short sleep before the click. The
+# only thing that moves it, so it always represents the agent, never the user.
 _CURSOR_GLIDE_JS = r"""
-([x, y]) => {
-  const c = document.getElementById('__hearth_cursor');
-  if (!c) return;
-  c.style.opacity = '1';   // pop back in for this action
-  c.style.transition = 'left .45s ease, top .45s ease, opacity .4s';
-  c.style.left = x + 'px';
-  c.style.top = y + 'px';
-  // Fade the dot out once the agent stops acting (idle); the next glide pops
-  // it back. Keeps the screen clean while the user reads, signals when active.
-  if (window.__hearthCursorFade) clearTimeout(window.__hearthCursorFade);
-  window.__hearthCursorFade = setTimeout(() => { c.style.opacity = '0'; }, 2500);
-}
+([x, y]) => { if (window.__hearthCursor) window.__hearthCursor.glide(x, y); }
+"""
+
+# The click itself: one pulse of the dot.
+_CURSOR_PRESS_JS = r"""
+() => { if (window.__hearthCursor) window.__hearthCursor.press(); }
 """
 
 
@@ -387,6 +429,7 @@ def _cmd_click(page, args: dict) -> str:
                         cy = bb["y"] + bb["height"] / 2
                         page.evaluate(_CURSOR_GLIDE_JS, [cx, cy])
                         time.sleep(0.55)  # let the cursor visibly travel + land
+                        page.evaluate(_CURSOR_PRESS_JS)
                 except Exception:
                     pass
                 loc.click()
