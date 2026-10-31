@@ -102,7 +102,7 @@ def identify(route):
 PANE = """() => {
   const p = document.getElementById('models-pane-mine');
   const vis = (el) => !!el && el.offsetParent !== null;
-  const rows = [...p.querySelectorAll('.model-row')].filter(vis);
+  const rows = [...p.querySelectorAll('.model-row')].filter(r => vis(r) && !r.closest('#mine-folders'));   // folders aren't models
   return { shown: vis(p), text: p.innerText, html: p.innerHTML,
            rows: rows.map(r => r.querySelector('.model-name')?.innerText || ''),
            load: [...p.querySelectorAll('[data-img-load]')].filter(vis).map(b => b.dataset.imgLoad),
@@ -113,7 +113,8 @@ PANE = """() => {
 
 with sync_playwright() as pw:
     try:
-        browser = pw.chromium.launch(channel="msedge")
+        # Software rendering: a GPU-less session can't draw a frame, so clicks never settle.
+        browser = pw.chromium.launch(channel="msedge", args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])
     except Exception as e:
         print(f"skipped: no browser to run the page in ({type(e).__name__})")
         srv.shutdown()
@@ -126,6 +127,12 @@ with sync_playwright() as pw:
     pg.route("**/api/images/load", load)
     pg.route("**/api/images/delete", delete)
     pg.route("**/api/images/identify", identify)
+    pg.route("**/api/llmserver/hf-search*", lambda r: r.fulfill(json={"results": []}))
+    # Every folder models are read from, as My Models' Model folders lists them.
+    pg.route("**/api/model-folders", lambda r: r.fulfill(json={
+        "chat": os.path.join(work, "models"), "chat_also": [{"path": "C:\\x\\.lmstudio\\models", "from": "LM Studio"}],
+        "images": [{"path": own, "own": True}, {"path": os.path.join(work, "ComfyUI", "models"), "own": False}],
+        "forge": ""}))
     errors: list = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
     for _ in range(4):
@@ -158,8 +165,20 @@ with sync_playwright() as pw:
           b["unload"] == 1 and b["load"] == ["sd-turbo", "wan22-ti2v"])
     check(f"the My Models count has chat and image models ({b['count']})", b["count"] == "4")
     flat = b["text"].replace("\n", " ")
-    check("the folders are shown, the person's own one too", "ComfyUI" in flat and "Inglen's own" in flat)
-    check("a family still missing a file says which", "needs T5-XXL" in b["html"])
+    pg.evaluate("modelsRenderFolders()")
+    pg.wait_for_timeout(500)
+    fold = pg.evaluate("document.getElementById('mine-folders')?.innerText || ''").replace("\n", " ")
+    check("one Model folders section has the chat folder and the image ones, the person's own one too",
+          "Chat models" in fold and os.path.join(work, "models") in fold and "ComfyUI" in fold and "Inglen's own" in fold)
+    check("My Models no longer lists what else the engine can run", "What else it can run" not in b["html"]
+          and "Wan 2.1 T2V" not in b["text"])
+    pg.click(".models-tab[data-tab=discover]")
+    pg.wait_for_timeout(1200)
+    disc = pg.evaluate("document.getElementById('disc-images')?.innerText || ''")
+    check("Discover lists every family the engine runs under Image & video",
+          "Image & video" in disc and "Wan 2.1 T2V" in disc and "Z-Image Turbo" in disc)
+    pg.click(".models-tab[data-tab=mine]")
+    pg.wait_for_timeout(600)
 
     pg.click("[data-mine-kind=video]")
     pg.wait_for_timeout(300)
