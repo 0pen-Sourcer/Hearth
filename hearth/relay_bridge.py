@@ -189,6 +189,19 @@ def live() -> Dict[str, Any]:
         return {}
 
 
+def bridge_up() -> bool:
+    """The phone bridge is running on this PC (it writes its pid as it starts)."""
+    try:
+        with open(LIVE_FILE, encoding="utf-8") as f:
+            pid = int((json.load(f) or {}).get("pid") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    if pid == os.getpid():
+        return True
+    from .bridge_status import _alive
+    return bool(pid) and _alive(pid)
+
+
 def phones() -> List[Dict[str, Any]]:
     return [{"id": phone_id(R.unb64(p["pub"])), "name": p.get("name") or "Phone", "at": p.get("at")}
             for p in _read().get("phones", [])]
@@ -2121,7 +2134,7 @@ class Bridge:
         if kind == "call_me":
             from . import call_me
             # Checked again here: the rules may have changed since it was asked for.
-            if call_me.may_call(str(ev.get("reason") or ""))[0]:
+            if call_me.allowed(ev):
                 threading.Thread(target=self.ring, args=(ev,), daemon=True, name="relay-ring").start()
             return
         if kind == "phone_notice":
@@ -2130,6 +2143,9 @@ class Bridge:
                     "body": str(ev.get("body") or ""), "c": str(ev.get("c") or "")}
             threading.Thread(target=lambda: [self.adapter.notify(chat, note, urgent=True) for chat in phones],
                              daemon=True, name="relay-notice").start()
+            return
+        if kind == "to_phone":
+            threading.Thread(target=self.to_phone, args=(ev,), daemon=True, name="relay-to-phone").start()
             return
         out: Optional[Dict[str, Any]] = None
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
@@ -2148,6 +2164,23 @@ class Bridge:
                     self.adapter._push(chat, out)
             finally:
                 cc._TURN.ctx = prev
+
+    def to_phone(self, ev: Dict[str, Any]) -> None:
+        """A message or a file the window or terminal sent to the phone (send_to_phone): into the
+        phone's own chat, like a text, with a notification for a phone that isn't looking."""
+        from . import persona
+        text, path = str(ev.get("text") or ""), str(ev.get("path") or "")
+        prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+        try:
+            for chat in list(self.adapter.rooms):
+                if text:
+                    self.adapter._push(chat, {"type": "text", "text": text})
+                if path and os.path.isfile(path):
+                    self.adapter.send_file(chat, path)
+                self.adapter.notify(chat, {"kind": "done", "title": persona.NAME,
+                                           "body": text or os.path.basename(path), "c": ""}, urgent=True)
+        finally:
+            cc._TURN.ctx = prev
 
     def _mirror(self, phones: List[str], ev: Dict[str, Any]) -> None:
         """A reply the window is writing, shown on the phones in that chat as it comes."""

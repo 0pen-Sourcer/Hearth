@@ -100,6 +100,22 @@ def _other_agents_line() -> str:
             "hand it over with delegate and relay the answer.\n")
 
 
+PHONE_LINE = (
+    "\nTheir phone is paired with this PC (Inglen Plus): send_to_phone puts a message, picture or "
+    "file on it, and call_phone rings it. Ring only when they asked to be called (\"call me when "
+    "it's done\": call once it's done) or something important can't wait while they're away from "
+    "the PC; never for a routine reply.\n")
+
+
+def _phone_line() -> str:
+    """Only when it is true: Plus on and a phone paired. Changes when they pair or unpair, not per turn."""
+    try:
+        from .call_me import paired
+        return PHONE_LINE if paired() else ""
+    except Exception:
+        return ""
+
+
 def system_prompt(voice: bool = False) -> str:
     # Date only (no %H:%M) so the system prompt stays byte-identical all day —
     # a minute-resolution stamp here changes the prefix every 60s and forces the
@@ -285,6 +301,10 @@ one short goodbye line, then end_session. A mid-task "thanks" is not a goodbye.
     skills_block = skills_for_prompt()
     if skills_block:
         parts.append("\n" + skills_block + "\n")
+
+    phone = _phone_line()
+    if phone:
+        parts.append(phone)
 
     if profile:
         # The USER-model layer (who this person is + how they want replies),

@@ -95,12 +95,13 @@ def whats_going_on() -> str:
 
 
 @mcp.tool()
-def call_me(message: str) -> str:
+def call_me(message: str, asked: bool = True) -> str:
     """Ring the person's phone through Inglen and say `message` when they answer. Use it when they
-    asked to be called ("call me when you're done", "call me if it fails") or something can't wait.
+    asked to be called ("call me when you're done", "call me if it fails"), once that has happened,
+    or, with asked false, for something important that can't wait. Never for a routine update.
     One or two short spoken sentences: what is done, or what you need from them."""
     from hearth import call_me as _call_me
-    return _call_me.ask_for(message)
+    return _call_me.ask_for(message, asked=asked)
 
 
 if __name__ == "__main__":

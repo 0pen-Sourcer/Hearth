@@ -147,7 +147,8 @@ check("send_to_phone in plain words", cc._what("send_to_phone", {"message": "Rel
 
 check("from the window (no app turn), it still asks", tools.mode_allows("send_to_phone", {"message": "x"}) is False)
 check("and with no app connected it says so",
-      tools._send_to_phone({"message": "x"}).startswith("Error: no chat app is connected"))
+      tools._send_to_phone({"message": "x"}).startswith("Error: no phone to send to")
+      and "no chat app" in tools._send_to_phone({"message": "x"}))
 
 src = open(os.path.join(ROOT, "hearth", "tools.py"), encoding="utf-8").read()
 check("a screenshot's result doesn't shout orders", "TELL THEM WHAT'S" not in src and "RIGHT NOW in" not in src)

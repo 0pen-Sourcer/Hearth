@@ -134,9 +134,10 @@ def check(force: bool = False) -> Dict[str, Any]:
     return d
 
 
-def status() -> Dict[str, Any]:
-    """{plus: bool, key_hint, checked, offline_grace, checkout} for the app."""
-    d = check()
+def status(fresh: bool = True) -> Dict[str, Any]:
+    """{plus: bool, key_hint, checked, offline_grace, checkout} for the app. Without
+    `fresh`, the last check as saved, never asking Dodo (for the system prompt)."""
+    d = check() if fresh else _read()
     has = bool(d.get("key"))
     fresh = bool(d.get("owner")) or time.time() - float(d.get("checked") or 0) < GRACE_S
     on = has and bool(d.get("valid")) and fresh
@@ -145,5 +146,5 @@ def status() -> Dict[str, Any]:
             "lapsed": has and not on, "checked": d.get("checked"), "checkout": checkout_url()}
 
 
-def active() -> bool:
-    return status()["plus"]
+def active(fresh: bool = True) -> bool:
+    return status(fresh)["plus"]

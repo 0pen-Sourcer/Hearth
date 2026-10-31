@@ -7366,7 +7366,8 @@ def _focus_window(p: Dict) -> str:
 def _send_to_phone(p: Dict) -> str:
     """Send a message or a file from this PC to the owner's phone. In a turn that
     came from the phone app or a chat app, that is this same conversation; from the
-    window or the terminal, the connected chat app (Telegram first)."""
+    window or the terminal, the Inglen app on a phone paired through Plus, else the
+    connected chat app (Telegram first)."""
     from . import channel_core
     channel = (p.get("channel") or "").strip().lower()
     message = (p.get("message") or "").strip()
@@ -7389,13 +7390,24 @@ def _send_to_phone(p: Dict) -> str:
             return f"Error: it didn't send: {type(e).__name__}: {e}"
         what = " and ".join(x for x in ("the message" if message else "", os.path.basename(path) if path else "") if x)
         return f"Sent {what} here, in this conversation: they see it now."
+    if channel in ("", "app"):
+        from . import call_me
+        no = call_me.reach()
+        if not no:
+            from . import live_bus
+            live_bus.publish({"kind": "to_phone", "text": message, "path": os.path.abspath(path) if path else ""})
+            what = " and ".join(x for x in ("the message" if message else "", os.path.basename(path) if path else "") if x)
+            return f"Sent {what} to their phone, in the Inglen app, with a notification."
+        if channel == "app":
+            return f"Error: couldn't reach the Inglen app: {no}."
     if not channel:
         for ch in ("telegram", "discord"):
             if channel_core.config_of(ch).get("bot_token") and channel_core.owner_of(ch):
                 channel = ch
                 break
         else:
-            return "Error: no chat app is connected and paired (Settings > Connectors)."
+            return ("Error: no phone to send to: the Inglen app isn't reachable (" + no + ") and no chat app "
+                    "is connected (Settings > Connectors).")
     out = channel_core.push(channel, message) if message else ""
     if path and not out.startswith("Error"):
         out = channel_core.push_file(channel, path)
@@ -7490,19 +7502,54 @@ TOOL_DEFINITIONS.append({
     "name": "send_to_phone",
     "description": (
         "Send a message or a file (a screenshot, a photo, a PDF) from this PC to the user's "
-        "phone. When they are talking to you from the phone app or a chat app, it goes to that "
-        "same conversation; from the window or terminal, to the chat app they connected "
-        "(Telegram, or Discord as a DM). Use for 'send me a photo', 'text me this', 'ping my "
-        "phone'. Leave channel out unless they named one."
+        "phone, where it arrives with a notification. When they are talking to you from the phone "
+        "app or a chat app, it goes to that same conversation; from the window or terminal, to "
+        "the Inglen app on their paired phone, else the chat app they connected (Telegram, or "
+        "Discord as a DM). Use for 'send me a photo', 'text me this', 'ping my phone'. It never "
+        "rings: to ring them, use call_phone. Leave channel out unless they named one."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "channel": {"type": "string", "enum": ["telegram", "discord"], "description": "Leave out for whichever is connected."},
+            "channel": {"type": "string", "enum": ["app", "telegram", "discord"],
+                        "description": "Leave out for whichever reaches them (the Inglen app first)."},
             "message": {"type": "string", "description": "The text to send."},
             "path": {"type": "string", "description": "A file on this PC to send (a screenshot, a photo, a PDF): it arrives as an attachment."},
         },
         "required": ["message"],
+    },
+})
+
+def _call_phone(p: Dict) -> str:
+    """Ring the paired phone through call_me, under its rules."""
+    from . import call_me, memory
+    message = (p.get("message") or "").strip()
+    if not message:
+        return "Error: give the message they hear when they answer."
+    return call_me.ask_for(message, chat=memory.current_chat(), asked=bool(p.get("asked")))
+
+
+_HANDLERS["call_phone"] = _call_phone
+TOOL_DEFINITIONS.append({
+    "name": "call_phone",
+    "description": (
+        "Ring the user's phone (the Inglen app, paired through Plus): when they answer, they hear "
+        "`message` and can talk to you in the call. Call when they asked to be called ('call me "
+        "when the backup finishes': once it has finished, saying how it went), or, rarely, for "
+        "something important and time-sensitive while they're away from the PC. Never for a routine "
+        "reply, a greeting or a status update: those go by send_to_phone. In their quiet hours or "
+        "while they're at the PC it doesn't ring, and the result says so; then tell them another way."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "message": {"type": "string",
+                        "description": "What happened or what you need from them, one or two short spoken "
+                                       "sentences ('the backup finished, 40 GB, no errors')."},
+            "asked": {"type": "boolean",
+                      "description": "true when they asked to be called; false when calling on your own judgment."},
+        },
+        "required": ["message", "asked"],
     },
 })
 
@@ -8342,6 +8389,7 @@ _DRYRUN_GUARDED = {
     "extract_archive_file",              # writes files out of an archive
     "start_job",                         # a shell command, in the background
     "send_to_phone",                     # a real message to a real phone
+    "call_phone",                        # rings a real phone
     "connectors",                        # connects an app, lets someone in
     "helper_changes",                    # brings a helper's changes into real folders
     "race_helpers",                      # starts agent programs and runs a command
@@ -8720,6 +8768,7 @@ _DEFERRED_TOOLS = {
     "race_helpers",        # comparing agents is an occasional ask
     "list_jobs",           # start_job/get_job_result stay core
     "send_to_phone",       # starting a message to the phone is rare
+    "call_phone",          # so is ringing it; the prompt names both when a phone is paired
     "agent_sessions",      # reaching a coding agent's session is an occasional ask
     "connectors",          # setting up a chat app is occasional
     "focus_window",        # niche window management
@@ -9379,7 +9428,7 @@ _TOOL_CATEGORY = {
     # Reminders & alerts
     "set_reminder": "Reminders & alerts", "list_reminders": "Reminders & alerts",
     "cancel_reminder": "Reminders & alerts", "snooze_reminder": "Reminders & alerts", "pause_reminder": "Reminders & alerts",
-    "notify": "Reminders & alerts", "send_to_phone": "Reminders & alerts", "connectors": "Reminders & alerts",
+    "notify": "Reminders & alerts", "send_to_phone": "Reminders & alerts", "call_phone": "Reminders & alerts", "connectors": "Reminders & alerts",
     # Email
     "read_inbox": "Email", "send_email": "Email",
     # Voice

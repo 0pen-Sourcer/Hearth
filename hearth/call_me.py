@@ -175,20 +175,62 @@ def request(reason: str, why: str, chat: str = "", ask: str = "", tap: bool = Fa
         return False
 
 
-def ask_for(why: str, chat: str = "") -> str:
-    """A call they asked for themselves ("call me when you're done"), from Inglen or one of their coding
-    agents: it rings even with Inglen's own calls off, but not in their quiet hours, and not while they
-    are at the PC. What happened, in a line for whoever asked."""
+def paired() -> bool:
+    """Plus is on and a phone is paired with this PC. Read from what is saved, never over the network:
+    the system prompt asks every turn."""
+    try:
+        from . import plus, relay_bridge
+        return bool(relay_bridge.phones()) and plus.active(fresh=False)
+    except Exception:
+        return False
+
+
+def reach() -> str:
+    """'' when a paired phone can be reached now, else why not, in a few words."""
+    try:
+        from . import live_bus, relay_bridge
+        if not relay_bridge.phones():
+            return "no phone is paired with this PC (Settings > Plus)"
+        # The bridge hears of a call or a message through the window's event stream.
+        if not relay_bridge.bridge_up() or not (live_bus.IN_WINDOW or live_bus.window_url()):
+            return "the phone link isn't running; it runs while Inglen is open on this PC"
+    except Exception as e:
+        return f"the phone link didn't answer ({type(e).__name__})"
+    return ""
+
+
+def allowed(ev: Dict[str, Any], r: Optional[Dict[str, Any]] = None, now: Optional[datetime] = None) -> bool:
+    """Whether a wanted ring may still go: one they asked for only needs it not to be quiet hours,
+    one the agent judged worth it needs calls on, the rest their reason's switch."""
+    r = rules() if r is None else r
+    if ev.get("asked"):
+        return not quiet_now(r, now)
+    if ev.get("judged"):
+        return bool(r.get("call_me")) and not quiet_now(r, now)
+    return may_call(str(ev.get("reason") or ""), r, now)[0]
+
+
+def ask_for(why: str, chat: str = "", asked: bool = True) -> str:
+    """Ring the phone now, from Inglen or one of their coding agents. One they asked for ("call me when
+    you're done") rings even with Inglen's own calls off; one the agent judged worth a call needs calls
+    on. Neither in their quiet hours, nor while they are at the PC. What happened, in a line for the agent."""
     try:
         r = rules()
+        if not asked and not r.get("call_me"):
+            return (f"Not calling: they haven't let {agent_name(r)} call on its own (Settings > Plus). "
+                    "Send it to the phone as a message instead.")
         if quiet_now(r):
-            return "Not calling: it's their quiet hours. Tell them in the session instead."
+            return "Not calling: it's their quiet hours. Send it as a message instead."
         if at_pc():
-            return "Not calling: they're at the PC right now. Tell them in the session."
+            return "Not calling: they're at the PC right now. Tell them here."
+        no = reach()
+        if no:
+            return f"Couldn't call: {no}."
         from . import live_bus
         live_bus.publish({"kind": "call_me", "reason": "job", "why": _clip(why, 160), "say": opener("job", why),
                           "c": str(chat or ""), "ask": "", "tap": False, "question": "",
-                          "key": f"asked:{chat}:{time.time():.0f}"})
+                          "asked" if asked else "judged": True,
+                          "key": f"{'asked' if asked else 'judged'}:{chat}:{time.time():.0f}"})
         return "Calling their phone now; they hear this when they answer."
     except Exception as e:
         return f"Couldn't call: {type(e).__name__}: {e}"
