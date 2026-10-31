@@ -357,7 +357,7 @@ _SUB_CHOICES = {
                ("mic-test", "check the level"), ("duplex", "hold the mic while I speak")],
     "/models": [("disk", "models on this PC"), ("free", "free ones on this provider"), ("hf", "search Hugging Face"),
                 ("get", "download"), ("use", "load one on this PC"), ("stop", "stop the local server"),
-                ("helper", "a second model for helpers")],
+                ("helper", "a second model for helpers"), ("folders", "where models are read from")],
     "/agents": [("update", "update one"), ("setup", "install and sign in")],
     "/lockdown": [("on", ""), ("off", "")], "/listen": [("on", ""), ("off", "")],
     "/mem": [("tree", "by category"), ("map", "as a graph")], "/perms": [("forget", "one tool"), ("reset", "all")],
@@ -2135,6 +2135,54 @@ class JarvisCLI:
             self.current_model = live or model
         print(f"{C_DIM}↳ the window switched me to {C_RESET}{self._model_label()}")
 
+    def _cmd_model_folders(self, arg: str) -> None:
+        """/models folders: where models are read from, as My Models' Model folders shows it.
+          /models folders                 - list them
+          /models folders chat <path>     - chat models download here (from the next start)
+          /models folders add <path>      - read an image or video models folder in place
+          /models folders remove <n|path> - stop reading one"""
+        from hearth import llmserver, sdserver
+        from hearth.web import _model_folders
+        words = arg.split(None, 1)
+        act = words[0].lower() if words else ""
+        val = words[1].strip().strip('"') if len(words) > 1 else ""
+        if act == "chat" and val:
+            r = llmserver.set_models_dir(val)
+            print(f"{C_OK}chat models download to {r['path']} from the next start{C_RESET}" if r.get("ok")
+                  else f"{C_ERR}couldn't use that folder: {r.get('error')}{C_RESET}")
+            return
+        if act in ("add", "remove") and val:
+            if act == "remove" and val.isdigit():
+                mine = [d["path"] for d in _model_folders()["images"] if not d["own"]]
+                n = int(val) - 1
+                if not 0 <= n < len(mine):
+                    print(f"{C_ERR}no folder {val}: /models folders lists them{C_RESET}")
+                    return
+                val = mine[n]
+            r = sdserver.set_folder(val, add=act == "add")
+            print(f"{C_OK}{'reading' if act == 'add' else 'stopped reading'} {val}{C_RESET}" if r.get("ok")
+                  else f"{C_ERR}{r.get('error')}{C_RESET}")
+            return
+        if act:
+            print(f"{C_DIM}/models folders · chat <path> · add <path> · remove <n|path>{C_RESET}")
+            return
+        f = _model_folders()
+        print(f"{C_TOOL}Chat models{C_RESET}")
+        print(f"  {f['chat']}  {C_DIM}downloads go here{C_RESET}")
+        for d in f["chat_also"]:
+            print(f"  {d['path']}  {C_DIM}{d['from']}, read where they are{C_RESET}")
+        print(f"{C_TOOL}Image and video models{C_RESET}")
+        n = 0
+        for d in f["images"]:
+            if d["own"]:
+                print(f"  {d['path']}  {C_DIM}Inglen's own{C_RESET}")
+            else:
+                n += 1
+                print(f"  {n}. {d['path']}  {C_DIM}yours, read in place{C_RESET}")
+        if f.get("forge"):
+            print(f"  {C_DIM}Forge's models are at {f['forge']}: /models folders add <path> uses them{C_RESET}")
+        print(f"{C_DIM}  change: /models folders chat <path> · add <path> · remove <n>{C_RESET}")
+
     async def _cmd_models(self, raw: str) -> None:
         """Full model picker/downloader - matches the GUI Models tab.
 
@@ -2147,11 +2195,16 @@ class JarvisCLI:
           /models engine         - show the inference engine; `engine install` / `engine update` to fetch llama.cpp
           /models stop           - stop the built-in server
           /models helper <n|path|off> - a second, smaller model for helpers and sub-agents
+          /models folders        - where models are read from; change them
         """
         from hearth import llmserver
         parts = raw.strip().split(None, 2)
         sub = parts[1].lower() if len(parts) > 1 else ""
         arg = parts[2] if len(parts) > 2 else ""
+
+        if sub in ("folders", "folder", "dirs"):
+            self._cmd_model_folders(arg)
+            return
 
         if sub == "helper":
             hs = llmserver.helper_status()
