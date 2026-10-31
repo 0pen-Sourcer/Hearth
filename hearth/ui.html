@@ -1349,6 +1349,10 @@
   .img-part span { color: var(--fg-dim); }
   .img-part code { font-family: var(--mono); font-size: 11.5px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .img-part em { font-style: normal; color: var(--fg-faint); font-size: 11.5px; font-family: var(--mono); }
+  .img-extra { margin-top: 8px; }
+  .img-extra > summary { cursor: pointer; font-size: 12px; color: var(--fg-faint); padding: 4px 2px; list-style: none; }
+  .img-extra > summary::before { content: '▸ '; }
+  .img-extra[open] > summary::before { content: '▾ '; }
   .fold-label { font-size: 12px; font-weight: 600; color: var(--fg-dim); margin: 2px 0 8px; }
   .tool .t-name.t-said { font-family: inherit; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
   .tool .t-args {
@@ -3679,12 +3683,15 @@
   .toast .body .mp-row { padding: 6px 8px; margin: 3px 0 0; font-size: 12.5px; }
   .toast .body .mp-row .mp-s { font: 11px var(--mono); color: var(--fg-faint); }
   .ob-get { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
-  .ob-get .mp-row { border: 1px solid var(--border); padding: 10px 12px; }
-  .ob-get .mp-row .mp-s { white-space: normal; }
+  .ob-get .mp-row, .img-pick .mp-row { border: 1px solid var(--border); padding: 10px 12px; }
+  .ob-get .mp-row .mp-s, .img-pick .mp-row .mp-s { white-space: normal; }
+  .img-pick { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .img-pick .mp-row .mp-s { font: 11.5px var(--mono); color: var(--fg-faint); }
+  .disc-more { margin-top: 10px; font-size: 12px; color: var(--fg-faint); padding: 2px 4px; }
   .ob-get-size { flex: none; font: 11.5px var(--mono); color: var(--fg-dim); }
-  .ob-get .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
+  .ob-get .upd-tick, .img-pick .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
     transition: opacity .16s ease, transform .2s cubic-bezier(.2, .9, .3, 1.2); }
-  .ob-get .mp-row.cur .upd-tick { opacity: 1; transform: none; }
+  .ob-get .mp-row.cur .upd-tick, .img-pick .mp-row.cur .upd-tick { opacity: 1; transform: none; }
   .ob-get-total { margin-top: 10px; font-size: 12px; color: var(--fg-faint); }
   .toast .upd-tick { flex: none; color: var(--accent); opacity: 0; transform: scale(.7);
     transition: opacity .16s ease, transform .2s cubic-bezier(.2, .9, .3, 1.2); }
@@ -19345,12 +19352,13 @@ function _imgInstallButton() {
   b.textContent = busy ? `Installing… ${d.pct || 0}%` + (d.total ? ` of ${(d.total / 1e9).toFixed(2)} GB` : '')
     : (d && d.status === 'paused' ? 'Resume the install' : 'Install the engine');
 }
-async function imagesInstall() {
+async function imagesInstall(tag) {
   dlToggle(true);
   dlUpsert(IMG_DL_ID, { name: 'Image engine', kind: 'imgengine', status: 'downloading', pct: 0 });
   _imgInstallButton();
   try {
-    const resp = await fetch('/api/images/install', { method: 'POST' });
+    const resp = await fetch('/api/images/install', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                      body: JSON.stringify({ tag: tag || '' }) });
     const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
     for (;;) {
       const { done, value } = await reader.read();
@@ -19446,7 +19454,7 @@ function _applyMineKind() {
   });
   const none = img.querySelector('[data-img-none]');
   if (none) {
-    const rows = [...img.querySelectorAll('[data-img-main] [data-img-kind]')];
+    const rows = [...img.querySelectorAll('[data-img-main] .model-row[data-row][data-img-kind]')];
     none.hidden = !rows.length || rows.some(r => !r.hidden);
     const sub = img.querySelector('[data-img-sub]');
     if (sub) sub.textContent = `${rows.filter(r => !r.hidden).length} ready on this PC${sub.dataset.loading ? ' · loading one…' : ''}`;
@@ -19503,7 +19511,7 @@ function _paintMineImages() {
       Without it, pictures are made with a cloud provider you have a key for.</div>
       <div><button class="model-action" id="img-install">Install the engine</button></div></div></div>`;
     box.innerHTML = html;
-    $('img-install').onclick = imagesInstall;
+    $('img-install').onclick = () => imagesInstall();
     _imgInstallButton();
     _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
     return;
@@ -19535,38 +19543,32 @@ function _paintMineImages() {
         </div>
       </div></div>`;
   }).join('')
-    : `<div class="engine-note">No image or video model here yet. <b>Discover, Image &amp; video</b> downloads one with every
-       part it needs. A ComfyUI or WebUI models folder you already have works as it is: add it under <b>Model folders</b> below.</div>`;
-  html += '</div></div>';
-  // A model file is here but the family needs more files beside it.
-  if (started.length) {
-    html += `<div class="models-section" data-img-sec="1"><div class="sec-head"><h3>Almost ready</h3><span class="sub">the model is here, a part is missing</span></div><div class="sec-body">` +
+    : `<div class="engine-note">None yet. <b>Discover</b> has them, and a ComfyUI or WebUI folder you already use can be added under <b>Model folders</b>.</div>`;
+  // The rest folds into one quiet line, so the section stays the size of the chat one:
+  // a model file whose family needs a part more, and files whose names don't say what they are.
+  const unnamed = o.unnamed || [], unsure = o.unsure || [];
+  const extra = [started.length ? `${started.length} almost ready` : '',
+                 unnamed.length + unsure.length ? `${unnamed.length + unsure.length} not placed yet` : ''].filter(Boolean);
+  if (extra.length) {
+    html += `<details class="img-extra"${_modelsState.imgExtraOpen ? " open" : ""}><summary>${extra.join(' · ')}</summary>` +
       started.map(r => `<div class="model-row" data-img-kind="${r.video ? 'video' : 'image'}"><div class="model-info"><div class="model-name">${esc(r.name)}${kind(r)}</div>
-        <div class="model-meta">${kinds(r)}</div>
         <div class="model-meta">still needs ${esc(r.missing.join(', '))}${r.url ? ` &middot; <a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">where to get it &#8599;</a>` : ''}</div></div>
         <div class="cell-size">${r.size_gb ? r.size_gb + ' GB' : ''}</div></div>`).join('') +
-      '</div></div>';
-  }
-  // Files whose names don't say what they are: loading one once tells.
-  const unnamed = o.unnamed || [], unsure = o.unsure || [];
-  if (unnamed.length || unsure.length) {
-    html += `<div class="models-section" data-img-sec="1"><div class="sec-head"><h3>Not placed yet</h3><span class="sub">${unnamed.length + unsure.length} file${unnamed.length + unsure.length === 1 ? '' : 's'}</span></div><div class="sec-body">` +
       unnamed.map(f => `<div class="model-row" data-img-kind="any"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
         <div class="model-meta">Its name doesn't say which kind of model it is. Loading it once tells, and it's remembered.</div></div>
         <button class="model-action" data-img-identify="${esc(f.id)}">Find out</button></div>`).join('') +
       unsure.map(f => `<div class="model-row" data-img-kind="any"><div class="model-info"><div class="model-name">${esc(f.name)}</div>
         <div class="model-meta">${f.family ? `${esc(f.family)}, which nothing here runs with the files on disk` : esc(f.note || "the engine couldn't read it")}</div></div></div>`).join('') +
-      '</div></div>';
+      '</details>';
   }
-  // The engine itself: which build, and the last thing that went wrong.
-  if (st.error || o.error) {
-    html += `<div class="models-section"><div class="sec-head"><h3>Image and video engine</h3>
-      <span class="sub">stable-diffusion.cpp &middot; ${esc(o.build || '')}${o.backend ? ' &middot; ' + esc(o.backend) : ''}</span></div><div class="sec-body">` +
-      (st.error ? `<div class="engine-note" style="color:var(--err)">Last error: ${esc(st.error)}</div>` : '') +
-      (o.error ? `<div class="engine-note" style="color:var(--err)">${esc(o.error)}</div>` : '') +
-      '</div></div>';
-  }
+  // The engine's last error, one line; its build and updates are under Engine.
+  if (st.error || o.error)
+    html += `<div class="engine-note" style="color:var(--err);margin-top:8px">${esc(o.error || 'Last error: ' + st.error)}</div>`;
+  html += '</div></div>';
   box.innerHTML = html;
+  // A repaint (every status refresh) keeps the fold as it was left.
+  const fold = box.querySelector('details.img-extra');
+  if (fold) fold.addEventListener('toggle', () => { _modelsState.imgExtraOpen = fold.open; });
   box.querySelectorAll('.model-row[data-row]').forEach(row => row.addEventListener('click', (e) => {
     if (e.target.closest('button') || e.target.closest('.model-expand') || e.target.closest('a')) return;
     modelsToggleRow(row);
@@ -19609,7 +19611,6 @@ function _paintMineImages() {
        } }]);
   });
   _mineHideImageDupes(); _paintMineKinds(); _applyMineKind();
-  if (_modelsState.tab === 'discover') _paintDiscoverImages();
 }
 
 // My Models, Model folders: every folder models are read from, chat and image
@@ -19676,80 +19677,6 @@ function modelsOpenFolders() {
   setTimeout(() => $('mine-folders')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
 }
 
-// Discover, Image & video: every family the image engine runs. Picking one
-// downloads all of it (model, text encoder, VAE, any LoRA it needs) through the
-// Downloads overlay, from the repackaged repo named like it.
-function _imgDiscoverHTML() {
-  const o = _modelsState.images;
-  const q = (_modelsState.hfQuery || '').trim().toLowerCase();
-  const head = (sub) => `<div class="models-section" id="disc-images"><div class="sec-head"><h3>Image &amp; video</h3><span class="sub">${sub}</span></div><div class="sec-body">`;
-  if (!o) return head('checking the image engine…') + '</div></div>';
-  if (!o.installed) return head('needs the image engine') + `<div class="engine-note" style="margin-bottom:10px">Pictures and short videos
-      are made on this PC by stable-diffusion.cpp, a one-time download for your graphics card. Then every model it runs shows here.</div>
-      <div><button class="model-action" id="disc-img-install">Install the engine</button></div></div></div>`;
-  const rows = (o.recipes || []).filter(r => !q || (r.name + ' ' + r.id + ' ' + (r.description || '')).toLowerCase().includes(q));
-  if (!rows.length) return q ? '' : head('the engine listed none') + '</div></div>';
-  const sorted = rows.slice().sort((a, b) => (b.ready - a.ready) || a.name.localeCompare(b.name));
-  return head(`${rows.length} model famil${rows.length === 1 ? 'y' : 'ies'} the image engine runs. Download gets every part each needs.`) +
-    sorted.map(r => {
-      const rid = 'di-' + r.id.replace(/[^a-z0-9_-]/gi, '');
-      return `<div class="model-row is-expandable" data-row="${rid}" data-img-recipe="${esc(r.id)}">
-        <div class="model-info"><div class="model-name">${esc(r.name)} <span class="model-badge badge-src">${r.video ? 'video' : 'image'}</span>${r.ready ? '<span class="model-badge badge-loaded">on this PC</span>' : ''}</div>
-        <div class="model-meta">${esc(r.description || '')}</div></div>
-        <span class="model-row-chevron" aria-hidden="true">▾</span>
-        <div class="model-expand" data-expand="${rid}">
-          <div class="ex-head">What it's made of</div>
-          <div data-img-plan="${esc(r.id)}"><div class="ex-hint" style="display:flex;align-items:center;gap:8px"><span class="hf-spinner"></span> Finding its files on Hugging Face…</div></div>
-          ${r.url ? `<div class="ex-desc" style="margin-top:8px"><a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">Model page &#8599;</a><span style="color:var(--fg-faint)"> &middot; licence and what it was trained for</span></div>` : ''}
-          <div class="ex-actions">
-            <button class="model-action is-secondary" data-cancel="${rid}">Cancel</button>
-            <button class="model-action" data-img-get="${esc(r.id)}" data-img-video="${r.video ? 1 : 0}" disabled>Download</button>
-          </div>
-        </div></div>`;
-    }).join('') + '</div></div>';
-}
-function _paintDiscoverImages() {
-  const pane = $('models-pane-discover'); if (!pane) return;
-  const html = _imgDiscoverHTML();
-  let box = $('disc-images-box');
-  if (!box) { box = document.createElement('div'); box.id = 'disc-images-box'; pane.appendChild(box); }
-  if (box._was === html) return;
-  box._was = html; box.innerHTML = html;
-  const inst = $('disc-img-install'); if (inst) inst.onclick = imagesInstall;
-  box.querySelectorAll('.model-row[data-img-recipe]').forEach(row => row.addEventListener('click', (e) => {
-    if (e.target.closest('button') || e.target.closest('.model-expand') || e.target.closest('a')) return;
-    modelsToggleRow(row);
-    if (row.classList.contains('is-open')) _imgPlanInto(row);
-  }));
-  box.querySelectorAll('[data-cancel]').forEach(b => b.onclick = (e) => {
-    e.stopPropagation(); box.querySelector(`.model-row[data-row="${b.dataset.cancel}"]`)?.classList.remove('is-open');
-  });
-  box.querySelectorAll('[data-img-get]').forEach(b => b.onclick = (e) => {
-    e.stopPropagation();
-    const plan = b._plan; if (!plan) return;
-    imagesDownloadSet(plan, b.dataset.imgVideo === '1' ? 'video' : 'image');
-  });
-}
-const _GB = (n) => (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
-async function _imgPlanInto(row) {
-  const rid = row.dataset.imgRecipe, box = row.querySelector('[data-img-plan]'), btn = row.querySelector('[data-img-get]');
-  if (!box || box.dataset.loaded === '1') return;
-  let p;
-  try { p = await api('/api/images/plan?recipe=' + encodeURIComponent(rid)); } catch (e) { p = { ok: false, error: e.message }; }
-  box.dataset.loaded = '1';
-  const parts = (p.parts || []).map(x => `<div class="img-part"><span>${esc(x.kind)}</span><code title="${esc(x.label)}">${esc(x.name)}</code>
-      <em>${x.have ? 'on this PC' : _GB(x.size)}</em></div>`).join('');
-  if (!p.ok) {
-    if (btn) btn.hidden = true;             // nothing whole to download
-    box.innerHTML = (parts ? `<div class="img-parts">${parts}</div>` : '') + `<div class="ex-desc" style="margin-top:8px">There's no ready-made set
-      of its files on Hugging Face${p.missing && p.missing.length ? ` (still missing: ${esc(p.missing.join(', '))})` : ''}. Its model page says where each part is;
-      put them in a folder under <b>Model folders</b> and it shows in My Models.</div>`;
-    return;
-  }
-  box.innerHTML = `<div class="img-parts">${parts}</div><div class="ex-desc" style="margin-top:8px">From ${esc(p.repo)}, ComfyUI's repackaged files.
-    ${p.bytes ? 'About ' + _GB(p.bytes) + ' to download.' : 'Everything is already on this PC.'}</div>`;
-  if (btn) { btn._plan = p; btn.disabled = !p.bytes; btn.textContent = p.bytes ? `Download all · ${_GB(p.bytes)}` : 'On this PC'; }
-}
 // One part after another through the Downloads overlay; a part that stops stops the set.
 async function imagesDownloadSet(plan, kind) {
   const todo = (plan.parts || []).filter(x => !x.have);
@@ -19764,12 +19691,81 @@ async function imagesDownloadSet(plan, kind) {
 // Engine pane: what's running inference, and every llama.cpp build you can
 // switch to. Rolling back matters because a new build can regress on hardware
 // nobody tested.
+// Why there's no build list, or why it's an old one, in words.
+function _ghWhy(r) {
+  r = r || {};
+  if (r.stale) return `This list is from the last check: GitHub ${r.limited ? 'is limiting requests from this network for the hour' : "didn't answer just now"}.`;
+  if (r.limited) return "GitHub is limiting requests from this network for the hour, so the build list can't load yet. Your engine keeps working; look again later.";
+  if (r.error) return "Couldn't reach GitHub for the build list. Your engine keeps working offline.";
+  return 'No builds for this graphics card among the recent releases.';
+}
+
+// Models, Engine: the image engine (stable-diffusion.cpp), shown the way the chat engine is.
+function _sdEngineHTML(sb) {
+  if (!sb) return '';
+  const cur = sb.current;
+  let html = `<div class="models-section">
+      <div class="sec-head"><h3>Image and video engine</h3><span class="sub">stable-diffusion.cpp &middot; makes pictures and videos</span></div>
+      <div class="sec-body">`;
+  if (!cur) {
+    html += `<div class="model-row"><div class="model-info"><div class="model-name">Not installed</div>
+      <div class="model-meta">A one-time download built for your graphics card. Without it, pictures are made with a cloud provider you have a key for.</div></div>
+      <button class="model-action" data-sd-get="">Install</button></div></div></div>`;
+    return html;
+  }
+  const latest = (sb.builds || [])[0];
+  const behind = latest && !latest.current && latest.tag !== cur.tag && !cur.pinned;
+  html += `<div class="server-card">
+        <div class="server-card-row"><span class="k">Engine</span>
+          <span class="v">${esc(cur.tag)}<span style="color:var(--fg-faint)"> &middot; ${esc(cur.backend || '')}${cur.pinned ? ' &middot; picked by you' : ''}</span></span></div>
+        <div class="server-card-row"><span class="k">Path</span><span class="v" style="color:var(--fg-faint)">${esc(cur.path)}</span></div>
+        <div class="server-card-row"><span class="k">State</span><span class="v">${cur.running ? 'running' : 'stopped, starts when a picture is asked for'}</span></div>
+      </div>
+      ${behind ? `<div class="server-card-actions" style="margin-top:10px"><button class="btn-mini" data-sd-get="">Update to ${esc(latest.tag)}</button></div>` : ''}`;
+  const builds = sb.builds || [];
+  if (!builds.length) html += `<div class="models-empty" style="margin-top:10px">${_ghWhy(sb)}</div>`;
+  else {
+    html += `<div class="fold-label" style="margin:16px 0 8px">Available builds</div>`;
+    builds.forEach((b, i) => {
+      let badges = i === 0 ? '<span class="model-badge badge-rec">latest</span>' : '';
+      if (b.current) badges += '<span class="model-badge badge-loaded">in use</span>';
+      else if (b.installed) badges += '<span class="model-badge badge-src">installed</span>';
+      const btn = b.current ? '' : b.installed
+        ? `<button class="model-action is-secondary" data-sd-use="${esc(b.tag)}">Use this</button>`
+        : `<button class="model-action" data-sd-get="${esc(b.tag)}">Install</button>`;
+      html += `<div class="model-row${b.current ? ' is-loaded' : ''}">
+        <div class="model-info"><div class="model-name">${esc(b.tag)}${badges}</div>
+        <div class="model-meta">${b.size_mb ? b.size_mb + ' MB' : 'on this PC'}${b.backend ? ' &middot; ' + esc(b.backend) : ''}${b.published ? ' &middot; released ' + esc(b.published) : ''}${b.url ? ` &middot; <a href="${esc(b.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">notes &#8599;</a>` : ''}</div></div>
+        ${btn}</div>`;
+    });
+    if (sb.stale) html += `<div class="engine-note" style="margin-top:8px">${_ghWhy(sb)}</div>`;
+  }
+  return html + '</div></div>';
+}
+function _wireSdEngine(pane) {
+  pane.querySelectorAll('[data-sd-get]').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await imagesInstall(b.dataset.sdGet || '');
+    modelsRenderEngine();
+  }));
+  pane.querySelectorAll('[data-sd-use]').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const r = await api('/api/images/use', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: b.dataset.sdUse }) }).catch(err => ({ ok: false, error: err.message }));
+    if (r.ok) toast('Image engine build picked', b.dataset.sdUse + ' runs from the next picture on.', 'ok', 5000);
+    else toast("Couldn't use that build", r.error || '', 'err', 7000);
+    modelsRenderEngine();
+  }));
+}
+
 async function modelsRenderEngine() {
   const pane = $('models-pane-engine'); if (!pane) return;
   pane.innerHTML = '<div class="models-empty">Checking engine…</div>';
-  let rt = {}, bl = {};
+  let rt = {}, bl = {}, sb = null;
+  const sbP = api('/api/images/builds').catch(() => null);
   try { rt = await api('/api/runtime/info'); } catch {}
   try { bl = await api('/api/runtime/builds'); } catch {}
+  sb = await sbP;
   const adv = rt.advice || {}, upd = rt.update || {};
   const srcLabel = { hearth: 'downloaded llama.cpp', lmstudio: "LM Studio's build (signed)",
                      wheel: 'built-in, ships with Inglen', other: 'detected copy' }[rt.source] || (rt.source || 'unknown');
@@ -19781,7 +19777,7 @@ async function modelsRenderEngine() {
 
   let html = `
     <div class="models-section">
-      <div class="sec-head"><h3>Running now</h3><span class="sub">what actually executes your model</span></div>
+      <div class="sec-head"><h3>Chat engine</h3><span class="sub">llama.cpp &middot; runs your chat models</span></div>
       <div class="sec-body">
         <div class="server-card">
           <div class="server-card-row"><span class="k">Engine</span>
@@ -19808,7 +19804,7 @@ async function modelsRenderEngine() {
 
   const builds = bl.builds || [];
   if (!builds.length) {
-    html += `<div class="models-empty">Couldn't reach GitHub for the build list. Your current engine keeps working offline.</div>`;
+    html += `<div class="models-empty">${_ghWhy(bl)}</div>`;
   } else {
     const cap = bl.gpu_compute_cap;
     html += `<div class="models-section">
@@ -19877,9 +19873,12 @@ async function modelsRenderEngine() {
         </div>`;
     }
     if (older) html += `<button type="button" class="srv-raw-tog eng-more" onclick="this.closest('.eng-builds').classList.toggle('show-all'); this.textContent = this.closest('.eng-builds').classList.contains('show-all') ? 'Hide older builds' : 'Show ${older} older builds'">Show ${older} older builds</button>`;
+    if (bl.stale) html += `<div class="engine-note" style="margin-top:8px">${_ghWhy(bl)}</div>`;
     html += '</div></div>';
   }
+  html += _sdEngineHTML(sb);
   pane.innerHTML = html;
+  _wireSdEngine(pane);
   // Same click-to-expand behaviour models have, so an engine build can be
   // inspected before committing to a download.
   modelsWireRowClicks(pane);
@@ -19957,46 +19956,64 @@ async function modelsRenderEngine() {
 async function modelsRenderDiscover() {
   const pane = $('models-pane-discover');
   const q = _modelsState.hfQuery.trim();
-  // No search query: pre-populate with the most-downloaded GGUF repos so the
-  // tab is useful out of the box. Cached so we don't hit HF on every tab switch.
-  pane.innerHTML = '<div class="models-empty">' + (q ? 'Searching Hugging Face…' : 'Loading most-downloaded GGUF repos…') + '</div>';
-  _paintDiscoverImages();                   // shows while the search runs
-  if (!_modelsState.images) modelsRenderImages(true);
+  // No search query: pre-populate with the most-downloaded repos so the tab is
+  // useful out of the box. Image and video families the image engine runs come
+  // into the same list, by the same measure, wherever a whole download exists.
+  pane.innerHTML = '<div class="models-empty">' + (q ? 'Searching Hugging Face…' : 'Loading the most downloaded models…') + '</div>';
+  const setsP = api('/api/images/sets').catch(() => null);
   let list;
   try {
-    const url = q
-      ? '/api/llmserver/hf-search?q=' + encodeURIComponent(q)
-      : '/api/llmserver/hf-search?q=';
-    const r = await api(url);
+    const r = await api('/api/llmserver/hf-search?q=' + encodeURIComponent(q));
     list = r.results || [];
   } catch (e) {
-    pane.innerHTML = '<div class="models-empty">Search failed: ' + esc(e.message) + '</div>';
-    _paintDiscoverImages();                 // the image engine's own list doesn't need Hugging Face's search
-    return;
+    list = [];
+    _modelsState.hfError = e.message;
   }
+  const sets = await setsP;
   _modelsState.hfResults = list;
-  if (!list.length) {
-    pane.innerHTML = `<div class="models-empty">No chat models matched${q ? ' “' + esc(q) + '”' : ''}.</div>`;
-    _paintDiscoverImages();
-    if (!_modelsState.images) modelsRenderImages(true);
+  _modelsState.imgSets = sets;
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (x) => words.every(w => (x.name + ' ' + x.id + ' ' + x.blurb + ' ' + (x.video ? 'video' : 'image')).toLowerCase().includes(w));
+  const all = (sets && sets.sets) || [];
+  const fams = q ? all.filter(hit) : all.filter(x => x.ok);
+  const entries = list.map((it, i) => ({ chat: it, i, dl: it.downloads || 0 }))
+    .concat(fams.map(x => ({ img: x, dl: x.downloads || 0 })));
+  if (!q) entries.sort((a, b) => b.dl - a.dl);
+  else entries.sort((a, b) => (a.img && !a.img.ok) - (b.img && !b.img.ok));   // what can't be downloaded whole goes last
+  const lead = sets && sets.installed === false ? _imgEngineRow()
+    : sets && !sets.ready ? _imgFindingRow() : '';
+  if (!entries.length && !lead) {
+    pane.innerHTML = `<div class="models-empty">${_modelsState.hfError ? 'Search failed: ' + esc(_modelsState.hfError) : 'Nothing matched' + (q ? ' “' + esc(q) + '”' : '') + '.'}</div>`;
     return;
   }
   const subText = q
-    ? `${list.length} repo${list.length === 1 ? '' : 's'} matching “${esc(q)}”`
-    : `The chat models downloaded most this month, the ones their makers publish first. Search for anything else.`;
+    ? `${entries.length} matching “${esc(q)}”`
+    : `The models downloaded most this month, the ones their makers publish first. Search for anything else.`;
   let html = `<div class="models-section">
     <div class="sec-head">
-      <h3>${q ? 'Hugging Face results' : 'Popular chat models'}</h3>
+      <h3>${q ? 'Results' : 'Popular models'}</h3>
       <span class="sub">${subText}</span>
     </div>
-    <div class="sec-body">`;
-  for (let i = 0; i < list.length; i++) {
-    const it = list[i];
-    const caps = modelsCapTags(it.hf_repo, it.tags || []);
-    const params = it.params_b ? it.params_b + 'B' : modelParamsLabel(it.hf_repo);
-    const rowId = 'hf-' + i;
-    const media = it.kind === 'image' || it.kind === 'video';
-    html += `
+    <div class="sec-body">` + lead;
+  for (const e of entries) html += e.chat ? _discoverChatRow(e.chat, e.i) : _discoverImageRow(e.img);
+  const rest = q ? 0 : all.filter(x => !x.ok).length;
+  if (rest) html += `<div class="disc-more">${rest} more the image engine can run need their files gathered by hand. Search for one by name to see it.</div>`;
+  html += '</div></div>';
+  pane.innerHTML = html;
+  modelsWireRowClicks(pane);
+  _wireImagePicks(pane);
+  const inst = $('disc-img-install'); if (inst) inst.onclick = (ev) => { ev.stopPropagation(); imagesInstall(); };
+  clearTimeout(_modelsState.setsPoll);
+  if (sets && sets.installed !== false && (!sets.ready || sets.updating) && _modelsState.tab === 'discover')
+    _modelsState.setsPoll = setTimeout(() => { if (_modelsState.tab === 'discover' && !pane.querySelector('.model-row.is-open')) modelsRenderDiscover(); }, sets.ready ? 30000 : 5000);
+}
+
+function _discoverChatRow(it, i) {
+  const caps = modelsCapTags(it.hf_repo, it.tags || []);
+  const params = it.params_b ? it.params_b + 'B' : modelParamsLabel(it.hf_repo);
+  const rowId = 'hf-' + i;
+  const media = it.kind === 'image' || it.kind === 'video';
+  return `
       <div class="model-row is-expandable" data-row="${rowId}" data-hf-repo="${esc(it.hf_repo)}">
         <div class="model-info">
           <div class="model-name">${esc(it.hf_repo)}${media ? ` <span class="model-badge badge-src">${it.kind}</span>` : ''}${it.makers ? ' <span class="model-maker" title="Published by the people who made this model, not a copy or a remix">' + _ICON_MAKER + '</span>' : ''}</div>
@@ -20023,12 +20040,76 @@ async function modelsRenderDiscover() {
           </div>
         </div>
       </div>`;
-  }
-  html += '</div></div>';
-  pane.innerHTML = html;
-  modelsWireRowClicks(pane);
-  _paintDiscoverImages();
-  if (!_modelsState.images) modelsRenderImages(true);
+}
+
+// An image or video family, in a chat row's shape. Its parts are picked like
+// agent updates: a tick each, on unless the part is on this PC already.
+const _GB = (n) => (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + ' GB';
+function _discoverImageRow(x) {
+  const rowId = 'di-' + x.id.replace(/[^a-z0-9_-]/gi, '');
+  const kind = x.video ? 'video' : 'image';
+  const total = (x.parts || []).reduce((n, p) => n + p.size, 0);
+  const parts = (x.parts || []).map((p, i) => `<button type="button" class="mp-row${p.have ? '' : ' cur'}" data-i="${i}" aria-pressed="${p.have ? 'false' : 'true'}">
+      <span class="mp-txt"><span class="mp-t">${esc(p.kind)}</span><span class="mp-s">${esc(p.name)}</span></span>
+      <span class="ob-get-size">${p.have ? 'on this PC' : _GB(p.size)}</span><span class="upd-tick">${_UPD_TICK}</span></button>`).join('');
+  return `
+      <div class="model-row is-expandable" data-row="${rowId}" data-img-recipe="${esc(x.id)}">
+        <div class="model-info">
+          <div class="model-name">${esc(x.name)} <span class="model-badge badge-src">${kind}</span></div>
+          <div class="model-meta">${esc(x.blurb)}${x.ok ? ` · ${_GB(total)}` : ''}${x.downloads ? ` · ${x.downloads.toLocaleString()} downloads` : ''}</div>
+        </div>
+        <span class="model-row-chevron" aria-hidden="true">▾</span>
+        <div class="model-expand" data-expand="${rowId}">
+          ${x.ok ? `<div class="ex-head">Choose what to download</div>
+          <div class="ex-desc">${x.video ? 'A video' : 'An image'} model is made of a few files. A part already on this PC, or one you keep elsewhere, can be left out.</div>
+          <div class="img-pick" data-img-parts="${esc(x.id)}">${parts}</div>`
+          : `<div class="ex-head">Not available as one download</div>
+          <div class="ex-desc">Its files aren't published together. Its page says where each part is; put them in a folder under <b>My Models, Model folders</b> and it shows there.</div>`}
+          <div class="ex-desc" style="margin-top:12px">${x.ok ? `From <a href="https://huggingface.co/${esc(x.repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">${esc(x.repo)} &#8599;</a>, ComfyUI's repackaged files. ` : ''}${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener" style="color:var(--accent-2)">Model page &#8599;</a><span style="color:var(--fg-faint)"> &middot; licence and what it was trained for</span>` : ''}</div>
+          <div class="ex-actions">
+            <button class="model-action is-secondary" data-cancel="${rowId}">Cancel</button>
+            ${x.ok ? `<button class="model-action" data-img-get="${esc(x.id)}">Download</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+}
+function _imgEngineRow() {
+  return `<div class="model-row" data-img-engine="1">
+      <div class="model-info"><div class="model-name">Image and video models <span class="model-badge badge-src">image</span></div>
+      <div class="model-meta">Pictures and short videos are made on this PC by stable-diffusion.cpp, a one-time download for your graphics card. Then its models show here.</div></div>
+      <button class="model-action" id="disc-img-install">Install the engine</button></div>`;
+}
+function _imgFindingRow() {
+  return `<div class="model-row"><div class="model-info"><div class="model-name">Image and video models <span class="model-badge badge-src">image</span></div>
+      <div class="model-meta" style="display:flex;align-items:center;gap:8px"><span class="hf-spinner"></span> Finding which ones download whole. They join this list in a minute.</div></div></div>`;
+}
+// The ticks, the Download button's total, and the download itself.
+function _wireImagePicks(pane) {
+  const total = (row) => {
+    const x = (_modelsState.imgSets?.sets || []).find(s => s.id === row.dataset.imgRecipe); if (!x) return;
+    const on = [...row.querySelectorAll('.img-pick .mp-row.cur')].map(b => x.parts[+b.dataset.i]);
+    const btn = row.querySelector('[data-img-get]'); if (!btn) return;
+    const bytes = on.filter(p => !p.have).reduce((n, p) => n + p.size, 0);
+    btn.disabled = !on.length;
+    btn.textContent = !on.length ? 'Download' : bytes ? `Download ${on.length === x.parts.length ? 'all' : on.length + ' part' + (on.length === 1 ? '' : 's')} · ${_GB(bytes)}` : 'On this PC';
+    if (on.length && !bytes) btn.disabled = true;
+  };
+  pane.querySelectorAll('.model-row[data-img-recipe]').forEach(row => {
+    total(row);
+    row.querySelectorAll('.img-pick .mp-row').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const on = b.classList.toggle('cur');
+      b.setAttribute('aria-pressed', String(on));
+      total(row);
+    }));
+    const get = row.querySelector('[data-img-get]');
+    if (get) get.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const x = (_modelsState.imgSets?.sets || []).find(s => s.id === row.dataset.imgRecipe); if (!x) return;
+      const parts = [...row.querySelectorAll('.img-pick .mp-row.cur')].map(b => x.parts[+b.dataset.i]).filter(p => !p.have);
+      if (parts.length) imagesDownloadSet({ parts }, x.video ? 'video' : 'image');
+    });
+  });
 }
 
 function modelsWireRowClicks(pane) {

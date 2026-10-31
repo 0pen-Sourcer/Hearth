@@ -127,7 +127,22 @@ with sync_playwright() as pw:
     pg.route("**/api/images/load", load)
     pg.route("**/api/images/delete", delete)
     pg.route("**/api/images/identify", identify)
-    pg.route("**/api/llmserver/hf-search*", lambda r: r.fulfill(json={"results": []}))
+    pg.route("**/api/llmserver/hf-search*", lambda r: r.fulfill(json={"results": [
+        {"hf_repo": "unsloth/Qwen3.5-9B-GGUF", "downloads": 900000, "likes": 4, "tags": ["gguf"], "params_b": 9}]}))
+    # Discover's image and video families: one with a whole download, one without.
+    pg.route("**/api/images/sets", lambda r: r.fulfill(json={"installed": True, "ready": True, "sets": [
+        {"id": "z-image-turbo", "name": "Z-Image Turbo", "video": False, "blurb": "Makes pictures from text, in a few steps",
+         "url": "", "ok": True, "repo": "Comfy-Org/Z-Image-Turbo", "downloads": 400000, "bytes": 8_000_000_000, "parts": [
+             {"slot": "diffusion_model", "kind": "Diffusion model", "label": "Diffusion model", "repo": "Comfy-Org/Z-Image-Turbo",
+              "path": "split_files/diffusion_models/z.safetensors", "category": "diffusion_models", "name": "z.safetensors",
+              "size": 6_000_000_000, "have": False},
+             {"slot": "vae", "kind": "VAE", "label": "VAE", "repo": "Comfy-Org/Z-Image-Turbo", "path": "split_files/vae/ae.safetensors",
+              "category": "vae", "name": "ae.safetensors", "size": 300_000_000, "have": True},
+             {"slot": "llm", "kind": "Text encoder", "label": "Qwen 3", "repo": "Comfy-Org/Z-Image-Turbo",
+              "path": "split_files/text_encoders/q.safetensors", "category": "text_encoders", "name": "q.safetensors",
+              "size": 2_000_000_000, "have": False}]},
+        {"id": "wan21-t2v", "name": "Wan 2.1 T2V", "video": True, "blurb": "Makes short videos from text", "url": "",
+         "ok": False, "repo": "", "downloads": 0, "parts": []}]}))
     # Every folder models are read from, as My Models' Model folders lists them.
     pg.route("**/api/model-folders", lambda r: r.fulfill(json={
         "chat": os.path.join(work, "models"), "chat_also": [{"path": "C:\\x\\.lmstudio\\models", "from": "LM Studio"}],
@@ -174,9 +189,30 @@ with sync_playwright() as pw:
           and "Wan 2.1 T2V" not in b["text"])
     pg.click(".models-tab[data-tab=discover]")
     pg.wait_for_timeout(1200)
-    disc = pg.evaluate("document.getElementById('disc-images')?.innerText || ''")
-    check("Discover lists every family the engine runs under Image & video",
-          "Image & video" in disc and "Wan 2.1 T2V" in disc and "Z-Image Turbo" in disc)
+    disc = pg.evaluate("""() => ({ rows: [...document.querySelectorAll('#models-pane-discover .model-row')].map(r => r.querySelector('.model-name').innerText),
+        sections: document.querySelectorAll('#models-pane-discover .models-section').length,
+        text: document.getElementById('models-pane-discover').innerText })""")
+    check(f"chat and image models are one list in Discover {disc['rows']}",
+          disc["sections"] == 1 and disc["rows"][0].startswith("unsloth/Qwen3.5") and disc["rows"][1].startswith("Z-Image Turbo"))
+    check("a family with no whole download isn't in the list, only counted at the end",
+          not any(r.startswith("Wan 2.1 T2V") for r in disc["rows"]) and "1 more the image engine can run" in disc["text"])
+    check("the engine's own notes aren't the description", "Makes pictures from text, in a few steps" in disc["text"])
+    pg.click(".model-row[data-img-recipe=z-image-turbo]")
+    pg.wait_for_timeout(400)
+    pick = pg.evaluate("""() => { const r = document.querySelector('.model-row[data-img-recipe=z-image-turbo]');
+        return { on: [...r.querySelectorAll('.img-pick .mp-row')].map(b => b.classList.contains('cur')),
+                 btn: r.querySelector('[data-img-get]').textContent }; }""")
+    check(f"each part has a tick, off for the one on this PC, and the button totals what's ticked {pick}",
+          pick["on"] == [True, False, True] and pick["btn"] == "Download 2 parts · 8.0 GB")
+    pg.click(".model-row[data-img-recipe=z-image-turbo] .img-pick .mp-row[data-i='2']")
+    pg.wait_for_timeout(200)
+    btn = pg.evaluate("document.querySelector('[data-img-get=z-image-turbo]').textContent")
+    check(f"a part can be left out ({btn})", btn == "Download 1 part · 6.0 GB")
+    pg.evaluate("_modelsState.hfQuery = 'wan'; modelsRenderDiscover()")
+    pg.wait_for_timeout(1000)
+    found = pg.evaluate("document.getElementById('models-pane-discover').innerText")
+    check("searching finds one without a whole download, and says so", "Wan 2.1 T2V" in found and "Not available as one download" in pg.evaluate("document.getElementById('models-pane-discover').innerHTML"))
+    pg.evaluate("_modelsState.hfQuery = ''")
     pg.click(".models-tab[data-tab=mine]")
     pg.wait_for_timeout(600)
 
@@ -196,8 +232,15 @@ with sync_playwright() as pw:
     pg.click("[data-img-load=sd-turbo]")
     pg.wait_for_timeout(800)
     check(f"Load asks the image engine for that model {loads}", loads and loads[0].get("recipe") == "sd-turbo")
+    fold = pg.evaluate("""() => { const d = document.querySelector('#mine-images details.img-extra');
+        return { shut: d && !d.open, says: d ? d.querySelector('summary').innerText : '' }; }""")
+    check(f"the rest folds into one quiet line, so images don't outgrow the chat list {fold}",
+          fold["shut"] and fold["says"] == "2 not placed yet")
+    pg.evaluate("document.querySelector('#mine-images details.img-extra').open = true")
+    pg.wait_for_timeout(300)
+    flat = pg.evaluate("document.getElementById('models-pane-mine').innerText").replace("\\n", " ")
     check("a file named for no family is listed with a way to find out what it is",
-          "ponyDiffusionV6XL.safetensors" in flat and "Not placed yet" in b["text"]
+          "ponyDiffusionV6XL.safetensors" in flat and "not placed yet" in flat
           and pg.locator("[data-img-identify]").count() == 1)
     check("one found to be a family nothing here runs says so", "Hunyuan Video, which nothing here runs" in flat)
     pg.click("[data-img-identify]")
@@ -216,6 +259,24 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(800)
     check(f"Delete asks the image engine to delete that model {deletes}",
           deletes and deletes[0].get("recipe") == "z-image-turbo")
+    # Engine: the image engine beside the chat one; a GitHub limit is named as one.
+    pg.route("**/api/runtime/builds", lambda r: r.fulfill(json={"ok": False, "builds": [], "limited": True,
+                                                                "stale": False, "error": "HTTP 403"}))
+    pg.route("**/api/images/builds", lambda r: r.fulfill(json={"ok": True, "stale": False, "limited": False, "error": "",
+        "current": {"tag": "master-987-a77d362", "backend": "cuda", "path": "x", "running": True, "pinned": ""},
+        "builds": [{"tag": "master-990-b", "backend": "cuda", "size_mb": 712, "published": "", "url": "", "installed": False, "current": False},
+                   {"tag": "master-987-a77d362", "backend": "cuda", "size_mb": 712, "published": "", "url": "", "installed": True, "current": True}]}))
+    pg.click(".models-tab[data-tab=engine]")
+    try:
+        pg.wait_for_function("(document.getElementById('models-pane-engine').innerText || '').includes('Image and video engine')", timeout=30000)
+    except Exception:
+        pass
+    eng = pg.evaluate("document.getElementById('models-pane-engine').innerText")
+    check("Engine shows the image engine, its build and what it runs on",
+          "Image and video engine" in eng and "master-987-a77d362" in eng and "cuda" in eng and "running" in eng)
+    check("with an update to the newest build", "Update to master-990-b" in eng)
+    check("a GitHub limit is said as one, not as no connection",
+          "limiting requests from this network" in eng and "Couldn't reach GitHub" not in eng)
     check(f"no script errors {errors[:2]}", not errors)
     print("screenshot:", os.path.join(work, "my_models.png"))
     browser.close()
