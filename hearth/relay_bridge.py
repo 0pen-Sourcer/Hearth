@@ -1060,9 +1060,28 @@ class AgentWatch:
                         "c": r["chat"]}
             return None                            # it ended on a step: still at work, or waiting on a tool
         text = (parts[-1].get("text") if parts else "") or last.get("text") or ""
+        if not last.get("error") and NO_REPLY.match(text.strip()):
+            return None                            # a turn with nothing to say (Claude Code's "No response requested.")
         if last.get("error"):
             text = stopped_note(r.get("label") or "The agent", text)
-        return {"kind": "done", "title": who, "body": " ".join(text.split())[:240], "c": r["chat"]}
+        return {"kind": "done", "title": who, "body": " ".join(text.split())[:240], "c": r["chat"],
+                **({"stopped": True} if last.get("error") else {})}
+
+    @staticmethod
+    def worth_a_call(n: Dict[str, Any]) -> bool:
+        """A finished turn is worth ringing about when it has news: a question, an error other than
+        a usage limit (a notification says that), or a reply longer than an "OK"."""
+        if n.get("kind") == "ask":
+            return True
+        body = str(n.get("body") or "").strip()
+        if n.get("stopped"):
+            return "stopped: its usage limit" not in body
+        return len(body) >= 24 and not TRIVIAL.match(body)
+
+
+NO_REPLY = re.compile(r"^(?:no response requested\.?|\(no content\)|)$", re.I)
+TRIVIAL = re.compile(r"^(?:ok(?:ay)?|done|sure|yes|no|thanks?(?: you)?|got it|noted|all set)\W*$", re.I)
+STRETCH_S = 1800           # a session that rang does not ring again for this long (one stretch of work)
 
 
 CALL_NOTE = ("This is a voice call from their phone: your reply is spoken aloud as you write it, so keep it "
@@ -1630,6 +1649,7 @@ class Bridge:
         self._mirrored: Dict[str, str] = {}                 # a window turn -> its text so far, for the phones
         self._said: Dict[str, List[str]] = {}
         self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
+        self.phone_sessions: Dict[str, float] = {}          # session chat -> when the phone last sent into it
         from . import call_me
         self.rings = call_me.Rings()                        # the agent calling the phone by itself
         self._ring_timer: Optional[threading.Timer] = None
@@ -1792,6 +1812,7 @@ class Bridge:
         _log(f"{name} session {cid[-8:]}: a message from the phone" + (f" (on {model})" if model else ""))
         _activity("agent_session", agent=agent, chat=cid, text=text[:200], **({"model": model} if model else {}))
         run = self.agent_runs[cid] = {"q": None, "answer": False, "t": turn, "steer": queue.Queue(), "keys": [cid]}
+        self.phone_sessions[cid] = time.time()
         sent = {"live": 0.0, "think": 0.0}
         thought: List[str] = []
 
@@ -1819,6 +1840,7 @@ class Bridge:
                 if real != cid:
                     was, cid = cid, real
                     self.agent_runs[real] = run
+                    self.phone_sessions[real] = time.time()
                     run["keys"].append(real)
                     push({"type": "agent_session", "from": was, "chat": real})
             elif kind == "step":
@@ -1977,7 +1999,7 @@ class Bridge:
             cc._TURN.ctx = prev
 
     def _missed(self, rid: str) -> None:
-        ring = self.rings.drop(rid)
+        ring = self.rings.drop(rid, missed=True)
         if ring is not None:
             self._stopped(ring, missed=True)
 
@@ -2019,6 +2041,28 @@ class Bridge:
             if ev is not None and self.ring(ev):
                 q["rang"] = True
 
+    def from_here(self, c: str) -> bool:
+        """A session the phone sent into, or one Inglen ran: work they handed off, not a session
+        they are working in at the PC."""
+        from . import agent_sessions
+        if time.time() - self.phone_sessions.get(c, 0.0) < 12 * 3600:
+            return True
+        got = agent_sessions.parse_chat(c)
+        return bool(got) and tuple(got) in agent_sessions._RAN_HERE
+
+    def agent_call(self, n: Dict[str, Any], idle: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """The ring an agent's finished turn makes: only for work handed off from the phone or Inglen,
+        only when it has news, and one per session per stretch of work."""
+        from . import call_me
+        c = str(n.get("c") or "")
+        if not c or not self.from_here(c) or not AgentWatch.worth_a_call(n):
+            return None
+        if any(getattr(r, "peer_up", False) for r in self._phones()):
+            return None                            # the app is open on the phone: the reply shows there
+        ev = call_me.want("job", f"{n.get('title') or 'An agent'} {'has a question' if n.get('kind') == 'ask' else 'finished'}: "
+                                 f"{n.get('body') or ''}", chat=c, key="agent:" + c, idle=idle)
+        return dict(ev, once_s=STRETCH_S) if ev is not None else None
+
     def watch_agents(self) -> None:
         """Tell the phone when a coding agent finishes on the PC, as Shed does: Codex
         or Claude Code run in their own window, not through the phone, still reach it."""
@@ -2036,9 +2080,7 @@ class Bridge:
                 for chat in list(self.adapter.rooms):     # each paired phone
                     self.adapter.notify(chat, n)
                 try:
-                    from . import call_me
-                    ev = call_me.want("job", f"{n.get('title') or 'An agent'} {'has a question' if n.get('kind') == 'ask' else 'finished'}: "
-                                             f"{n.get('body') or ''}", key="agent:" + str(n.get("c") or "") + str(n.get("body") or "")[:60])
+                    ev = self.agent_call(n)
                     if ev is not None:
                         self.ring(ev)
                 except Exception:
