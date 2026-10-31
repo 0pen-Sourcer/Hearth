@@ -1302,6 +1302,14 @@ async def _queue_codex(exe: List[str], sid: str, cwd: str, text: str) -> bool:
             await proc.wait()
 
 
+def acp_tools() -> List[Dict[str, Any]]:
+    """Inglen's tools for agents (memory, and call_me) as an ACP session's MCP server."""
+    from .shared_memory import NAME, launch
+    l = launch()
+    return [{"name": NAME, "command": l["command"], "args": l["args"],
+             "env": [{"name": k, "value": v} for k, v in l["env"].items()]}]
+
+
 async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: Ask) -> int:
     from . import acp_brain as A
     name = label(agent)
@@ -1323,9 +1331,9 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
             if not how:
                 emit("error", message=f"{name} can't reopen a session from outside it.")
                 return 2
-            await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": []}, 120)
+            await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": acp_tools()}, 120)
         else:
-            opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
+            opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": acp_tools()}, 120)
             sid = str(opened.get("sessionId") or "")
             if not sid:
                 raise RuntimeError(f"{name} did not return a session ID")

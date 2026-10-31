@@ -273,6 +273,25 @@ fact = next(f for f in RB.memory_view({})["facts"] if f["name"] == "Receipts")
 check(f"Memory sends the phone a fact's whole text to open, not a cut ({len(fact['more'])} of {len(long.strip())})",
       fact["text"] == "Where receipts go" and fact["more"].strip() == long.strip())
 
+# ------------------------------------------------------------ "call me when you're done", from any agent
+
+from hearth import call_me, live_bus, memory_mcp  # noqa: E402
+
+rung = []
+live_bus.publish = lambda ev: rung.append(ev)
+call_me.quiet_now = lambda r, now=None: False
+call_me.at_pc = lambda idle=None: False
+said = memory_mcp.call_me("The tests pass and the branch is pushed.")
+check(f"an agent's call_me rings the phone through Inglen, even with Inglen's own calls off ({said})",
+      rung and rung[-1]["kind"] == "call_me" and "tests pass" in rung[-1]["say"] and said.startswith("Calling"))
+call_me.at_pc = lambda idle=None: True
+check("not while they're at the PC, and it says so", memory_mcp.call_me("done").startswith("Not calling") and len(rung) == 1)
+args = claude_sessions.args_for(["claude"], "s1", "default")
+check("a Claude Code session started from the phone gets Inglen's agent tools", "--mcp-config" in args
+      and "hearth-memory" in args[args.index("--mcp-config") + 1])
+check("so does a Codex one", any("mcp_servers.hearth-memory.command" in a for a in codex_sessions.inglen_tools()))
+check("and an ACP one (OpenCode, Gemini CLI)", S.acp_tools()[0]["name"] == "hearth-memory")
+
 # ------------------------------------------------------------ approvals on a call
 
 

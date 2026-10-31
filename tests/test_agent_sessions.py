@@ -284,7 +284,7 @@ check(f"its steps and words come back as they happen, then the reply ({[k for k,
 
 rc, got, _ = say(by["codex"]["chat"], "how many posts?")
 c = ran("codex")[-1]
-check(f"Codex resumes that session in its folder ({c['argv'][:3]})", c["argv"] == ["app-server"]
+check(f"Codex resumes that session in its folder ({c['argv'][:3]})", c["argv"][:1] == ["app-server"]
       and os.path.samefile(c["cwd"], PB) and c["text"] == "how many posts?" and "exec" not in c["argv"])
 check("and answers", got[-1] == ("text", {"text": "The feed has 12 posts."}) and any(k == "step" for k, _ in got))
 rc, got, _ = say(by["codex"]["chat"], "and the newest one?")

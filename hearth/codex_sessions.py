@@ -23,6 +23,16 @@ _NEXT_MODEL: Dict[str, str] = {}             # thread -> the model /model picked
 COMMANDS = ("/compact", "/review", "/model")
 
 
+def inglen_tools() -> List[str]:
+    """`-c` options giving this app-server Inglen's tools for agents (memory, and call_me)."""
+    from .codex_brain import _toml
+    from .shared_memory import NAME, launch
+    out: List[str] = []
+    for k, v in launch().items():
+        out += ["-c", f"mcp_servers.{NAME}.{k}={_toml(v)}"]
+    return out
+
+
 def _sandbox_kind(policy: Any) -> str:
     return str(policy.get("type") or "") if isinstance(policy, dict) else str(policy or "")
 
@@ -44,7 +54,7 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
     from .tools import mode_allows
 
     proc = await asyncio.create_subprocess_exec(
-        *exe, "app-server", cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        *exe, "app-server", *inglen_tools(), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024,
         creationflags=0x08000000 if sys.platform == "win32" else 0)
     rpc = _Rpc(proc)
@@ -200,7 +210,7 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
 
 # ---------------------------------------------------------------- a session open in the Codex app
 
-PICKUP_S = 120         # a queued message runs when the session is free; a held one is said so after this
+PICKUP_S = 45          # a queued message not started by then waits for that session to be free
 TURN_S = 1800
 
 
@@ -213,7 +223,7 @@ async def follow(path: str, emit: Emit, *, queue_more: Optional[Callable[[str], 
     from .channel_core import out_of
 
     pos = os.path.getsize(path) if os.path.exists(path) else 0
-    partial, parts, started, t0, told = b"", [], False, time.time(), False
+    partial, parts, started, t0 = b"", [], False, time.time()
     while time.time() - t0 < TURN_S:
         for more in (drain() if drain else []):
             if more and queue_more is not None and await queue_more(more):
@@ -263,9 +273,11 @@ async def follow(path: str, emit: Emit, *, queue_more: Optional[Callable[[str], 
                 emit("error", message="Codex finished on your PC without a reply. Open the session there to see why "
                                       "(a usage limit, or it was stopped).")
                 return 1
-        if not started and not told and time.time() - t0 > PICKUP_S:
-            told = True
-            emit("note", text="Codex is still busy with this session on your PC. Its reply shows here when it gets to it.")
+        if not started and time.time() - t0 > PICKUP_S:
+            # Never a long "working" that ends in nothing: it waits in Codex's queue, and says so.
+            emit("text", text="Codex has it queued on your PC and runs it when that session is free. "
+                              "Its reply shows here when you open the session again.")
+            return 0
         await asyncio.sleep(0.3)
     emit("error", message="Codex is still working on your PC. Its reply shows here when you open the session again.")
     return 1

@@ -19,9 +19,12 @@ Emit = Callable[..., None]
 
 
 def args_for(exe: List[str], sid: str, mode: str) -> List[str]:
+    from .shared_memory import NAME, launch
+    # Inglen's tools for agents ride along (memory, and call_me so "call me when you're done" works).
+    tools = json.dumps({"mcpServers": {NAME: {"type": "stdio", **launch()}}})
     return list(exe) + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                         "--include-partial-messages", "--permission-prompt-tool", "stdio",
-                        "--permission-mode", mode] + (["--resume", sid] if sid else [])
+                        "--permission-mode", mode, "--mcp-config", tools] + (["--resume", sid] if sid else [])
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
