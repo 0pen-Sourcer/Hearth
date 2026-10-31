@@ -43,20 +43,13 @@ _LOCK = threading.Lock()
 # ---------------------------------------------------------------- state
 
 def _read() -> Dict[str, Any]:
-    try:
-        with open(STATE_FILE, encoding="utf-8") as f:
-            d = json.load(f)
-            return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    from . import keystore
+    return keystore.read_json(STATE_FILE, keystore.FIELDS["relay.json"])
 
 
 def _write(d: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    tmp = STATE_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=1)
-    os.replace(tmp, STATE_FILE)
+    from . import keystore
+    keystore.write_json(STATE_FILE, d, keystore.FIELDS["relay.json"], indent=1)
 
 
 def relay_url() -> str:

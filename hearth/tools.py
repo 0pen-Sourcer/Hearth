@@ -7405,9 +7405,8 @@ def _connectors(p: Dict) -> str:
             cfg["bot_token"] = token
         if ch == "whatsapp":
             cfg.setdefault("allow_self_chat", True)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
+        from . import keystore
+        keystore.write_json(path, cfg)
         try:
             from . import web as _w
             ok, err = _w._spawn_bridge(ch)

@@ -6,6 +6,8 @@ steps with the sites they reached.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import json
 import os
 import sys

@@ -11,6 +11,8 @@ watching got their prompt back mid-task with no error anywhere.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 import sys
 

@@ -9,6 +9,8 @@ scripts keep working.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import glob
 import os
 import re

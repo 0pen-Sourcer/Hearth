@@ -32,11 +32,8 @@ _FILE_MAX = 20_000_000          # the most the Bot API lets a bot download
 
 
 def _load_config() -> dict:
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    from . import keystore
+    return keystore.read_json(CONFIG_PATH)
 
 
 def _api(token: str, method: str) -> str:

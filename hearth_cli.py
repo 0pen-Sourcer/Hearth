@@ -263,12 +263,11 @@ def _read_settings_endpoint():
     cloud providers lives in brain_keys.json (the /brain command writes
     it there). Without reading both, restarts lose cloud auth."""
     try:
-        import json as _json
         p = os.path.join(WORKSPACE, "settings.json")
         if not os.path.isfile(p):
             return None, None, None, None
-        with open(p, "r", encoding="utf-8") as f:
-            s = _json.load(f)
+        from hearth import keystore
+        s = keystore.read_settings(p)
         return ((s.get("llm_url") or "").strip() or None,
                 (s.get("llm_key") or "").strip() or None,
                 (s.get("llm_model") or "").strip() or None,
@@ -464,18 +463,11 @@ def _read_brain_key(provider: str) -> str:
     key replaced in either place is the one used in both. '' if there is none."""
     if not provider or provider in ("local", "lmstudio", "builtin"):
         return ""
-    import json as _json
-
-    def _file(name: str) -> dict:
-        try:
-            with open(os.path.join(WORKSPACE, name), "r", encoding="utf-8") as f:
-                return _json.load(f) or {}
-        except Exception:
-            return {}
-    s = _file("settings.json")
+    from hearth import keystore
+    s = keystore.read_settings(os.path.join(WORKSPACE, "settings.json"))
     key = s.get("llm_key") or "" if (s.get("llm_provider") or "").strip().lower() == provider else ""
     key = key or (s.get("provider_keys") or {}).get(provider, "")
-    key = key or (_file("brain_keys.json").get(provider) or {}).get("key", "")
+    key = key or (keystore.brain_keys(os.path.join(WORKSPACE, "brain_keys.json")).get(provider) or {}).get("key", "")
     return str(key or "").strip()
 
 
@@ -2923,25 +2915,20 @@ class JarvisCLI:
             keys_path = os.path.join(WORKSPACE, "brain_keys.json")
             settings_path = os.path.join(WORKSPACE, "settings.json")
 
+            from hearth import keystore as _ks
+
             def _load_keys() -> dict:
-                try:
-                    with open(keys_path, "r", encoding="utf-8") as f:
-                        return _json.load(f) or {}
-                except (OSError, _json.JSONDecodeError):
-                    return {}
+                return _ks.brain_keys(keys_path)
             def _save_keys(d: dict) -> None:
                 before = _load_keys()
                 try:
-                    os.makedirs(WORKSPACE, exist_ok=True)
-                    with open(keys_path, "w", encoding="utf-8") as f:
-                        _json.dump(d, f, indent=2)
+                    _ks.save_brain_keys(d, keys_path)
                 except OSError:
                     pass
                 # The window keeps the same keys in settings.json: one set of keys,
                 # so a key replaced here isn't shadowed by the old one there.
                 try:
-                    with open(settings_path, "r", encoding="utf-8") as f:
-                        st = _json.load(f) or {}
+                    st = _ks.read_settings(settings_path)
                     vault = dict(st.get("provider_keys") or {})
                     for p, v in d.items():
                         if isinstance(v, dict) and v.get("key"):
@@ -2949,10 +2936,7 @@ class JarvisCLI:
                     for p in set(before) - set(d):
                         vault.pop(p, None)
                     st["provider_keys"] = vault
-                    tmp = settings_path + ".tmp"
-                    with open(tmp, "w", encoding="utf-8") as f:
-                        _json.dump(st, f, indent=2)
-                    os.replace(tmp, settings_path)
+                    _ks.write_settings(st, settings_path)
                 except (OSError, ValueError):
                     pass
 
@@ -2999,7 +2983,7 @@ class JarvisCLI:
                 print(f"  {C_TOOL}/brain codex{C_RESET}                     Codex on this PC, your ChatGPT plan")
                 print(f"  {C_TOOL}/brain cursor{C_RESET}                    Cursor's agent on this PC, your Cursor plan")
                 print(f"  {C_TOOL}/brain forget <provider>{C_RESET}         delete a saved key")
-                print(f"\n{C_DIM}Keys saved to ~/Jarvis/brain_keys.json (gitignored, 0600 on POSIX). "
+                print(f"\n{C_DIM}Keys are saved sealed to this account, never as plain text. "
                       f"A key saved in the window works here too.{C_RESET}\n")
                 return True
 
@@ -3207,13 +3191,7 @@ class JarvisCLI:
             # Also update settings.json so the GUI Settings → Chat brain pane
             # reflects this choice on next open (matches /api/llm-endpoint).
             try:
-                saved = {}
-                if os.path.exists(settings_path):
-                    try:
-                        with open(settings_path, "r", encoding="utf-8") as f:
-                            saved = _json.load(f) or {}
-                    except Exception:
-                        pass
+                saved = _ks.read_settings(settings_path)
                 # A local server says what it has loaded, so no name is kept
                 # for it; a cloud model name left over would be sent to it.
                 saved.update({
@@ -3222,9 +3200,7 @@ class JarvisCLI:
                     "llm_key": key,
                     "llm_model": "" if provider in _LOCAL else (model_hint or saved.get("llm_model", "")),
                 })
-                os.makedirs(WORKSPACE, exist_ok=True)
-                with open(settings_path, "w", encoding="utf-8") as f:
-                    _json.dump(saved, f, indent=2)
+                _ks.write_settings(saved, settings_path)
             except Exception:
                 pass
 
@@ -7091,6 +7067,11 @@ if __name__ == "__main__":
             pass
 
     os.environ.setdefault("HEARTH_QUIET_ENGINE", "1")   # the terminal draws its own load line
+    try:
+        from hearth import keystore as _keystore
+        _keystore.app_start()                            # keys an older version saved as plain text
+    except Exception:
+        pass
     app = JarvisCLI()
     app.animate_intro()
     # Suppress the httpx/anyio cleanup spam that happens when the asyncio

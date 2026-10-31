@@ -5,6 +5,8 @@ brought in, discarded or undone only from the window."""
 
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import asyncio
 import io
 import os

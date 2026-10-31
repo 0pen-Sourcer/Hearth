@@ -37,11 +37,8 @@ _HUB = None
 
 
 def _load_config() -> dict:
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    from . import keystore
+    return keystore.read_json(CONFIG_PATH)
 
 
 def _msg_text(message) -> str:

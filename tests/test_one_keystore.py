@@ -6,6 +6,8 @@ a key saved with /brain reaches the window's store.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import json
 import os
 import sys
@@ -65,7 +67,8 @@ if cli is not None:
         asyncio.run(cli.handle_command("/brain gemini AIzaSyTESTTESTTESTTESTTESTTESTTESTTE12"))
     except Exception:
         pass
-    vault = json.load(open(os.path.join(work, "settings.json"), encoding="utf-8")).get("provider_keys") or {}
+    from hearth import keystore
+    vault = keystore.read_settings(os.path.join(work, "settings.json")).get("provider_keys") or {}
     check(f"/brain with a new key replaces it in the window's store ({vault.get('gemini')})", vault.get("gemini") == "AIzaSyTESTTESTTESTTESTTESTTESTTESTTE12")
 
 if FAILS:

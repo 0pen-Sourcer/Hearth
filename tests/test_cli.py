@@ -18,6 +18,8 @@ whole session and sat at a prompt.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 import subprocess
 import sys
@@ -154,8 +156,12 @@ with open(os.path.join(_ws, "settings.json"), "w", encoding="utf-8") as f:
     _json.dump({"llm_provider": "local", "provider_keys": {"anthropic": "saved-in-the-window"}}, f)
 code, out, _ = run([], stdin=b"/brain anthropic\n", timeout=150, home=home, extra_env={"JARVIS_WORKSPACE": _ws})
 check("/brain uses a key that was saved in the window", "brain → anthropic" in out and "no saved key" not in out)
-with open(os.path.join(_ws, "settings.json"), encoding="utf-8") as f:
-    _after = _json.load(f)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_env_before = dict(os.environ)
+from hearth import keystore as _ks  # noqa: E402
+os.environ.clear()
+os.environ.update(_env_before)        # importing hearth pins a workspace; the runs below set their own
+_after = _ks.read_settings(os.path.join(_ws, "settings.json"))
 check("and switches to that provider with it",
       _after.get("llm_provider") == "anthropic" and _after.get("llm_key") == "saved-in-the-window"
       and "api.anthropic.com" in _after.get("llm_url", ""))
@@ -169,8 +175,7 @@ with open(os.path.join(_ws2, "brain_keys.json"), "w", encoding="utf-8") as f:
                 "gemini": {"url": "", "key": _g_key, "model": ""}}, f)
 code, out, _ = run([], stdin=b"/brain openrouter qwen/qwen3.8-27b:free\n/brain cusror\n/brian gemini\n/brain gemini\n",
                    timeout=200, home=home, extra_env={"JARVIS_WORKSPACE": _ws2})
-with open(os.path.join(_ws2, "brain_keys.json"), encoding="utf-8") as f:
-    _keys = _json.load(f)
+_keys = _ks.brain_keys(os.path.join(_ws2, "brain_keys.json"))
 check("/brain openrouter <model> picks the model and keeps the saved key",
       "brain → openrouter" in out and "qwen/qwen3.8-27b:free" in out and _keys["openrouter"]["key"] == _or_key
       and "key saved" not in out)

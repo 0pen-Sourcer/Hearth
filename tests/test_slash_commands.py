@@ -9,6 +9,8 @@ twenty terminal commands were missing from autocomplete and several from
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 import re
 import sys

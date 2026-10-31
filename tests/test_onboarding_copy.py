@@ -9,6 +9,8 @@ an English-only speech model. The tour was eleven tabs read out one by one.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import builtins
 import json
 import os
