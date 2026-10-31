@@ -1343,6 +1343,7 @@
     font-family: var(--mono); font-size: 12px;
     font-weight: 500;
   }
+  .tool .t-name.t-said { font-family: inherit; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
   .tool .t-args {
     flex: 1; min-width: 0;
     color: var(--fg-faint);
@@ -7925,7 +7926,7 @@ function replayAssistant(msgDiv, m, body) {
     putText(p);
     if (ev.kind === 'tool') {
       if (_hideToolCard(ev.name)) continue;
-      const t = makeToolCard(ev.name, ev.args || {});
+      const t = makeToolCard(ev.name, ev.args || {}, ev.words);
       // Keep the green/red diff for file writes; the terse text result would
       // clobber it. Other tools show their result as before.
       if (!t.div.classList.contains('has-diff')) fillToolBody(t.body, ev.name, ev.result || '');
@@ -8581,7 +8582,7 @@ function _liveLabel(run, card) {
     }
     return `${favSlot(_SEARCH_CYCLE[0], 'site', 'fav-cycle')}Searching the web…`;
   }
-  return esc(n) + '…';
+  return esc(card._words ? (card._words.doing || card._words.done) : n) + '…';
 }
 
 const _RUN_VERBS = {
@@ -8601,6 +8602,7 @@ const _RUN_VERBS = {
   handoff:['handed off a task', 'handed off {n} tasks'],
   web:    ['searched the web', 'searched the web {n} times'],
   plugin: ['used a plugin', 'used plugins {n} times'],
+  other:  ['took a step', 'took {n} steps'],
   del:    ['deleted something', 'deleted {n} things'],
   move:   ['moved something', 'moved {n} things'],
 };
@@ -8611,7 +8613,7 @@ const _RUN_DOING = {
   video: 'making a video', brain: 'checking memory', bell: 'setting a reminder',
   rocket: 'opening an app', monitor: 'using the desktop', users: 'asking a helper',
   handoff: 'handing it over', web: 'searching the web', plugin: 'using a plugin',
-  del: 'deleting', move: 'moving',
+  del: 'deleting', move: 'moving', other: 'working',
 };
 function toolDoing(name) { return (_RUN_DOING[_toolKind(name)] || 'working') + '…'; }
 function _toolKind(name) {
@@ -8619,9 +8621,7 @@ function _toolKind(name) {
   if (name === 'web_search') return 'web';
   if (name === 'delete_path') return 'del';
   if (name === 'move_path') return 'move';
-  const icon = _toolIcon(name);
-  for (const [k, v] of Object.entries(_TOOL_ICONS)) if (v === icon) return k;
-  return 'file';
+  return _toolIconKey(name) || 'other';
 }
 function _summarizeRun(run) {
   const cards = [...run._cards.children].filter(c => c.classList.contains('tool'));
@@ -8637,11 +8637,14 @@ function _summarizeRun(run) {
     if (bad) failed++;
     if (c.classList.contains('t-running')) running = c;
   }
+  const said = c => c._words ? (c.classList.contains('t-running') ? (c._words.doing || c._words.done) : (c._words.done || c._words.doing)) : '';
+  const others = cards.filter(c => _toolKind(c._toolName) === 'other');
   const parts = [...counts].map(([k, n]) => {
-    const v = _RUN_VERBS[k] || _RUN_VERBS.file;
+    if (k === 'other' && n <= 2 && others.every(said)) return others.map(c => { const w = said(c); return w.charAt(0).toLowerCase() + w.slice(1); }).join(', ');
+    const v = _RUN_VERBS[k] || _RUN_VERBS.other;
     return (n === 1 ? v[0] : v[1]).replace('{n}', n);
   });
-  let line = parts.join(', ');
+  let line = cards.length === 1 && said(cards[0]) ? said(cards[0]) : parts.join(', ');
   line = line.charAt(0).toUpperCase() + line.slice(1);
   run._sum.textContent = line;
   run._fail.textContent = failed ? (failed === 1 ? '1 failed' : failed + ' failed') : '';
@@ -8691,11 +8694,15 @@ const _TOOL_ICONS = {
   monitor: '<rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8 21h8M12 16.5V21"/>',
   users:   '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 11a3 3 0 1 0 0-6M21 20a6 6 0 0 0-5-5.9"/>',
   plugin:  '<path d="M10 3v3a2 2 0 0 0 4 0V3M3 10h3a2 2 0 0 1 0 4H3M21 10h-3a2 2 0 0 0 0 4h3M5 5h14v14H5z"/>',
+  other:   '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/>',
 };
 function _toolIcon(name) {
+  return _TOOL_ICONS[_toolIconKey(name)] || _TOOL_ICONS.other;
+}
+function _toolIconKey(name) {
   const n = (name || '').toLowerCase();
   const has = (...ks) => ks.some(k => n.includes(k));
-  let key = 'file';
+  let key = '';
   if (has('plugin')) key = 'plugin';
   else if (has('subagent', 'launch_team', 'agent', 'delegate')) key = 'users';
   else if (has('list_dir', 'list_file', 'list_archive', 'extract_archive')) key = 'folder';
@@ -8709,7 +8716,8 @@ function _toolIcon(name) {
   else if (has('remind')) key = 'bell';
   else if (has('open_app')) key = 'rocket';
   else if (has('desktop')) key = 'monitor';
-  return _TOOL_ICONS[key] || _TOOL_ICONS.file;
+  else if (has('read', 'view_file', 'summarize_file', 'pdf', 'file')) key = 'file';
+  return key;
 }
 
 // A compact line diff: trims the common head/tail so only the CHANGED region
@@ -8871,6 +8879,7 @@ function _startToolClock(t) {
   if (!t || !t.ms) return;
   const t0 = Date.now();
   t.div.classList.add('t-running');
+  _cardTense(t.div);
   t._clock = setInterval(() => {
     if (!t.div.isConnected) return _stopToolClock(t);
     if (pendingPermId) { t.ms.textContent = 'waiting for you'; return; }
@@ -8880,7 +8889,12 @@ function _startToolClock(t) {
 }
 function _stopToolClock(t) {
   if (t && t._clock) { clearInterval(t._clock); t._clock = null; }
-  if (t && t.div) { t.div.classList.remove('t-slow', 't-running'); t.div.dispatchEvent(new Event('toolsettled', { bubbles: true })); }
+  if (t && t.div) { t.div.classList.remove('t-slow', 't-running'); _cardTense(t.div); t.div.dispatchEvent(new Event('toolsettled', { bubbles: true })); }
+}
+function _cardTense(div) {
+  const w = div && div._words, el = div && div.querySelector('.t-name.t-said');
+  if (!w || !el) return;
+  el.textContent = div.classList.contains('t-running') ? (w.doing || w.done) : (w.done || w.doing);
 }
 
 // A question JARVIS put to you stays in the chat as a card: the question,
@@ -8924,7 +8938,7 @@ function makeAskCard(args) {
   return { div, body: div.querySelector('.t-body'), ms: div.querySelector('.t-ms') };
 }
 
-function makeToolCard(name, args) {
+function makeToolCard(name, args, words) {
   if (name === 'ask_user') return makeAskCard(args || {});
   // Every tool - including browse / browse_click / browse_scroll / browse_type /
   // browse_close - renders with the SAME card shape: header with name + args,
@@ -8935,6 +8949,8 @@ function makeToolCard(name, args) {
   // on top of the same card, not a different code path.
   const div = document.createElement('div'); div.className = 'tool';
   div._toolName = name; div._toolArgs = args;   // used by the run_command transcript render
+  // The step in words (hearth/step_words.py): the present while it runs, the past once done.
+  div._words = words && (words.doing || words.done) ? words : null;
   // Pretty-printed JSON for the title (hover tooltip). For run_command in
   // particular the cmd arg often runs long; ellipsis in the header hides
   // it but hover + opening the card both reveal the full text.
@@ -8945,8 +8961,10 @@ function makeToolCard(name, args) {
     <div class="t-head">
       <svg class="t-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       <svg class="t-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${_toolIcon(name)}</svg>
-      <span class="t-name">${name === 'delegate' && args && args.agent ? harnessChip(String(args.agent).toLowerCase()) : esc(name)}</span>
-      <span class="t-args" title="${esc(fullArgs)}">${esc(name === 'delegate' && args ? (args.task || '') : headerArgs)}</span>
+      ${name === 'delegate' && args && args.agent ? `<span class="t-name">${harnessChip(String(args.agent).toLowerCase())}</span>`
+        : div._words ? `<span class="t-name t-said" title="${esc(name)}">${esc(div._words.done || div._words.doing)}</span>`
+        : `<span class="t-name">${esc(name)}</span>`}
+      <span class="t-args" title="${esc(fullArgs)}">${esc(name === 'delegate' && args ? (args.task || '') : (div._words && !div._words.own) ? '' : headerArgs)}</span>
       <span class="t-ms"></span>
     </div>
     <div class="t-body"></div>
@@ -11936,15 +11954,16 @@ async function send(forced = null, displayAs = null, opts = {}) {
       if (_hideToolCard(ev.name)) {
         // Still recorded on the message, just not drawn.
         assistantMsg.events.push({ kind: 'tool', name: ev.name, args: ev.args || {},
-                                   result: '', ms: 0, pos: assistantMsg.content.length });
+                                   result: '', ms: 0, pos: assistantMsg.content.length, ...(ev.words ? { words: ev.words } : {}) });
         pendingTool = null;
         pendingToolEvent = assistantMsg.events[assistantMsg.events.length - 1];
         if (ev.id) openTools.set(ev.id, { tool: null, event: pendingToolEvent });
         setState(`calling ${ev.name}…`);
         return;
       }
-      pendingTool = makeToolCard(ev.name, ev.args || {});
-      pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0, pos: assistantMsg.content.length };
+      pendingTool = makeToolCard(ev.name, ev.args || {}, ev.words);
+      pendingToolEvent = { kind: 'tool', name: ev.name, args: ev.args || {}, result: '', ms: 0, pos: assistantMsg.content.length,
+                           ...(ev.words ? { words: ev.words } : {}) };
       assistantMsg.events.push(pendingToolEvent);
       if (ev.id) openTools.set(ev.id, { tool: pendingTool, event: pendingToolEvent });
       appendPart(pendingTool.div, live);

@@ -169,7 +169,7 @@ def words(name: str, args: Optional[Dict[str, Any]] = None, says: str = "") -> D
     if says:
         doing, done = tenses(says)
         if doing:
-            return {"doing": doing, "done": done}
+            return {"doing": doing, "done": done, "own": True}     # the brain's words: what it ran shows beside them
     if name == "agent_sessions":
         act = str(args.get("action") or "list")
         who = _session_agent(args.get("session"))
