@@ -3686,6 +3686,9 @@
   .ob-get .mp-row, .img-pick .mp-row { border: 1px solid var(--border); padding: 10px 12px; }
   .ob-get .mp-row .mp-s, .img-pick .mp-row .mp-s { white-space: normal; }
   .img-pick { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .model-expand .img-pick .img-sizes { margin: 0 0 6px 14px; max-height: 196px; position: relative; }
+  .model-expand .img-pick .ex-file { cursor: pointer; }
+  .img-pick .img-size-head { margin: 2px 0 0 14px; }
   .img-pick .mp-row .mp-s { font: 11.5px var(--mono); color: var(--fg-faint); }
   .disc-more { margin-top: 10px; font-size: 12px; color: var(--fg-faint); padding: 2px 4px; }
   .ob-get-size { flex: none; font: 11.5px var(--mono); color: var(--fg-dim); }
@@ -20062,9 +20065,12 @@ function _discoverImageRow(x, solo) {
   const rowId = 'di-' + x.id.replace(/[^a-z0-9_-]/gi, '');
   const kind = x.video ? 'video' : 'image';
   const total = (x.parts || []).reduce((n, p) => n + p.size, 0);
+  // Two parts of one kind (Wan's low- and high-noise experts) go by the recipe's names for them.
+  const twice = (k) => (x.parts || []).filter(q => q.kind === k).length > 1;
   const parts = (x.parts || []).map((p, i) => `<button type="button" class="mp-row${p.have ? '' : ' cur'}" data-i="${i}" aria-pressed="${p.have ? 'false' : 'true'}">
-      <span class="mp-txt"><span class="mp-t">${esc(p.kind)}</span><span class="mp-s">${esc(p.name)}</span></span>
-      <span class="ob-get-size">${p.have ? 'on this PC' : _GB(p.size)}</span><span class="upd-tick">${_UPD_TICK}</span></button>`).join('');
+      <span class="mp-txt"><span class="mp-t">${esc(twice(p.kind) && p.label ? p.label : p.kind)}</span><span class="mp-s">${esc(p.name)}</span></span>
+      <span class="ob-get-size">${p.have ? 'on this PC' : _GB(p.size)}</span><span class="upd-tick">${_UPD_TICK}</span></button>`
+    + (p.options ? _imgSizes(p, i) : '')).join('');
   return `
       <div class="model-row is-expandable" data-row="${rowId}" data-img-recipe="${esc(x.id)}">
         <div class="model-info">
@@ -20085,6 +20091,20 @@ function _discoverImageRow(x, solo) {
           </div>
         </div>
       </div>`;
+}
+// A model part's sizes, in the chat quant picker's rows: the largest that fits
+// this card comes picked; a smaller one is quicker to fetch and lighter to run.
+function _imgSizes(p, i) {
+  const q = p.options.find(o => /\.gguf$/i.test(o.name));
+  const from = q ? ` The smaller ones are from <a href="https://huggingface.co/${esc(q.repo)}" target="_blank" rel="noopener" style="color:var(--accent-2)">${esc(q.repo)} &#8599;</a>.` : '';
+  return `<div class="ex-hint img-size-head">Size: a smaller file runs on a smaller card, with a little less detail.${from}</div>
+    <div class="ex-files img-sizes" data-part="${i}">${p.options.map((o, j) => {
+      const tier = o.fit || 'unknown';
+      const label = FIT_LABELS[tier] || '';
+      return `<div class="ex-file${j === p.pick ? ' selected' : ''}" data-o="${j}" data-tier="${tier}">
+        <span class="fn"><span class="ex-quant">${esc(o.quant)}</span><span class="ex-fname">${esc(o.name)}</span></span>
+        <span class="sz">${o.have ? 'on this PC' : (FIT_ICONS[tier] || '') + ' ' + _GB(o.size)}${label && !o.have ? ` <span class="ex-fit-label">· ${esc(label)}</span>` : ''}</span></div>`;
+    }).join('')}</div>`;
 }
 function _imgEngineRow() {
   return `<div class="model-row" data-img-engine="1">
@@ -20113,6 +20133,23 @@ function _wireImagePicks(pane) {
       e.stopPropagation();
       const on = b.classList.toggle('cur');
       b.setAttribute('aria-pressed', String(on));
+      total(row);
+    }));
+    // On open, the picked size is in view, not below a scroll.
+    row.addEventListener('click', () => requestAnimationFrame(() => row.querySelectorAll('.img-sizes').forEach(box => {
+      const sel = box.querySelector('.ex-file.selected');
+      if (sel && row.classList.contains('is-open')) box.scrollTop = Math.max(0, sel.offsetTop - box.clientHeight / 2 + sel.offsetHeight / 2);
+    })));
+    row.querySelectorAll('.img-sizes .ex-file').forEach(f => f.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const x = (_modelsState.imgSets?.sets || []).find(s => s.id === row.dataset.imgRecipe); if (!x) return;
+      const box = f.closest('.img-sizes'), i = +box.dataset.part, p = x.parts[i], o = p.options[+f.dataset.o];
+      Object.assign(p, { repo: o.repo, path: o.path, name: o.name, size: o.size, quant: o.quant, have: !!o.have, pick: +f.dataset.o });
+      box.querySelectorAll('.ex-file').forEach(z => z.classList.toggle('selected', z === f));
+      const b = row.querySelector(`.img-pick .mp-row[data-i="${i}"]`);
+      b.querySelector('.mp-s').textContent = o.name;
+      b.querySelector('.ob-get-size').textContent = o.have ? 'on this PC' : _GB(o.size);
+      b.classList.toggle('cur', !o.have); b.setAttribute('aria-pressed', String(!o.have));
       total(row);
     }));
     const get = row.querySelector('[data-img-get]');

@@ -494,6 +494,12 @@ def _compact(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
 
 
+def _slot_tag(slot_id: str) -> str:
+    """What sets a model slot apart from the plain one: 'highnoise' for
+    high_noise_diffusion_model, '' for diffusion_model or model."""
+    return _compact(re.sub(r"_?(diffusion_model|model)$", "", str(slot_id or "")))
+
+
 def recipes_for_family(family: str, candidates: List[dict], category: str = "") -> List[dict]:
     """The recipes the engine's own name for a family points at, likeliest
     first: one named the same ("SDXL", "SD 1.x"), then those whose id or name
@@ -539,10 +545,15 @@ def _assign(recipe: Dict[str, Any], slots: Dict[str, List[dict]],
             pick = next((g for g in group if slots.get(g)), group[0])
             needed += [s for s in recipe.get("slots") or [] if s["id"] == pick]
     used, picks, missing = set(), {}, []
+    tags = {s["id"]: _slot_tag(s["id"]) for s in needed}
 
     def score(slot_id: str, f: dict) -> tuple:
         name = str(f.get("name") or f.get("id") or "").lower()
-        return (placed.get(f["id"]) == recipe.get("id"), slot_id.lower() in name.replace("-", "_"),
+        c = _compact(name)
+        own = tags.get(slot_id) or ""
+        # high_noise_diffusion_model takes the HighNoise file; the plain slot doesn't.
+        tagged = (bool(own) and own in c) - any(t and t != own and t in c for t in tags.values())
+        return (placed.get(f["id"]) == recipe.get("id"), tagged, slot_id.lower() in name.replace("-", "_"),
                 len(_words(name) & want), -len(name))
 
     for s in sorted(needed, key=lambda s: len(slots.get(s["id"]) or [])):
@@ -1224,6 +1235,109 @@ def download_plan(recipe_id: str, recipe: Optional[Dict[str, Any]] = None,
             "error": ("still needs " + ", ".join(missing)) if missing else ""}
 
 
+_QUANT = re.compile(r"(?i)(?:^|[-_.])((?:ud-)?(?:i|t)?q\d(?:_[a-z0-9]+)*|b?f16|fp16|f32|fp32|fp8\w*)(?=$|[-_.])")
+_FULL = ("BF16", "F16", "FP16", "F32", "FP32")
+_SIZE_WORD = re.compile(r"^(a?\d+b|\d+p)$")      # 14b, a14b, 480p: sizes, not another model
+
+
+def _stem(name: str) -> str:
+    # Not splitext: "Qwen-Image-2.1-GGUF" has no extension.
+    return re.sub(r"(?i)\.(gguf|safetensors|sft|ckpt|pth?|bin)$", "", os.path.basename(name or ""))
+
+
+def quant_label(name: str) -> str:
+    """Q4_K_M, Q8_0, BF16, FP8...; 'Full' for a file that names none."""
+    m = list(_QUANT.finditer(_stem(name)))
+    if not m:
+        return "Full"
+    q = m[-1].group(1).upper()
+    return "FP8" if q.startswith("FP8") else q
+
+
+def _unexplained(name: str, allowed: str) -> set:
+    """Words in a repo or file name the family doesn't account for: a 'turbo',
+    'edit' or '2.1' there means another model, not a size of this one."""
+    stem = _QUANT.sub(" ", _stem(name))
+    return {w for w in _words(stem) if w != "gguf" and not _SIZE_WORD.match(w) and w not in allowed}
+
+
+def quant_options(recipe: Dict[str, Any], slot: dict, needed: List[dict], original: str = "") -> List[dict]:
+    """Smaller GGUF builds of a model slot's file, found by searching Hugging
+    Face for the family as the chat side finds quants: [{repo, path, name,
+    size, quant}], largest first, from the most downloaded repo that has them.
+    `original` is the full file's name; its words (low_noise, 480p) are this one's."""
+    from .llmserver import search_huggingface, _repo_siblings, _NOT_A_START
+    idw = _words(str(recipe.get("id") or "")) - {"checkpoint"}
+    allowed = _compact(f"{recipe.get('id')} {recipe.get('name')} {original}")
+    tag = _slot_tag(slot["id"])
+    others = {_slot_tag(s["id"]) for s in needed if s is not slot} - {"", tag}
+    hits = [h for h in search_huggingface(str(recipe.get("name") or recipe.get("id") or ""), limit=20)
+            if h.get("hf_repo")]
+    repos = []
+    for h in hits:
+        rn = h["hf_repo"].split("/")[-1]
+        if _NOT_A_START.search(h["hf_repo"]) or not all(w in _compact(rn) for w in idw) or _unexplained(rn, allowed):
+            continue
+        repos.append(h["hf_repo"])
+    for repo in repos[:3]:
+        try:
+            sibs = _repo_siblings(repo)
+        except Exception:
+            continue
+        out = []
+        for sib in sibs:
+            path = str(sib.get("rfilename") or "")
+            name = path.split("/")[-1]
+            c = _compact(path)
+            if not name.lower().endswith(".gguf") or "mmproj" in c or not all(w in _compact(name) for w in idw):
+                continue
+            if (tag and tag not in c) or any(t in c for t in others) or _unexplained(name, allowed + tag):
+                continue
+            size = int(sib.get("size") or (sib.get("lfs") or {}).get("size") or 0)
+            if size and quant_label(name) not in _FULL:      # the full file is offered as it is
+                out.append({"repo": repo, "path": path, "name": name, "size": size, "quant": quant_label(name)})
+        if out:
+            return sorted(out, key=lambda o: -o["size"])
+    return []
+
+
+def _size_fit(size: int, usable: Optional[float], total: Optional[float]) -> str:
+    """good: the file and the engine's working memory fit on the card; partial:
+    some of it waits in RAM (slower); overflow: most of it does."""
+    if not usable:
+        return "unknown"
+    need = size / 1e9 + 1.0
+    return "good" if need <= usable else "partial" if need <= 2 * (total or usable) else "overflow"
+
+
+def _choose_size(part: Dict[str, Any], roots: List[str]) -> None:
+    """Pick a part's size for this PC: one already on it, else the largest at
+    Q4 or above that fits the card, else the smallest at Q4 or above. Each
+    option gets its fit."""
+    from . import llmserver
+    try:
+        total = llmserver.detect_gpu_vram_gb()
+        room = llmserver.vram_for_a_new_model()
+        usable = max(0.0, room - llmserver._VRAM_DRIVER_RESERVE_GB) if room else None
+    except Exception:
+        total = usable = None
+    opts = part["options"]
+    for o in opts:
+        o["have"] = any(os.path.isfile(os.path.join(root, part["category"], o["name"])) for root in roots)
+        o["fit"] = _size_fit(o["size"], usable, total)
+    def tier(o: dict) -> int:
+        m = re.search(r"Q(\d)", o["quant"])
+        return int(m.group(1)) if m else 16
+    # Below Q4 detail falls off fast: a Q4 that spills to RAM beats a Q2 that fits.
+    pick = (next((o for o in opts if o["have"]), None)
+            or max((o for o in opts if o["fit"] == "good" and tier(o) >= 4), key=lambda o: (tier(o), o["size"]), default=None)
+            or min((o for o in opts if tier(o) >= 4), key=lambda o: o["size"], default=None)
+            or min(opts, key=lambda o: o["size"]))
+    part.update({k: pick[k] for k in ("repo", "path", "name", "size", "quant")})
+    part["have"] = pick["have"]
+    part["pick"] = opts.index(pick)
+
+
 def blurb(recipe: Dict[str, Any]) -> str:
     """What a family does, in a few plain words, from its id and kind (the
     engine's own description is a note for whoever wires the files up)."""
@@ -1256,6 +1370,7 @@ def blurb(recipe: Dict[str, Any]) -> str:
 
 _SETS_PATH = os.path.join(os.path.expanduser("~"), ".hearth", "image_sets.json")
 _SETS_LOCK = threading.Lock()
+_SETS_V = 2                                     # parts carry their GGUF sizes
 _SETS_RUN: Dict[str, Any] = {"thread": None}
 
 
@@ -1267,15 +1382,27 @@ def _sets_build(recipes: List[dict]) -> None:
             p = download_plan(r["id"], r, roots=[])
         except Exception:
             p = {"ok": False}
+        parts = [{k: x[k] for k in ("slot", "kind", "label", "repo", "path", "category", "name", "size")}
+                 for x in p.get("parts") or []] if p.get("ok") else []
+        needed = _needed_slots(r)
+        for x in parts:
+            if "diffusion_model" in x["slot"]:
+                slot = next((s for s in needed if s["id"] == x["slot"]), {"id": x["slot"]})
+                try:
+                    q = quant_options(r, slot, needed, x["name"])
+                except Exception:
+                    q = []
+                if q:
+                    full = {k: x[k] for k in ("repo", "path", "name", "size")}
+                    x["options"] = sorted(q + [dict(full, quant=quant_label(x["name"]))], key=lambda o: -o["size"])
         out.append({"id": r["id"], "name": r.get("name") or r["id"], "video": "video_frames" in (r.get("defaults") or {}),
                     "blurb": blurb(r), "url": r.get("model_url") or "", "ok": bool(p.get("ok")),
                     "repo": p.get("repo") or "", "downloads": int((_REPOS.get("downloads") or {}).get(p.get("repo") or "", 0)),
-                    "parts": [{k: x[k] for k in ("slot", "kind", "label", "repo", "path", "category", "name", "size")}
-                              for x in p.get("parts") or []] if p.get("ok") else []})
+                    "parts": parts})
     os.makedirs(os.path.dirname(_SETS_PATH), exist_ok=True)
     tmp = _SETS_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"at": time.time(), "ids": sorted(r["id"] for r in recipes), "sets": out}, f)
+        json.dump({"v": _SETS_V, "at": time.time(), "ids": sorted(r["id"] for r in recipes), "sets": out}, f)
     os.replace(tmp, _SETS_PATH)
 
 
@@ -1290,7 +1417,7 @@ def catalog_sets(roots: Optional[List[str]] = None) -> Dict[str, Any]:
             kept = json.load(f)
     except (OSError, ValueError):
         kept = {}
-    fresh = kept.get("sets") is not None and time.time() - float(kept.get("at") or 0) < 86400
+    fresh = kept.get("sets") is not None and kept.get("v") == _SETS_V and time.time() - float(kept.get("at") or 0) < 86400
     if not fresh:
         with _SETS_LOCK:
             t = _SETS_RUN["thread"]
@@ -1310,6 +1437,9 @@ def catalog_sets(roots: Optional[List[str]] = None) -> Dict[str, Any]:
     roots = model_roots() if roots is None else roots
     for s in sets:
         for p in s.get("parts") or []:
+            if p.get("options"):
+                _choose_size(p, roots)
+                continue
             p["have"] = any(os.path.isfile(os.path.join(root, p["category"], p["name"])) for root in roots)
         s["bytes"] = sum(p["size"] for p in s.get("parts") or [] if not p["have"])
     return {"installed": True, "ready": bool(sets), "updating": not fresh, "sets": sets}
