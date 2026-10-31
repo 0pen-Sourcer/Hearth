@@ -62,8 +62,8 @@ in the window.
 
 ## Reminders on your phone
 
-Turn on **Send reminders to my phone too** in Connectors and every reminder also goes to the
-Telegram or Discord you connected. Inglen can also send you something on request ("send this to my
+Turn on **Send reminders to my phone** in Settings, Behavior, Notifications and every reminder also
+goes to the Inglen app on your paired phone (with Plus) and to the Telegram or Discord you connected. Inglen can also send you something on request ("send this to my
 Telegram").
 
 ## Running a bot without the window

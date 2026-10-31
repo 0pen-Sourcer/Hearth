@@ -5087,6 +5087,16 @@
           </div>
         </div>
 
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Notifications</h4>
+        <div class="field" id="field-phone-notify">
+          <div class="label">
+            <div class="name">Send reminders to my phone</div>
+            <div class="hint">Each reminder also goes to the Inglen app on your phone (with Plus) and to the Telegram or Discord you connected.</div>
+            <div class="hint" id="phone-notify-where" style="margin-top:4px"></div>
+          </div>
+          <div class="switch" data-key="phone_reminders" role="switch" aria-label="Send reminders to my phone"></div>
+        </div>
+
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Tool permissions</h4>
         <div class="hint" style="margin-bottom:10px;">What each risky tool does when called: <b>Ask</b>, <b>Allow</b> or <b>Deny</b>. A denied tool is hidden from the model. Read-only tools are always allowed.</div>
         <input type="text" id="perm-search" placeholder="Search tools…" style="width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--fg);padding:8px 11px;font-size:12px;outline:none;margin-bottom:10px;">
@@ -5145,13 +5155,6 @@
             <button type="button" class="ap-mode" data-wipe="pixel"><b>Pixel wipe</b><small>The next room opens out of where you clicked.</small></button>
             <button type="button" class="ap-mode" data-wipe="instant"><b>Instant</b><small>Straight to it, no movement.</small></button>
           </div>
-        </div>
-<div class="field">
-          <div class="label">
-            <div class="name">Count this install</div>
-            <div class="hint" id="count-payload-hint">Once a day, only an install id, the version, the OS and the kind of brain.</div>
-          </div>
-          <div class="switch" data-key="install_count"></div>
         </div>
 <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">In the chat</h4>
         <div class="field">
@@ -5419,13 +5422,12 @@
           </div>
         </div>
 
-        <!-- Reminders to the phone -->
         <div class="field">
           <div class="label">
-            <div class="name">Send reminders to my phone too</div>
-            <div class="hint">Each reminder also goes to the Telegram or Discord above, to whoever is let in there first.</div>
+            <div class="name">Reminders on your phone</div>
+            <div class="hint">Set in Behavior, Notifications. They go to the Inglen app and to the first person let in on these apps.</div>
           </div>
-          <div class="switch" data-key="phone_reminders"></div>
+          <button type="button" class="btn-mini" data-goto-st="behavior">Open</button>
         </div>
 
         <!-- WhatsApp (experimental) -->
@@ -5546,6 +5548,14 @@
             <div class="hint">Reminders fire before you open the window.</div>
           </div>
           <div class="switch" id="btn-autostart-toggle" role="switch" aria-checked="false" aria-label="Start Inglen at login"></div>
+        </div>
+        <div class="field" id="field-install-count">
+          <div class="label">
+            <div class="name">Count this install</div>
+            <div class="hint">Helps show how many people use Inglen. Off unless you turn it on. Once a day it sends only this, and no IP address is kept:</div>
+            <code class="ob-count-payload" id="count-payload"></code>
+          </div>
+          <div class="switch" data-key="install_count" role="switch" aria-label="Count this install"></div>
         </div>
         <div class="field"><div class="label">
           <div class="name">Currently talking to</div>
@@ -16292,8 +16302,36 @@ $$('.switch[data-key]').forEach(sw => {
     }
     if (k === 'user_bubbles') document.body.classList.toggle('chat-bubbles', next);
     if (k === 'auto_reviewer') setTimeout(() => refreshReviewer(), 300);
+    if (k === 'install_count') setTimeout(renderInstallCount, 300);
   });
 });
+
+// A button that opens another Settings pane.
+document.querySelectorAll('[data-goto-st]').forEach(b => b.addEventListener('click', () =>
+  document.querySelector(`.settings-side-btn[data-st="${b.dataset.gotoSt}"]`)?.click()));
+
+// Settings, Behavior, Notifications: where a reminder for the phone goes now.
+function renderPhoneNotify() {
+  const el = $('phone-notify-where'); if (!el) return;
+  api('/api/notify-targets').then(r => {
+    const names = { telegram: 'Telegram', discord: 'Discord' };
+    const to = [];
+    if (r.app) to.push(r.app === 1 ? 'the Inglen app on your phone' : `the Inglen app on ${r.app} phones`);
+    for (const c of r.chat_apps || []) to.push(names[c] || c);
+    el.textContent = to.length ? 'Goes to ' + to.join(' and ') + '.'
+      : 'Nothing is connected yet. Pair a phone under Plus, or connect Telegram or Discord under Connectors.';
+  }).catch(() => {});
+}
+
+// Settings, About: exactly what the install count sends, as onboarding shows it.
+function renderInstallCount() {
+  const el = $('count-payload'); if (!el) return;
+  api('/api/install-count').then(r => {
+    el.textContent = JSON.stringify(r.payload);
+    const sw = document.querySelector('#field-install-count .switch');
+    if (sw) sw.classList.toggle('on', !!r.on);
+  }).catch(() => {});
+}
 
 // Auto's reviewer: whether it is on for the brain in use, and how its model did
 // on the labelled steps. A check runs in the background; this follows it.
@@ -20187,6 +20225,8 @@ document.querySelectorAll('.settings-side-btn').forEach(b => {
     const name = b.dataset.st;
     document.querySelectorAll('.settings-pane').forEach(p => { p.hidden = (p.dataset.st !== name); });
     if (name === 'plus') renderPlus();
+    if (name === 'about') renderInstallCount();
+    if (name === 'behavior') renderPhoneNotify();
     if (name === 'mcp') { refreshMcpStatus().catch(() => {}); refreshMcpInbound().catch(() => {}); }
   });
 });

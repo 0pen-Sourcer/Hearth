@@ -1871,6 +1871,13 @@ class Bridge:
             if call_me.may_call(str(ev.get("reason") or ""))[0]:
                 threading.Thread(target=self.ring, args=(ev,), daemon=True, name="relay-ring").start()
             return
+        if kind == "phone_notice":
+            # A reminder (or the notify tool) for the phone: a notification on each paired phone.
+            note = {"kind": "reminder", "title": str(ev.get("title") or "Inglen"),
+                    "body": str(ev.get("body") or ""), "c": str(ev.get("c") or "")}
+            threading.Thread(target=lambda: [self.adapter.notify(chat, note, urgent=True) for chat in phones],
+                             daemon=True, name="relay-notice").start()
+            return
         out: Optional[Dict[str, Any]] = None
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
             _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh

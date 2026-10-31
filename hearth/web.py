@@ -2880,6 +2880,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             # The opt-in install count: whether it is on, and exactly what it sends.
             from . import install_count
             return self._send_json(200, {"on": install_count.on(), "payload": install_count.payload()})
+        if path == "/api/notify-targets":
+            # Where a reminder for the phone would go now: the Inglen app (Plus) and the chat apps.
+            from . import reminders as _rem
+            return self._send_json(200, _rem.phone_targets())
         if path == "/api/cards":
             # Where each chat stands, for the Memory tab's "Going on".
             from . import memory_cards
@@ -3409,7 +3413,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/events":
             # Another process (a bridge, the terminal) saying what changed; passed to every listener.
             ev = self._read_json()
-            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn"):
+            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn", "phone_notice"):
                 live_bus.publish(ev)
             return self._send_json(200, {"ok": True})
         if path == "/api/cancel":

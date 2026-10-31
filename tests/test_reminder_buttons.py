@@ -139,7 +139,7 @@ rem.deliver = lambda r, note, wait_s=600: None          # no model here
 rem._ensure_app_identity = lambda: None                  # leave this PC's registry alone
 plain, phone, caller = [], [], []
 rem.use_tray(lambda t, b: plain.append((t, b)))          # the plain notice, as the tray shows it
-rem._push_phone = lambda t, b: phone.append((t, b)) or True
+rem._push_phone = lambda t, b, chat="": phone.append((t, b)) or True
 
 snz = due_now("water the plants snz")
 dn = due_now("call the bank dn")

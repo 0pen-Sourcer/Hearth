@@ -113,7 +113,7 @@ Say it however you like. Inglen works out the exact time and reads back the day 
 | `next monday at 10am` | the coming Monday, 10:00 |
 | `every weekday at 9am` | a recurring reminder |
 
-When it's time you get a Windows notification, and Inglen says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone too** on (Settings, Connectors), it reaches your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what Inglen knows about you.
+When it's time you get a Windows notification, and Inglen says it in a chat of its own, marked in the sidebar with a clock and a dot until you open it. With **Send reminders to my phone** on (Settings, Behavior, Notifications), it reaches the Inglen app on your phone (with Plus) and your Telegram or Discord as well. All of them are listed in the Reminders tab, where you can change one (what it says, when, how often and until when), pause one without losing it (a repeating one picks up at its next time when you resume it), type a new one, and pick from ideas based on what Inglen knows about you.
 
 ---
 
