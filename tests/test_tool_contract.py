@@ -8,6 +8,8 @@ break then only appears when a user calls it. These checks close that gap.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import ast
 import glob
 import io

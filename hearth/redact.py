@@ -107,9 +107,11 @@ def redact_for_public(text: str, *, email: str = "", hostname: str = "",
     if email:
         _mask(re.compile(re.escape(email)), "email", "<EMAIL>")
 
-    # 2) API keys / tokens
+    # 2) API keys / tokens, by shape, then the person's own saved ones whatever their shape
     for label, pat in _KEY_PATTERNS:
         _mask(pat, label, "<REDACTED_KEY>")
+    out, saved = mask_known(out)
+    findings += saved
 
     # 3) home paths -> placeholder (keep the rest of the path intact)
     for label, pat in _home_patterns():
@@ -143,6 +145,68 @@ def redact_secrets_only(text: str) -> Tuple[str, List[Dict[str, str]]]:
     findings: List[Dict[str, str]] = []
     out = text
     for label, pat in _KEY_PATTERNS:
+        hits = pat.findall(out)
+        if hits:
+            findings.append({"type": label, "count": str(len(hits))})
+            out = pat.sub("<REDACTED_KEY>", out)
+    out, saved = mask_known(out)
+    return out, findings + saved
+
+
+def _saved_values() -> List[str]:
+    try:
+        from .keystore import known_values
+        return sorted(known_values(), key=len, reverse=True)
+    except Exception:
+        return []
+
+
+def mask_known(text: str, values=None) -> Tuple[str, List[Dict[str, str]]]:
+    """Mask the person's own saved secrets (provider keys, bot tokens, the licence
+    key, the mail password), matched exactly, whatever shape they have."""
+    if not text or not isinstance(text, str):
+        return text, []
+    n = 0
+    for v in (values if values is not None else _saved_values()):
+        if v and v in text:
+            n += text.count(v)
+            text = text.replace(v, "<REDACTED_KEY>")
+    return text, ([{"type": "saved key", "count": str(n)}] if n else [])
+
+
+_EMIT_TEXT = ("text", "content", "out", "words", "cmd", "message", "reply", "result", "detail", "preview")
+
+
+def clean_emit(emit):
+    """An event sink that cleans what an agent program says or a step shows
+    (saved secrets and key shapes) before the window, the phone or a later turn sees it."""
+    if getattr(emit, "_cleaned", False):
+        return emit
+
+    def wrapped(kind, **fields):
+        for k in _EMIT_TEXT:
+            if isinstance(fields.get(k), str):
+                fields[k] = redact_for_model(fields[k])[0]
+        a = fields.get("args")
+        if isinstance(a, dict):
+            fields["args"] = {k: redact_for_model(v)[0] if isinstance(v, str) else v for k, v in a.items()}
+        return emit(kind, **fields)
+    wrapped._cleaned = True
+    return wrapped
+
+
+# Generic enough to be ordinary data (ids) in what a tool returns to a model.
+_NOT_FOR_MODEL = {"UUID token"}
+
+
+def redact_for_model(text: str) -> Tuple[str, List[Dict[str, str]]]:
+    """A tool result, cleaned before a model sees it: saved secrets and key shapes."""
+    if not text or not isinstance(text, str):
+        return text, []
+    out, findings = mask_known(text)
+    for label, pat in _KEY_PATTERNS:
+        if label in _NOT_FOR_MODEL:
+            continue
         hits = pat.findall(out)
         if hits:
             findings.append({"type": label, "count": str(len(hits))})

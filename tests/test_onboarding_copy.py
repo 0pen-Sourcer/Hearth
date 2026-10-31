@@ -9,6 +9,8 @@ an English-only speech model. The tour was eleven tabs read out one by one.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import builtins
 import json
 import os
@@ -45,8 +47,15 @@ real_save = web._save_settings
 web._save_settings = lambda d: saved.update(d) or saved
 onboarding.apply({"language": "hi"})
 check("the language spoken is saved for listening", saved.get("stt_language") == "hi")
+check("and replies follow it: the profile the model reads every turn says so",
+      "- Language: reply in Hindi" in memory.read_profile())
+onboarding.apply({"language": "en"})
+check("English needs no language line", "Language:" not in memory.read_profile())
+onboarding.apply({"name": "Asha", "language": "ta"})
 onboarding.apply({"language": ""})
 check("'more than one' saves blank, so each utterance is worked out", saved.get("stt_language") == "")
+check("and drops the reply line, keeping the rest of the profile",
+      "Language:" not in memory.read_profile() and "Asha" in memory.read_profile())
 onboarding.apply({"language": "hindi; rm"})
 check("anything that isn't a language code is ignored", saved.get("stt_language") == "")
 check("names and codes both read as a language",
@@ -113,7 +122,9 @@ with sync_playwright() as pw:
     pg.screenshot(path=os.path.join(shots, "1_welcome.png"))
     check("the welcome no longer says nothing leaves the machine", "Nothing leaves" not in welcome)
     check(f"the welcome is a hello and one line on what it is {welcome.strip()!r}",
-          "I run on your PC and do real things on it." in welcome and "What makes me different" not in welcome)
+          "I run on your PC and do real things on it" in welcome and "What makes me different" not in welcome)
+    check("and that line says what sets it apart: any brain, one switch, memory, undo, the phone",
+          all(w in welcome for w in ("Claude Code and Codex", "one switch", "remember", "undone", "phone")))
     agent = pg.evaluate("() => _agentName()")
     check(f"the hello uses the agent's own name ({agent})", f"Hey, I'm {agent}." in welcome)
 
@@ -153,6 +164,9 @@ with sync_playwright() as pw:
       obStep = 4; obRender(); await wait(300);
       document.querySelector('#ob-body [data-voice="full"]').click(); await wait(200);
       const sel = $('ob-lang'), out = {};
+      document.querySelector('#ob-body [data-voice="text"]').click(); await wait(200);
+      out.textOnly = !!sel.getClientRects().length;
+      document.querySelector('#ob-body [data-voice="full"]').click(); await wait(200);
       out.langs = sel.options.length;
       const pick = async (v) => { sel.value = v; sel.dispatchEvent(new Event('change')); await wait(100);
         return { voices: [...$('ob-voice-name').options].map(o => o.value), note: $('ob-lang-note').textContent }; };
@@ -166,6 +180,7 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(200)
     pg.screenshot(path=os.path.join(shots, "2_voice_language.png"))
     check(f"the voice step asks the language, from the list listening knows ({lang['langs']})", lang["langs"] >= 20)
+    check("the language is asked for text only too, since replies follow it", lang["textOnly"])
     check(f"Hindi offers only Hindi voices {lang['hi']}",
           lang["hi"]["voices"] and all(v.startswith("h") for v in lang["hi"]["voices"]))
     check(f"German keeps the English voices and says no voice speaks it {lang['de']['note']!r}",
@@ -202,7 +217,10 @@ with sync_playwright() as pw:
         pg.screenshot(path=os.path.join(shots, f"4_tour_{n + 1}.png"))
         stops.append(st)
         pg.click("#tour-card [data-t='next']")
-    check(f"the tour has six stops {[s['title'] for s in stops]}", len(stops) == 6)
+    check(f"the tour has seven stops {[s['title'] for s in stops]}", len(stops) == 7)
+    check("it stops at the approval switch, the phone and the chat apps",
+          {"Before I act", "Your phone", "Chat apps and email"} <= {s["title"] for s in stops})
+    check("and ends back in the chat", pg.evaluate("() => document.getElementById('view-chat').classList.contains('active')"))
     check("each stop ends in something to try", stops and all(s["tried"].startswith("Try: ") for s in stops))
     check(f"each card sits inside the window {[s['inside'] for s in stops]}", stops and all(s["inside"] for s in stops))
     check(f"no page errors {errors[:3]}", not errors)

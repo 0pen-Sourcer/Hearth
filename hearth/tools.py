@@ -7448,9 +7448,8 @@ def _connectors(p: Dict) -> str:
             cfg["bot_token"] = token
         if ch == "whatsapp":
             cfg.setdefault("allow_self_chat", True)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
+        from . import keystore
+        keystore.write_json(path, cfg)
         try:
             from . import web as _w
             ok, err = _w._spawn_bridge(ch)
@@ -8362,6 +8361,19 @@ _HUD_TOOLS = {
 
 
 def execute_tool(name: str, args: Optional[Dict] = None) -> str:
+    """Run a tool by name. The result never carries a saved key or a key-shaped
+    string to the model (hearth/redact.py)."""
+    out = _execute_tool(name, args)
+    if isinstance(out, str):
+        try:
+            from .redact import redact_for_model
+            out = redact_for_model(out)[0]
+        except Exception:
+            pass
+    return out
+
+
+def _execute_tool(name: str, args: Optional[Dict] = None) -> str:
     """Run a tool by name. Returns a string (truncated to per-tool cap).
     MCP-bridged tools (name starts with 'mcp_') route through the live
     MCP client session instead of the static _HANDLERS dict."""
@@ -9031,13 +9043,30 @@ def is_risky(name: str, args=None) -> bool:
 
 
 def sends_out(name: str, args=None) -> str:
-    """Why this call asks in every mode, because it would send something out
-    after the chat took in content from outside; '' when it doesn't."""
+    """Why this call asks in every mode: it would read a place that holds keys
+    (hearth/secret_places.py), or send something out after the chat took in
+    content from outside (hearth/outbound.py); '' when neither."""
+    r = reads_secret(name, args)
+    if r:
+        return r
     try:
         from .outbound import reason
         return reason(name, args)
     except Exception:
         return ""
+
+
+def reads_secret(name: str, args=None) -> str:
+    """Why this call would read a place that holds keys; '' when it wouldn't.
+    Nothing lets it through without a person's yes: not the mode, the reviewer,
+    a standing yes or auto-approve."""
+    if not isinstance(args, dict):
+        return ""
+    try:
+        from .secret_places import reason
+        return reason(name, args)
+    except Exception as e:
+        return f"This couldn't be checked for keys it would read ({type(e).__name__}), so it asks."
 
 
 # ============================================================

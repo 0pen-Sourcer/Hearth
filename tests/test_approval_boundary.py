@@ -11,6 +11,8 @@ prompt to say no.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 # What these calls do is a test, not something the agent did: keep it out of
 # the real activity log.

@@ -405,7 +405,10 @@ class Hub:
             because = ""
         if because:
             question += " " + because
-        if callable(getattr(self.a, "ask", None)):
+        if callable(getattr(self.a, "ask", None)) and getattr(self.a, "takes_detail", False):
+            cmd = ((args or {}).get("command") or (args or {}).get("cmd")) if name in ("run_command", "start_job") else ""
+            self.a.ask(chat, question, detail={"cmd": str(cmd or "")})   # the whole command, apart from the words
+        elif callable(getattr(self.a, "ask", None)):
             self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
         else:
             self.a.send(chat, question + " Reply yes to let me, anything else to stop.")
@@ -634,7 +637,10 @@ class Hub:
             from .errors import classify_api_error
             info = classify_api_error(e, headless._is_local_endpoint(headless.LOCAL_API_BASE))
             err["cat"], err["msg"] = info.category, info.hint
-        reply = headless.bridge_reply_or_reason("".join(parts), err["cat"], err["msg"])
+        # A turn that ended on a step after its words (a goodbye, then end_session) has them only as
+        # written, never as a final message: those words are the reply, not "couldn't get a response".
+        said = "".join(parts).strip() or "".join(written).strip()
+        reply = headless.bridge_reply_or_reason(said, err["cat"], err["msg"])
         if tools_used and not self.a.can_edit and not steps:
             foot = bridge_status.footer(tools_used)
             if foot:
@@ -642,7 +648,7 @@ class Hub:
         final = redact_secrets_only(reply or "(no output)")[0]
         stats = {k: v for k, v in stats.items() if v is not None}
         _TURN.ctx = dict(_TURN.ctx or {}, stats=stats, context=context)   # the finished reply carries them
-        if err["cat"] and not "".join(parts).strip():
+        if err["cat"] and not said:
             _TURN.ctx["error"] = True          # the reply is why it failed: the phone shows it as an error
         try:
             if status["id"] is not None and tools_used:
@@ -732,11 +738,10 @@ _OWNER_KEYS = {"telegram": "allowed_chat_ids", "discord": "allowed_user_ids", "w
 
 
 def config_of(channel: str) -> Dict[str, Any]:
-    try:
-        with open(os.path.join(os.path.expanduser("~"), ".hearth", CONFIG_FILES[channel]), encoding="utf-8") as f:
-            return json.load(f) or {}
-    except (KeyError, OSError, ValueError):
+    if channel not in CONFIG_FILES:
         return {}
+    from . import keystore
+    return keystore.read_json(os.path.join(os.path.expanduser("~"), ".hearth", CONFIG_FILES[channel]))
 
 
 def owner_of(channel: str) -> str:
@@ -848,8 +853,8 @@ def use_saved_brain(log: Callable[[str], None] = print) -> None:
         return
     try:
         from .tools import WORKSPACE
-        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-            s = json.load(f)
+        from . import keystore
+        s = keystore.read_settings(os.path.join(WORKSPACE, "settings.json"))
     except Exception:
         return
     for key, env in (("llm_url", "LOCAL_API_BASE"), ("llm_key", "LOCAL_API_KEY"), ("llm_model", "LOCAL_MODEL")):
@@ -865,8 +870,8 @@ def follow_saved_brain() -> Dict[str, Any]:
     engine itself; a model server's address, key and name are set here."""
     try:
         from .tools import WORKSPACE
-        with open(os.path.join(WORKSPACE, "settings.json"), encoding="utf-8") as f:
-            s = json.load(f)
+        from . import keystore
+        s = keystore.read_settings(os.path.join(WORKSPACE, "settings.json"))
     except Exception:
         return {}
     url = str(s.get("llm_url") or "").strip()
@@ -949,6 +954,17 @@ def shown_result(content: Any, limit: int = 4000) -> str:
             content = str(content)
     t = str(content or "")
     return t if len(t) <= limit else t[:limit].rstrip() + "\n..."
+
+
+def question_for(who: str, name: str, args: Dict[str, Any]) -> str:
+    """An agent's permission question, with why it asks whatever the mode (keys it would read)."""
+    q = f"{who} asks: may it {_what(name, args)}?"
+    try:
+        from .tools import sends_out
+        why = sends_out(name, args)
+    except Exception:
+        why = ""
+    return f"{q} {why}" if why else q
 
 
 def _what(name: str, args: Dict[str, Any]) -> str:

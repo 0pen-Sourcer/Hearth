@@ -3,7 +3,8 @@
 The answers have to land where the model reads them on every turn, which is
 profile.md (who the person is and how they want replies) and rules.md (what to
 avoid). Voice and approval choices are settings the rest of Hearth reads. Each
-answer owns one profile line, so answering again replaces it.
+answer owns one profile line, so answering again replaces it. The language
+answer is both: listening's setting and the profile line replies follow.
 """
 from __future__ import annotations
 
@@ -129,7 +130,11 @@ def apply(answers: Dict[str, str]) -> Dict[str, object]:
     if "language" in a and isinstance(a["language"], str) and re.fullmatch(r"[a-z]{0,3}", a["language"]):
         # The language spoken to it: listening uses it (a multilingual model for
         # anything but English); blank means work it out for each utterance.
+        # Replies follow it through the profile; English and blank need no line.
         settings["stt_language"] = a["language"]
+        name = LANGUAGES.get(a["language"])
+        _set_profile_field("Language:", f"reply in {name} unless they write in another language."
+                           if name and a["language"] != "en" else None)
     if "install_count" in a:
         settings["install_count"] = a["install_count"] in (True, "yes", "on")   # opt-in: anything else is no
     if "voice" in a:

@@ -175,14 +175,35 @@ def request(reason: str, why: str, chat: str = "", ask: str = "", tap: bool = Fa
         return False
 
 
+def ask_for(why: str, chat: str = "") -> str:
+    """A call they asked for themselves ("call me when you're done"), from Inglen or one of their coding
+    agents: it rings even with Inglen's own calls off, but not in their quiet hours, and not while they
+    are at the PC. What happened, in a line for whoever asked."""
+    try:
+        r = rules()
+        if quiet_now(r):
+            return "Not calling: it's their quiet hours. Tell them in the session instead."
+        if at_pc():
+            return "Not calling: they're at the PC right now. Tell them in the session."
+        from . import live_bus
+        live_bus.publish({"kind": "call_me", "reason": "job", "why": _clip(why, 160), "say": opener("job", why),
+                          "c": str(chat or ""), "ask": "", "tap": False, "question": "",
+                          "key": f"asked:{chat}:{time.time():.0f}"})
+        return "Calling their phone now; they hear this when they answer."
+    except Exception as e:
+        return f"Couldn't call: {type(e).__name__}: {e}"
+
+
 class Rings:
-    """One ring at a time; the same thing rings once; a gap after a declined or missed one."""
+    """One ring at a time; the same thing rings once (a key with once_s, once in that long);
+    a gap after a declined or missed one, doubling with each call missed in a row."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.now: Optional[Dict[str, Any]] = None     # the ring going on
         self.seen: Dict[str, float] = {}               # key -> when it rang
         self.quiet_until = 0.0
+        self.missed = 0                                # calls missed in a row
 
     def start(self, ev: Dict[str, Any], rid: str, at: Optional[float] = None) -> Optional[Dict[str, Any]]:
         at = time.time() if at is None else at
@@ -190,7 +211,8 @@ class Rings:
             if self.now is not None or at < self.quiet_until:
                 return None
             key = str(ev.get("key") or "")
-            if key and key in self.seen:
+            once = ev.get("once_s")
+            if key and key in self.seen and (once is None or at - self.seen[key] < float(once)):
                 return None
             if key:
                 self.seen[key] = at
@@ -206,15 +228,18 @@ class Rings:
             ring = self.now if self.now and self.now.get("id") == rid else None
             if ring is not None:
                 self.now = None
+                self.missed = 0
             return ring
 
-    def drop(self, rid: str, at: Optional[float] = None) -> Optional[Dict[str, Any]]:
-        """Declined or missed: it stops, and nothing rings for a while."""
+    def drop(self, rid: str, at: Optional[float] = None, missed: bool = False) -> Optional[Dict[str, Any]]:
+        """Declined or missed: it stops, and nothing rings for a while; longer after each missed in a row."""
         with self.lock:
             ring = self.now if self.now and self.now.get("id") == rid else None
             if ring is not None:
                 self.now = None
-                self.quiet_until = (time.time() if at is None else at) + GAP_S
+                self.missed = self.missed + 1 if missed else 0
+                gap = GAP_S * (2 ** min(self.missed - 1, 4)) if missed else GAP_S
+                self.quiet_until = (time.time() if at is None else at) + gap
             return ring
 
 

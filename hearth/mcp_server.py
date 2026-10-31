@@ -185,14 +185,17 @@ _IN_HEARTH = (("spawn_subagent", "tell_subagent", "get_subagent_result", "launch
 
 def _run(name: str, args: Dict[str, Any]):
     import time as _t
-    from hearth.tools import APPROVAL_TOKEN, _RISKY_TOOLS, mode_allows
+    from hearth.tools import APPROVAL_TOKEN, _RISKY_TOOLS, mode_allows, reads_secret
     from hearth.outbound import URL_ARGS
     now = _t.time()
     hit = next((a for a in _APPROVED if a[0] == name and now - a[1] < 60), None)
+    secret = reads_secret(name, args)
     if hit:
         _APPROVED.remove(hit)
         args = dict(args, _approved=APPROVAL_TOKEN)
-    elif _BRAIN_GATE and _BRAIN_URL and (name in _RISKY_TOOLS or name in URL_ARGS):
+    elif secret and not (_BRAIN_GATE and _BRAIN_URL):
+        return f"Not done. {secret} Nobody here can say yes to it."
+    elif _BRAIN_GATE and _BRAIN_URL and (name in _RISKY_TOOLS or name in URL_ARGS or secret):
         # Whether a request would carry data out depends on what the turn has
         # read from outside, which the Inglen that started this server keeps.
         if name in URL_ARGS or not mode_allows(name, args):

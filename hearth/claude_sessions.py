@@ -10,28 +10,35 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 Emit = Callable[..., None]
 
 
-def args_for(exe: List[str], sid: str, mode: str) -> List[str]:
+def args_for(exe: List[str], sid: str, mode: str, model: str = "") -> List[str]:
+    from .claude_brain import claude_settings
+    from .shared_memory import NAME, launch
+    # Inglen's tools for agents ride along (memory, and call_me so "call me when you're done" works).
+    tools = json.dumps({"mcpServers": {NAME: {"type": "stdio", **launch()}}})
     return list(exe) + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                         "--include-partial-messages", "--permission-prompt-tool", "stdio",
-                        "--permission-mode", mode] + (["--resume", sid] if sid else [])
+                        "--permission-mode", mode, "--settings", json.dumps(claude_settings()),
+                        "--mcp-config", tools] + (["--model", model] if model else []) + (["--resume", sid] if sid else [])
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
-              mode: str = "default", drain: Optional[Callable[[], List[str]]] = None) -> int:
+              mode: str = "default", drain: Optional[Callable[[], List[str]]] = None, model: str = "") -> int:
     """Resume session `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _result_text, _steps_of
     from .channel_core import _what, out_of
-    from .claude_brain import _QUIET_TOOLS, hearth_view
+    from .claude_brain import _QUIET_TOOLS, hearth_view, agent_env
 
     proc = await asyncio.create_subprocess_exec(
-        *args_for(exe, sid, mode), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
+        *args_for(exe, sid, mode, model), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024, env=agent_env(),
         creationflags=0x08000000 if sys.platform == "win32" else 0)
     errs = asyncio.ensure_future(proc.stderr.read())
     sent, answered = 0, 0                    # user messages given, turns finished
@@ -85,8 +92,12 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
                 if req.get("subtype") == "can_use_tool":
                     name, args = str(req.get("tool_name") or ""), req.get("input") if isinstance(req.get("input"), dict) else {}
                     from .tools import mode_allows
-                    ok = mode_allows(*hearth_view(name, args)) or await asyncio.to_thread(
-                        ask, f"Claude Code asks: may it {_what(*hearth_view(name, args))}?")
+                    from .channel_core import question_for
+                    tname, targs = hearth_view(name, args)
+                    if tname == "run_command":
+                        targs = dict(targs, cwd=cwd)
+                    ok = mode_allows(tname, targs) or await asyncio.to_thread(
+                        ask, question_for("Claude Code", tname, targs))
                     answer = ({"behavior": "allow", "updatedInput": args} if ok
                               else {"behavior": "deny", "message": "Not allowed from the phone."})
                     send({"type": "control_response", "response": {"subtype": "success", "request_id": ev.get("request_id"),
@@ -155,3 +166,121 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
     if failed:
         emit("error", message=f"Claude Code stopped: {failed}"[:600])
     return 0 if replied and not failed else 1
+
+
+# ---------------------------------------------------------------- a session open on the PC
+
+def deliver(inbox: Dict[str, Any], words: str) -> bool:
+    """One message into a live session's messaging inbox: the token line, then the message line."""
+    from .agent_sessions import PHONE_MARK
+    try:
+        with open(inbox["pipe"], "r+b", buffering=0) as f:
+            f.write((json.dumps({"type": "auth", "token": inbox["token"]}) + "\n").encode("utf-8"))
+            f.write((json.dumps({"type": "user", "message": {"role": "user", "content": f"{PHONE_MARK}\n\n{words}"}})
+                     + "\n").encode("utf-8"))
+        return True
+    except OSError:
+        return False
+
+
+SEEN_S = 20            # an idle session that hasn't taken the message by then won't (held, or refused)
+BUSY_S = 600           # a busy one takes it when its turn allows
+TURN_S = 1800          # how long a reply is followed
+
+
+async def live(inbox: Dict[str, Any], path: str, text: str, emit: Emit, *,
+               drain: Optional[Callable[[], List[str]]] = None) -> int:
+    """Send `text` into a Claude Code session running on the PC (VS Code, a terminal, its desktop app)
+    through its messaging inbox, so it shows there as it runs, and follow its transcript for the reply:
+    steps and words as Claude Code writes them, until its turn ends. Messages sent meanwhile go in the
+    same way; the session takes them between its steps."""
+    from .agent_sessions import _result_text, _steps_of, from_phone
+    from .channel_core import out_of
+    from .claude_brain import _QUIET_TOOLS, hearth_view
+
+    pos = os.path.getsize(path) if path and os.path.exists(path) else 0
+    if not await asyncio.to_thread(deliver, inbox, text):
+        emit("error", message="Claude Code on your PC didn't take the message.")
+        return 2
+    sent, seen, t0, told = 1, 0, time.time(), False
+    parts: List[str] = []
+    partial = b""
+    replied = False
+    while time.time() - t0 < TURN_S:
+        for more in (drain() if drain else []):
+            if more and await asyncio.to_thread(deliver, inbox, more):
+                sent += 1
+                emit("note", text="Claude Code has it, in the session on your PC.")
+        try:
+            with open(path, "rb") as f:
+                f.seek(pos)
+                chunk = f.read()
+        except OSError:
+            chunk = b""
+        if chunk:
+            pos += len(chunk)
+            lines = (partial + chunk).split(b"\n")
+            partial = lines.pop()
+        else:
+            lines = []
+        for raw in lines:
+            try:
+                o = json.loads(raw)
+            except ValueError:
+                continue
+            if from_phone(o):
+                seen += 1
+                continue
+            if o.get("isSidechain") or o.get("type") not in ("user", "assistant") or seen == 0:
+                continue
+            m = o.get("message") or {}
+            content = m.get("content") if isinstance(m.get("content"), list) else []
+            if o["type"] == "user":
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        emit("step_out", out=out_of(_result_text(b.get("content"))))
+                continue
+            if o.get("isApiErrorMessage") or m.get("model") == "<synthetic>":
+                # The session stopped on its own error (a usage limit, an outage): that is the turn's end.
+                why = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict)).strip()
+                emit("error", message=f"Claude Code stopped: {why or 'it hit an error'}"[:600])
+                return 1
+            used = wrote = False
+            for b in content:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text" and b.get("text"):
+                    wrote = True
+                    parts.append(str(b["text"]))
+                    emit("live", text="\n\n".join(parts))
+                elif b.get("type") == "thinking" and b.get("thinking"):
+                    emit("think", text=str(b["thinking"]))
+                elif b.get("type") == "tool_use" and b.get("name") not in _QUIET_TOOLS:
+                    used = True
+                    _in = b.get("input") if isinstance(b.get("input"), dict) else {}
+                    for st in _steps_of(*hearth_view(str(b.get("name") or ""), _in), _in.get("description")):
+                        emit("step", words=st["w"], tool=st["tool"], cmd=st.get("cmd", ""))
+            # Claude Code writes each block of a reply as a line of its own, all marked end_turn:
+            # the turn is over at the one with its words.
+            if m.get("stop_reason") == "end_turn" and wrote and not used and seen >= sent:
+                said = "\n\n".join(parts).strip()
+                if said:
+                    emit("text", text=said)
+                    replied = True
+                return 0 if replied else 1
+        if seen == 0:
+            from .agent_sessions import claude_inbox
+            now = claude_inbox(str(inbox.get("sid") or "")) if inbox.get("sid") else inbox
+            if not now:
+                emit("error", message="Claude Code on your PC closed before it took the message.")
+                return 2
+            if now.get("busy") and not told and time.time() - t0 > 4:
+                told = True
+                emit("note", text="Claude Code is busy on your PC; it takes this when its turn allows.")
+            if time.time() - t0 > (BUSY_S if now.get("busy") else SEEN_S):
+                emit("error", message="Claude Code on your PC hasn't taken it. It may be asking there whether to "
+                                      "accept messages from outside the session.")
+                return 3
+        await asyncio.sleep(0.25)
+    emit("error", message="Claude Code is still working on your PC. Its reply shows here when you open the session again.")
+    return 1

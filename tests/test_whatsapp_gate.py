@@ -15,6 +15,8 @@ Drives the real message handler through a stand-in for neonize.
 """
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import os
 import sys
 import tempfile

@@ -357,6 +357,11 @@ def main(argv: Optional[list] = None) -> int:
             except OSError:
                 continue
 
+    try:
+        from . import keystore
+        keystore.app_start()          # saved keys are sealed; an older version's plain ones get sealed now
+    except Exception:
+        pass
     server = web_backend.serve(host="127.0.0.1", port=port)
     _server_url = f"http://127.0.0.1:{port}/"
     time.sleep(0.3)

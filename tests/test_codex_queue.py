@@ -24,6 +24,9 @@ os.environ["HEARTH_NO_ACTIVITY_LOG"] = "1"
 os.environ["HEARTH_NO_BRIDGES"] = "1"
 
 from hearth import agent_sessions as S                              # noqa: E402
+from hearth import codex_sessions                                   # noqa: E402
+
+codex_sessions.PICKUP_S = 1          # nothing here runs what was queued: the follow ends quickly
 
 FAILS: list = []
 
@@ -52,7 +55,8 @@ rc = asyncio.run(S.say("as_codex_11111111-2222-3333-4444-555555555555", "keep it
 ran = json.load(open(RAN))
 check(f"the message goes to the open session through codex queue ({ran})",
       ran == ["queue", "--thread", "11111111-2222-3333-4444-555555555555", "--message", "keep it sealed"] and rc == 0)
-check(f"and the phone is told where it went, as Inglen's note, not as Codex speaking {said}", said and said[-1][0] == "note" and "Sent to Codex" in said[-1][1]["text"])
+check(f"and the phone is told where it went, as Inglen's note, not as Codex speaking {said}", said and said[0][0] == "note" and "Sent to Codex" in said[0][1]["text"]
+      and said[-1][0] == "text" and "queued" in said[-1][1]["text"])
 
 with open(fake, "w") as f:
     f.write("import sys\nsys.stderr.write(\"error: unrecognized subcommand 'queue'\")\nsys.exit(2)\n")

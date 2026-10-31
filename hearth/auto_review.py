@@ -402,6 +402,12 @@ def allows(name: str, args: Any) -> bool:
 
 def review(name: str, args: Any) -> "Verdict":
     turn = _TURN.get()
+    try:
+        from .tools import reads_secret
+        if reads_secret(name, args):
+            return Verdict(False, "it reads a place that holds keys, which always asks", "floor")
+    except Exception:
+        pass
     why = floor_reason(name, args)
     if why:
         return _said(turn, name, Verdict(False, f"it {why}, which always asks", "floor"))
@@ -451,7 +457,7 @@ def why(name: str, args: Any) -> str:
     """What a question about this step adds: the reviewer's or the floor's reason, '' when there is none."""
     turn = _TURN.get()
     try:
-        from .outbound import reason as _sends_out
+        from .tools import sends_out as _sends_out
         out = _sends_out(name, args)
     except Exception:
         out = ""

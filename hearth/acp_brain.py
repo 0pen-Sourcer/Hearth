@@ -39,11 +39,19 @@ def _env_for(provider: str) -> Dict[str, str]:
     if provider == "opencode":
         # Its shell, edits and fetches ask first, so they come to Hearth; MCP calls
         # wait as long as a person takes to answer. Turning a tool off instead would
-        # make OpenCode's free models refuse the request.
+        # make OpenCode's free models refuse the request. A read of a place that
+        # holds keys asks too.
+        from .secret_places import opencode_read
         extra["OPENCODE_CONFIG_CONTENT"] = json.dumps({
-            "permission": {"edit": "ask", "bash": "ask", "webfetch": "ask", "external_directory": "ask"},
+            "permission": {"edit": "ask", "bash": "ask", "webfetch": "ask", "external_directory": "ask",
+                           "read": opencode_read()},
             "experimental": {"mcp_timeout": 900000}})
     return extra
+
+
+def _agent_env(provider: str) -> Dict[str, str]:
+    from .keystore import agent_env
+    return agent_env(_env_for(provider))
 
 
 def _mcp_servers() -> List[Dict[str, Any]]:
@@ -59,7 +67,7 @@ async def _start(provider: str, cwd: str, extra: Optional[List[str]] = None):
     return await asyncio.create_subprocess_exec(
         *exe, *_base.ACP[provider].get("args", []), *(extra or []), cwd=cwd, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024,
-        env=dict(os.environ, **_env_for(provider)), creationflags=_NO_WINDOW)
+        env=_agent_env(provider), creationflags=_NO_WINDOW)
 
 
 async def _hello(rpc: _Rpc) -> Dict[str, Any]:
@@ -346,6 +354,21 @@ def _text(content: List[Dict[str, Any]]) -> str:
         elif c.get("type") == "diff":
             out.append(f"changed {c.get('path', '')}")
     return "\n".join(out)
+
+
+async def use_model(rpc: "_Rpc", provider: str, sid: Any, opened: Dict[str, Any], want: str) -> bool:
+    """Put an open session on `want` for its next prompt, the way the brain's own sessions switch."""
+    opt = _model_option(opened.get("configOptions") or [], opened.get("models"))
+    if not opt or not want or want == str(opt.get("currentValue") or ""):
+        return False
+    try:
+        if opt.get("via"):
+            await rpc.call(opt["via"], {"sessionId": sid, "modelId": want}, 30)
+        else:
+            await rpc.call("session/set_config_option", {"sessionId": sid, "configId": opt["id"], "value": want}, 30)
+        return True
+    except Exception:
+        return False
 
 
 async def _use_model(rpc: _Rpc, provider: str, sid: Any, opened: Dict[str, Any]) -> tuple:

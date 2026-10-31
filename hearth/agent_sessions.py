@@ -439,10 +439,15 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
         if o.get("type") == "custom-title" and o.get("customTitle"):
             named = str(o["customTitle"])          # the name they gave it (/rename): the newest wins
             continue
-        if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
-            continue
         m = o.get("message") or {}
         content, at = m.get("content"), _ms(o.get("timestamp"))
+        sent = from_phone(o)
+        if sent:
+            title = title or _title(sent)
+            msgs.append(_msg("user", sent, at))
+            continue
+        if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
+            continue
         if o["type"] == "user":
             for b in content if isinstance(content, list) else []:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
@@ -547,6 +552,11 @@ def _codex_read(path: str, head: bool) -> Dict[str, Any]:
             _give_out(by_id, p.get("call_id"), p.get("output"))
         elif kind == "event_msg" and p.get("type") in ("error", "stream_error") and p.get("message"):
             said.append(_msg("assistant", str(p["message"]), at, error=True))
+        elif (kind == "event_msg" and p.get("type") == "task_complete" and isinstance(p.get("error"), dict)
+              and p["error"].get("message")):
+            # A turn that ended on its own error (a usage limit) without a word: that error is what it said.
+            for lst in (said, items):
+                lst.append(_msg("assistant", str(p["error"]["message"]), at, error=True))
         elif p.get("type") == "message" and p.get("role") in ("user", "assistant"):
             text = _text_of(p.get("content"))
             if p["role"] == "user" and not _typed(text):
@@ -823,6 +833,52 @@ def _known_folders() -> List[str]:
     return seen
 
 
+# What Inglen writes into a live Claude Code session for the person, and how Claude Code wraps a
+# message that came in through its messaging inbox (a peer's, as far as it knows).
+PHONE_MARK = "Sent by the user from their phone, through Inglen:"
+
+
+def from_phone(o: Dict[str, Any]) -> str:
+    """The words of a message Inglen delivered into a live session for the person, or ''."""
+    if not (o.get("type") == "user" and (o.get("origin") or {}).get("kind") == "peer"):
+        return ""
+    text = _text_of((o.get("message") or {}).get("content"))
+    i = text.find(PHONE_MARK)
+    if i < 0:
+        return ""
+    said = text[i + len(PHONE_MARK):]
+    end = said.find("\n\nThis came from another Claude session")
+    return (said[:end] if end >= 0 else said).strip()
+
+
+def claude_inbox(sid: str) -> Dict[str, Any]:
+    """The messaging inbox of a Claude Code session running right now: {pid, pipe, token, busy}, or {}.
+    Each live session lists its pipe in ~/.claude/sessions/<pid>.json and the token peers present
+    in <pid>.<hash>.key beside it (both readable only by this user)."""
+    try:
+        import psutil
+    except ImportError:
+        return {}
+    d = os.path.join(_home(), ".claude", "sessions")
+    for p in glob.glob(os.path.join(d, "*.json")):
+        try:
+            with open(p, encoding="utf-8") as f:
+                rec = json.load(f)
+            pid = int(rec.get("pid") or 0)
+            if str(rec.get("sessionId") or "") != sid or not rec.get("messagingSocketPath") or not psutil.pid_exists(pid):
+                continue
+            for k in glob.glob(os.path.join(d, f"{pid}.*.key")):
+                with open(k, encoding="utf-8") as f:
+                    key = json.load(f)
+                # A key left by an earlier process with the same pid is not this one's.
+                if key.get("peerToken") and str(key.get("procStartFt") or rec.get("procStart")) == str(rec.get("procStart")):
+                    return {"pid": pid, "pipe": str(rec["messagingSocketPath"]), "token": str(key["peerToken"]),
+                            "busy": rec.get("status") == "busy"}
+        except (OSError, ValueError, TypeError):
+            continue
+    return {}
+
+
 def _claude_live() -> Dict[str, int]:
     """Claude Code sessions open right now: each running one writes ~/.claude/sessions/<pid>.json."""
     out: Dict[str, int] = {}
@@ -875,14 +931,17 @@ def working(msgs: List[Dict[str, Any]], mtime: float) -> bool:
     its last message is the person's or ends on a step (a command still running) and the
     file was written within STEP_S."""
     age = time.time() - (mtime or 0)
+    last = msgs[-1] if msgs else None
+    parts = (last or {}).get("parts") or []
+    if last and last.get("role") == "assistant" and parts and "text" in parts[-1] and not last.get("error") and age > 3:
+        # It has answered: what it writes after its reply (costs, its own notes) isn't work.
+        return False
     if age < WORKING_S:
         return True
-    last = msgs[-1] if msgs else None
     if not last or age > STEP_S:
         return False
     if last.get("role") == "user":
         return True
-    parts = last.get("parts") or []
     return bool(parts) and "text" not in parts[-1] and not last.get("error")
 
 
@@ -1101,15 +1160,29 @@ def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
     except OSError:
         mtime = 0
     return {"chat": cid, "title": d.get("title") or "", "source": agent, "agent": agent, "label": label(agent),
-            "working": working(msgs, mtime),
+            "working": working(msgs, mtime), **_reach(agent, sid, d.get("path") or ""),
             "cwd": d.get("cwd") or "", "messages": msgs[-last:], "more": max(0, len(msgs) - last),
             **({"earlier": True} if cut else {})}
+
+
+def _reach(agent: str, sid: str, path: str) -> Dict[str, str]:
+    """Said when a session is opened: open on the PC in a program the phone can't send into."""
+    if agent == "claude-code" and sid in _claude_live() and not claude_inbox(sid):
+        return {"reach": "This session is open in Claude Code on your PC, which doesn't take messages from "
+                         "outside it. Close it there, or start a new session here."}
+    return {}
 
 
 # ---------------------------------------------------------------- carrying on
 
 Emit = Callable[..., None]           # emit(kind, **fields): "step", "live", "think", "text", "error"
 Ask = Callable[[str], bool]          # ask(question) -> allowed
+
+
+def attached(paths: List[str]) -> str:
+    """What a coding agent is told about files sent with a message from the phone: where they are, to open."""
+    return "".join(f"\n\n[Attached from the phone: {os.path.basename(p)}, saved at {p}. Open it to look at it.]"
+                   for p in paths if p)
 
 
 def _mode() -> str:
@@ -1120,7 +1193,7 @@ def _mode() -> str:
         return "ask"
 
 
-async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
+async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None, model: str = "") -> int:
     """Send `text` into a session: its agent program carries it on in the session's own
     folder, with the session's own model and permissions. What the agent asks about
     comes to `ask`; what `drain` gives while it works reaches the turn it is on (Codex
@@ -1132,7 +1205,8 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
         return 2
     agent, sid = got
     name = label(agent)
-    outer, ran = emit, []
+    from .redact import clean_emit
+    outer, ran = clean_emit(emit), []        # what reaches the phone or window: no saved key
 
     def emit(kind: str, **fields: Any) -> None:
         if kind == "session":
@@ -1143,7 +1217,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
     draft = agent_launch.DRAFTS.pop(cid, None)
     if draft:
         try:
-            return await agent_launch.start(draft, text, emit, ask, drain=drain)
+            return await agent_launch.start(draft, text, emit, ask, drain=drain, model=model)
         finally:
             _remember(ran)
     d = read(agent, sid)
@@ -1155,12 +1229,27 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
     state = live_state(agent, sid, d.get("path") or "")
     if state == "recent" and _RAN_HERE.get((agent, sid)) == _mtime(d.get("path") or ""):
         state = ""
+    if agent == "claude-code" and state:
+        # Claude Code lists every session it is running: one that isn't is free to carry on here,
+        # and one that is takes the message in its own inbox, shown there as it runs.
+        inbox = claude_inbox(sid)
+        if inbox:
+            from . import claude_sessions
+            return await claude_sessions.live(dict(inbox, sid=sid), d.get("path") or "", text, emit, drain=drain)
+        if sid not in _claude_live():
+            state = ""
+        else:
+            emit("error", message=f"This session is open in {name} on your PC, and that {name} doesn't take messages "
+                                  f"from outside it. Update {name} there, or send this from the PC.")
+            return 3
     if state and agent == "codex" and _exe(agent):
         # Codex takes a message for a session its app holds (codex queue): the app runs it
         # when that session is free, and the reply shows here.
         if await _queue_codex(_exe(agent), sid, cwd, text):
-            emit("note", text=f"Sent to {name} on your PC, where this session is open. It goes in when {name} is free.")
-            return 0
+            emit("note", text=f"Sent to {name} on your PC, where this session is open.")
+            from . import codex_sessions
+            return await codex_sessions.follow(d.get("path") or "", emit, drain=drain,
+                                               queue_more=lambda more: _queue_codex(_exe(agent), sid, cwd, more))
     if state == "open":
         emit("error", message=f"This session is open in {name} on your PC right now. Send it there, or close it "
                               f"there and send this again.")
@@ -1174,7 +1263,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None) -> int:
         emit("error", message=f"{name} isn't installed on this PC any more.")
         return 2
     try:
-        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain)
+        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain, model=model)
     finally:
         _remember(ran)
 
@@ -1194,18 +1283,19 @@ def _remember(ran: List[Tuple[str, str]]) -> None:
 
 
 async def run_in(agent: str, exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ask, *,
-                 drain=None) -> int:
-    """Run `text` in the agent's own harness: session `sid`, or a new one in `cwd` when sid is empty."""
+                 drain=None, model: str = "") -> int:
+    """Run `text` in the agent's own harness: session `sid`, or a new one in `cwd` when sid is empty.
+    `model` (one of claude_brain.agent_models' ids) runs this turn on that model; '' keeps the session's."""
     try:
         if agent == "claude-code":
             from . import claude_sessions
             return await claude_sessions.run(exe, sid, cwd, text, emit, ask,
                                              mode="acceptEdits" if _mode() in ("edits", "auto") else "default",
-                                             drain=drain)
+                                             drain=drain, model=model)
         if agent == "codex":
             from . import codex_sessions
-            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain)
-        return await _say_acp(agent, sid, cwd, text, emit, ask)
+            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain, model=model)
+        return await _say_acp(agent, sid, cwd, text, emit, ask, model=model)
     except Exception as e:
         emit("error", message=f"{label(agent)} didn't run: {type(e).__name__}: {e}")
         return 1
@@ -1230,7 +1320,15 @@ async def _queue_codex(exe: List[str], sid: str, cwd: str, text: str) -> bool:
             await proc.wait()
 
 
-async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: Ask) -> int:
+def acp_tools() -> List[Dict[str, Any]]:
+    """Inglen's tools for agents (memory, and call_me) as an ACP session's MCP server."""
+    from .shared_memory import NAME, launch
+    l = launch()
+    return [{"name": NAME, "command": l["command"], "args": l["args"],
+             "env": [{"name": k, "value": v} for k, v in l["env"].items()]}]
+
+
+async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: Ask, model: str = "") -> int:
     from . import acp_brain as A
     name = label(agent)
     proc = await A._start(agent, cwd)
@@ -1251,13 +1349,15 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
             if not how:
                 emit("error", message=f"{name} can't reopen a session from outside it.")
                 return 2
-            await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": []}, 120)
+            got_s = await rpc.call(how, {"sessionId": sid, "cwd": cwd, "mcpServers": acp_tools()}, 120) or {}
         else:
-            opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": []}, 120)
+            got_s = opened = await rpc.call("session/new", {"cwd": cwd, "mcpServers": acp_tools()}, 120)
             sid = str(opened.get("sessionId") or "")
             if not sid:
                 raise RuntimeError(f"{name} did not return a session ID")
         emit("session", agent=agent, id=sid)
+        if model:
+            await A.use_model(rpc, agent, sid, got_s, model)
         while not rpc.inbox.empty():           # loading replays the old messages: already shown
             m = rpc.inbox.get_nowait()
             if m and "id" in m and "method" in m:
@@ -1275,9 +1375,10 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
             if "id" in msg:
                 if meth == "session/request_permission":
                     tname, targs = A.hearth_call(prm.get("toolCall") or {})
-                    from .channel_core import _what
+                    from .channel_core import question_for
                     from .tools import mode_allows
-                    ok = mode_allows(tname, targs) or await asyncio.to_thread(ask, f"{name} asks: may it {_what(tname, targs)}?")
+                    targs = dict(targs, cwd=targs.get("cwd") or cwd) if tname in ("run_command", "start_job") else targs
+                    ok = mode_allows(tname, targs) or await asyncio.to_thread(ask, question_for(name, tname, targs))
                     kinds = ("allow_once", "allow_always") if ok else ("reject_once", "reject_always")
                     pick = next((o for k in kinds for o in prm.get("options") or [] if o.get("kind") == k), None)
                     rpc.send({"id": msg["id"], "result": {"outcome": {"outcome": "selected", "optionId": pick["optionId"]}}

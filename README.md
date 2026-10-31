@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/0pen-sourcer/hearth/releases"><img src="https://img.shields.io/github/v/release/0pen-Sourcer/Hearth?include_prereleases&style=flat-square&color=8b5cf6&label=release" alt="Latest release"></a>
   <a href="https://github.com/0pen-sourcer/hearth/releases"><img src="https://img.shields.io/github/downloads/0pen-Sourcer/Hearth/total?style=flat-square&color=8b5cf6&label=downloads" alt="Total downloads"></a>
-  <a href="https://get-hearth.vercel.app"><img src="https://img.shields.io/badge/website-8b5cf6?style=flat-square" alt="Website"></a>
+  <a href="https://inglen.app"><img src="https://img.shields.io/badge/website-8b5cf6?style=flat-square" alt="Website"></a>
   <a href="docs/USER_GUIDE.md"><img src="https://img.shields.io/badge/docs-6b6b76?style=flat-square" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-6b6b76?style=flat-square" alt="MIT License"></a>
 </p>
@@ -26,9 +26,11 @@
 
 ---
 
-I built Inglen at 17 because I wanted the assistant from the films, the one that knows you and actually does things, and nothing I could run on my own PC came close. Chat apps can't touch your machine. Coding agents stay inside a code folder. Cloud assistants forget you when the tab closes.
+I built Inglen at 17 because I wanted the assistant from the films, the one that knows you and actually does things, on my own PC and on my terms.
 
-Inglen is the app, and on a new install it is the assistant's name too; you can rename it to anything. It was called Hearth until v0.7.6, and the files and settings still use that name. An older install keeps the name and the folder it already had. Inglen runs on whatever brain you give it, keeps its memory on your disk, and asks before risky steps.
+The idea underneath it is that the agent shouldn't own your computer. The model doing the thinking can be a local one, a cloud one, or Claude Code and Codex on your own plan, and you can swap it mid-conversation. What stays the same is the environment around it, and that is yours. One approval switch decides what may run without asking, and it holds for every brain, because Claude Code's, Codex's and the other agents' permission requests come back to Inglen to answer. In Auto, a reviewer that reads only your own words decides whether a risky step is one you actually asked for, and anything it isn't sure of waits for you. A file is copied before Inglen changes it, so `/undo` puts it back. A coding agent sent as a helper into a git repository works on its own copy, and its changes wait until you bring them in, discard them or undo them. What it remembers is a folder of small files you can read and edit, and with Plus your phone shows each step and lets you allow or deny the risky ones while you're away.
+
+Inglen is the app, and on a new install it is the assistant's name too; you can rename it to anything. It was called Hearth until v0.7.6, and the files and settings still use that name. An older install keeps the name and the folder it already had.
 
 ## Get started in three steps
 
@@ -85,7 +87,7 @@ The terminal app (`inglen.bat`) does everything the window does, with slash comm
 
 ### Safety
 
-A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and stops before deleting, moving, sending email or phone messages, uploading from the shell, pushing, publishing or installing, unless a reviewer that reads only your own words finds you asked for exactly that step. Something Inglen made itself in the last week it may delete or move without asking, since a copy is kept to undo it. Shutting down, disks, accounts, security settings and hidden commands always ask. Once a chat has read a web page, an email or a downloaded file, a request to an address nobody gave asks first in every mode, so a page that tries to steer the model can't quietly send your data out ([SECURITY.md](SECURITY.md) has the details and the limits). File changes are copied first, so `/undo` puts one back. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
+A switch beside the send box decides what runs without asking. **Ask** checks before anything acts on your machine. **Auto-edit** lets edits inside the workspace through. **Auto** runs routine work on its own and stops before deleting, moving, sending email or phone messages, uploading from the shell, pushing, publishing or installing, unless a reviewer that reads only your own words finds you asked for exactly that step. Something Inglen made itself in the last week it may delete or move without asking, since a copy is kept to undo it. Shutting down, disks, accounts, security settings and hidden commands always ask. Once a chat has read something from outside, like a web page, an email or a downloaded file, any request to an address you didn't give asks first in every mode, so a page can't quietly get your data sent somewhere ([SECURITY.md](SECURITY.md) has the details and the limits). The same switch holds when Claude Code, Codex, Cursor or another agent is the brain, since their permission requests are answered by Inglen, and with Plus the phone gets Allow and Deny for each one. File changes are copied first, so `/undo` puts one back. Writes are confined to the workspace folder unless you allow another one, and Inglen never runs elevated.
 
 ---
 
@@ -97,9 +99,9 @@ Inglen reads the tool-call formats of Gemma, Hermes, Qwen, Llama, Mistral, Phi, 
 
 ## How it compares
 
-OpenClaw and Hermes are broad agent platforms, and Munder Difflin coordinates many coding agents on one machine. Open WebUI and LM Studio are places to run and chat with models.
+None of the pieces is new on its own. OpenClaw and Hermes Agent are broad personal agents that reach you across many chat apps, keep memory between sessions and take any model. Munder Difflin runs Claude Code, Codex and other coding agents as a team on one machine. ChatGPT and Claude remember you across chats, and LM Studio and Open WebUI run local models with tools.
 
-Its distinction is the user-owned environment around the workers. Local models, cloud models and agent programs can use the same computer, memory and tools while Inglen keeps the approval boundary, visible supervision and reversible work outside any one worker. Coding-agent changes can be isolated before they reach the main tree, and Plus carries the same human-control surface to the phone. **The worker can change; it should not own the computer. You should.**
+Inglen puts them together around one Windows PC. A local model it runs itself, a cloud model or an agent program can be the brain, and each one works the same desktop, files, voice, memory and helpers. The approval switch, the undo copies, the review of a helper's changes and the phone's Allow and Deny sit outside whichever brain is thinking, so changing the brain doesn't change the rules. **The worker can change. It should not own the computer. You should.**
 
 ## FAQ
 

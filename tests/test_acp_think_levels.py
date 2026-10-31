@@ -9,6 +9,8 @@ CLI isn't installed is passed over for the real one."""
 
 from __future__ import annotations
 
+import _home  # noqa: F401,E402  temporary home and workspace
+
 import asyncio
 import json
 import os
