@@ -27,6 +27,7 @@ CHECK_EVERY_S = 24 * 3600
 GRACE_S = 7 * 24 * 3600
 # Where the Buy button goes: the Plus product's checkout link on Dodo.
 CHECKOUT_URL = os.environ.get("HEARTH_PLUS_CHECKOUT") or ""
+PLANS_URL = "https://inglen.app/#plus"
 
 
 def _setting(key: str) -> str:
@@ -43,7 +44,7 @@ def _base() -> str:
 
 
 def checkout_url() -> str:
-    return CHECKOUT_URL or _setting("plus_checkout")
+    return CHECKOUT_URL or _setting("plus_checkout") or PLANS_URL
 
 
 def _file() -> str:
