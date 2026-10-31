@@ -2871,6 +2871,14 @@ class HearthHandler(BaseHTTPRequestHandler):
             # The image and video engine, its model folders and which models are ready.
             from . import sdserver
             return self._send_json(200, sdserver.overview(start_engine=self._query().get("start", ["1"])[0] != "0"))
+        if path == "/api/images/sets":
+            # Discover's image and video rows: each family's whole download, found once a day.
+            from . import sdserver
+            return self._send_json(200, sdserver.catalog_sets())
+        if path == "/api/images/builds":
+            # Models, Engine: the image engine in use and its recent builds.
+            from . import sdserver
+            return self._send_json(200, sdserver.list_builds())
         if path == "/api/images/plan":
             # The files that make one image or video model whole, for Discover's Download.
             from . import sdserver
@@ -5022,6 +5030,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/images/install":
             # The image engine, fetched for this system and card, as NDJSON progress.
             from . import sdserver
+            _tag = str((self._read_json() or {}).get("tag") or "")      # a build picked under Models, Engine
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -5040,7 +5049,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     _seen[0] = time.time()
                     _emit({"type": "progress", "done": done, "total": total})
             try:
-                _emit({"type": "done", **sdserver.install(on_progress=_prog)})
+                _emit({"type": "done", **sdserver.install(on_progress=_prog, tag=_tag)})
             except Exception as e:
                 _emit({"type": "done", "ok": False, "error": f"{type(e).__name__}: {e}"})
             return
@@ -5049,6 +5058,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             from .tools import open_outside
             open_outside(str(sdserver.models_dir()))
             return self._send_json(200, {"ok": True})
+        if path == "/api/images/use":
+            # Run an installed image engine build from now on ('' for the newest).
+            from . import sdserver
+            return self._send_json(200, sdserver.use_build(str(self._read_json().get("tag") or "")))
         if path == "/api/images/cancel":
             from . import sdserver
             return self._send_json(200, sdserver.cancel_install())
