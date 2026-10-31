@@ -35,7 +35,7 @@ from . import relay_crypto as R
 _env.setdefault("NO_GUI", "1")
 
 STATE_FILE = os.path.join(os.path.expanduser("~"), ".hearth", "relay.json")
-DEFAULT_RELAY = os.environ.get("HEARTH_RELAY_URL") or ""
+DEFAULT_RELAY = os.environ.get("HEARTH_RELAY_URL") or "https://app.inglen.app"   # the relay Inglen ships with (Settings can name another)
 PAIR_LIFE_S = 600
 _LOCK = threading.Lock()
 
