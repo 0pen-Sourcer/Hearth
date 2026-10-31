@@ -1195,8 +1195,8 @@ class Relay(cc.Adapter):
         mid = self._push(chat, {"type": "text", "text": text})
         ctx = cc.turn_context()
         if ctx.get("t"):
-            from . import persona
-            self.finished(chat, persona.NAME, text, ctx.get("c", ""), ctx["t"])
+            from .call_me import agent_name
+            self.finished(chat, agent_name(), text, ctx.get("c", ""), ctx["t"])
         return mid
 
     def edit(self, chat, msg_id, text):
@@ -1233,8 +1233,8 @@ class Relay(cc.Adapter):
                 call.ask(text, tap=tap, aid=aid)
             else:
                 call.ask_quietly(tap=tap, aid=aid)
-        from . import persona
-        p = ask_parts(persona.NAME, text, str((detail or {}).get("cmd") or ""))
+        from .call_me import agent_name
+        p = ask_parts(agent_name(), text, str((detail or {}).get("cmd") or ""))
         mid = self._push(chat, {"type": "ask", "text": text, "ask": aid, "who": p["who"], "cmd": p["cmd"],
                                 **({"tap": True} if tap else {})})
         self.notify(chat, dict(ask_note(p), kind="ask", c=c, ask=aid), urgent=True)
@@ -1465,10 +1465,10 @@ class Room:
             _seen(self.chat, True)
             _log(f"phone {self.chat} connected")
             await self.ws.send(json.dumps({"t": "hello", "eph": R.b64(R.raw_public(eph))}))
-            from . import persona
+            from .call_me import agent_name
             # The turns running now: the phone drops any other it still draws as
             # working (one whose end it missed while it was closed).
-            await self.deliver({"type": "hi", "name": persona.NAME, "running": self.bridge.running()})
+            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running()})
             warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "box" and self.phone:          # Allow or Deny tapped on a notification
@@ -2168,7 +2168,7 @@ class Bridge:
     def to_phone(self, ev: Dict[str, Any]) -> None:
         """A message or a file the window or terminal sent to the phone (send_to_phone): into the
         phone's own chat, like a text, with a notification for a phone that isn't looking."""
-        from . import persona
+        from .call_me import agent_name
         text, path = str(ev.get("text") or ""), str(ev.get("path") or "")
         prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
         try:
@@ -2177,7 +2177,7 @@ class Bridge:
                     self.adapter._push(chat, {"type": "text", "text": text})
                 if path and os.path.isfile(path):
                     self.adapter.send_file(chat, path)
-                self.adapter.notify(chat, {"kind": "done", "title": persona.NAME,
+                self.adapter.notify(chat, {"kind": "done", "title": agent_name(),
                                            "body": text or os.path.basename(path), "c": ""}, urgent=True)
         finally:
             cc._TURN.ctx = prev

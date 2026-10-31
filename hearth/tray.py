@@ -155,7 +155,8 @@ def _wake_name() -> str:
         from .persona import NAME
         return str(NAME).title()
     except Exception:
-        return "Jarvis"
+        from . import default_agent_name
+        return default_agent_name().title()
 
 
 def _menu_chats(limit: int = 12):
