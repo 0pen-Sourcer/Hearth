@@ -4,132 +4,82 @@ Notable changes to Inglen (called Hearth through v0.7.5). Format loosely follows
 
 ## v0.7.6-preview
 
-Full notes in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
+Hearth is now Inglen. Updating keeps your chats, memory, models, folders and settings where they were. A new install calls the assistant Inglen and keeps its files in `~/Inglen`; an older one keeps JARVIS and `~/Jarvis`, and either can be renamed in Settings, Behavior.
 
-### Added
-- Agent brains. Claude Code (`hearth/claude_brain.py`, `claude -p` with stdin kept open for steering), Codex (`hearth/codex_brain.py`, through `codex app-server`: streamed replies, each command and file change sent to Inglen's approval with its diff, `turn/steer`, Fast tier, threads archived after each turn, `codex exec` as the fallback) and Cursor (`hearth/cursor_brain.py`) think for JARVIS on the user's own plan with Inglen's MCP server for tools. Any installed agent that speaks the Agent Client Protocol can be the brain too (`hearth/acp_brain.py`): OpenCode, Copilot CLI, Goose, Grok Build and Gemini CLI, and Pi, Amp and Antigravity through their adapter programs. OpenCode is verified; the others follow their documented protocol mode.
-- Agents list their own models (Claude Code's `initialize` answer, Codex's model cache, Cursor's `--list-models`, a protocol agent's session options). The Think button offers a model's effort levels; Fast is a switch for Codex's priority tier and Claude Code's fast mode, which reports back when a plan doesn't have it.
-- Settings shows every brain as a card grouped by where it runs; the model menu adds a cloud provider from there. A model on this PC can stay loaded under a cloud brain to run helpers for free.
-- Team view: every helper from its own transcript, as a list or a pixel room with up to eight desks a room (cabin, winter cabin, library, ocean), a wooden sign and a pixel wipe between rooms, a home room in Appearance. Clicking anyone shows who asked, the task, each step, what it changed and its plan usage.
-- Helpers can run on JARVIS's brain, this PC's model, a saved provider and model (`runs_on`, `model`), or an agent program. `launch_team` starts a mixed team in one call and tells each member who else is on it. Helpers can be told something part-way (`tell_subagent`, Codex helpers through its app server), stopped, and they message each other or JARVIS with `message_helper`; the room shows each message as one walking over to say it.
-- Helpers' changes are kept apart: an agent program working in a git repository gets its own worktree, and its changes wait to be brought in, discarded or undone (`helper_changes`, panel buttons, `/team changes|bring|discard|undo`). Inglen's own helpers claim the files they write, so two can't write one at once, and their changes can be undone.
-- `race_helpers`: one task to several agent programs on their own copies, a check command run in each, and one comparison back.
-- A general helper role: the everyday tools, and `load_tools` for the rest into its own list. A team member with no role named is one.
-- `delegate`: hand one task to another agent CLI and relay its answer. Twenty-three adapters, run headless on the user's install; Claude Code, Codex, Cursor and OpenCode have been run from Inglen. Installs and updates show in the Downloads list with Cancel.
-- Approval modes Ask, Auto-edit and Auto, shared by the window (chat bar menu, Shift+Tab), the terminal (`/mode`), helpers and agent programs.
-- One set of chats for the window and the terminal (`hearth/chat_sync.py`): a terminal chat is listed in the window and can be carried on there, and `/chats` and `/chat` open any chat in the terminal.
-- Logs page: each tool call with its result in words, by day, with errors and search; the model server's recent requests summed up.
-- `/status` in the window and the terminal: what is thinking, how full the chat is, and plan limits for every brain that reports them.
-- Appearance: Classic, Light, Dark and System, six accents; tray and window icons follow the choice. Every look but Classic carries the Nook mark (a rounded corner bracket with a dot in the accent); Classic's mark is an i with a flame for its dot. A new install opens in Dark with Rose, and one set up before keeps Classic. The app icon is the Nook on a dark tile with a Rose dot (`hearth/look_icon.py`).
-- The empty chat's mark shows the model's state: an empty ring with no model, a stroke along the bracket while one loads that follows the load percentage once it is known, and a filled dot that settles once when it is ready. Reduced motion holds each state still.
-- Settings shows every page in both modes. Expert rows (review every command, reasoning effort, keep local warm, bringing memory over, tool permissions, the built-in server's concurrent agents and port) sit in a closed Advanced section at the foot of their page. The mode is "Detail in chats: Simple / Full" in Appearance and sets only how much of each step a chat shows.
-- First-run setup is eight steps (welcome, a model on this PC, a cloud model, voice and the language you speak, what to download, about you, how it should work, bringing memory over) and ends in a six-stop tour, each stop with something to try. It finds the agents and model files already on the PC, writes its answers to profile.md, asks headphones or speakers, approval mode and look, and plays a sample task beside the approval choices; `/me` asks the same in the terminal.
-- Settings, MCP servers: two plain rows (servers Inglen uses, using Inglen from other apps) with the live server list between them. Each server shows its service's icon with a status dot, and a failed one says why in one sentence ("Couldn't start: node isn't installed"), with the raw error a click away.
-- Terminal colours are shades of the window's look: the accent, statuses, tool names, warnings, frames and the pickers' chosen row. Errors and diff lines keep red and green. The banner reads INGLEN in the saved look's colours.
-- Tray menu follows the look (dark or light) and lists pinned and recent chats that open in the window, New chat, Voice mode and Listen for the agent's name, with the rest under More.
-- `hearth/gpu.py`: load and memory for any vendor's card from DXGI and the GPU performance counters. AMD and Intel cards get llama.cpp's Vulkan build.
-- Pinned chats; tool runs show the agents, skills and sites they reached; a running tool counts up on its card.
-- Anthropic as a provider talks to its own Messages API (`hearth/anthropic_chat.py`): the model's effort levels, streamed thinking, and fields a model refuses learned per model. Effort levels and whether thinking can be turned off come from each provider's model list.
-- The terminal runs turns on the shared engine (`headless.run_once`, drawn by `hearth/term_render.py`): replies stream above an input that stays open for steering, Esc stops, thinking folds to one line, tables render, and `/brain`, `/model`, `/mode`, `/think`, `/chats` and approvals are arrow-key pickers (`hearth/term_pick.py`).
-- Messages carry the time they were said, with a line where the day changes; the chat list shows when each chat was last used.
-- A due reminder is said in its own chat (clock mark, unread dot); the Reminders page starts a typed task in a new chat and suggests reminders from memory.
-- `auto_memory` setting (Remember things on its own) for the background fact saver, which also saves nothing from a chat that asked it not to.
-- A GGUF without a tokenizer (an image or video model) or cut short is marked in Models and left out of the model menu.
-- The Team room's fire is animated.
-- Images and video on this PC (`hearth/sdserver.py`): stable-diffusion.cpp's sd-server fetched for the system and card and run like the chat engine. Models in `~/.hearth/image-models` or a ComfyUI/WebUI folder read in place, matched to the engine's own recipes; Models > My Models lists image and video models beside the chat ones, installs the engine, loads, unloads and deletes them, and says what each family still needs. `generate_image` / `generate_video` use a ready local model first (`where=local|cloud`), else a saved Grok, OpenAI or Gemini key from any brain.
-- Computer use you can watch (`hearth/desktop_session.py`): a breathing accent edge round the screen (click-through, excluded from capture) and a pill naming the action; the turn's end fades it, chimes, restores the window that was in front and stops taskbar flashing. Agent brains' tool servers report through `/api/brain/desktop`. A click raises the target window first; apps JARVIS opens outlive the turn; `desktop_type` appends to a filled field unless told to replace.
-- Connectors on one core (`hearth/channel_core.py`): Telegram, Discord and WhatsApp with pairing codes for new senders (approved in Settings > Connectors, `/pair`, or the `connectors` tool), approvals asked in the chat, voice notes, photos and files both ways, each conversation an Inglen chat. Custom connectors are one Python file in `<workspace>/connectors` ([docs/CONNECTORS.md](docs/CONNECTORS.md)).
-- Memory shared with coding agents (`hearth/memory_mcp.py`): the Memory tab's Share with agents adds Inglen's memory to Claude Code, Codex, Cursor and OpenCode as an MCP server.
-- Memory in layers (`hearth/memory_cards.py`, `hearth/memory_pass.py`, `hearth/session_search.py`): each chat keeps one card of where it stands (goal, open/done/dropped, values like a budget or a shortlist, what is left), replaced by the memory pass once the chat has gone quiet for a few minutes or before it is compacted, on whichever model is at hand: one loaded on this PC first, else the brain's own one-shot, for every agent program. A new chat's first message carries the newest open cards. Facts carry valid_from, valid_to, source chat, last use and importance; a superseded fact keeps valid_to in the archive. Every exchange of every chat is indexed in SQLite FTS5 with its time and names, ranked by words, shared names, recency, importance and open cards; time words become a date range, and `search_chats` takes after/before. The reply's "in mind" list names each card, fact and search with its source chat, with forget and done. `read_chat` reads one earlier chat in order, with where it stood.
-- @ in the message box picks chats, files and folders; long pastes go as a chip; web sources show as one chip; `ask_user` questions stay in the chat as a card.
-- Files tab: sandboxed preview, an Open menu of the apps the system lists for a file type with their icons (`hearth/openers.py`).
-- Linux and macOS: the llama.cpp and stable-diffusion.cpp downloads read release file names for any system (`hearth/release_files.py`); Linux apps from `.desktop` entries (`hearth/desktop_entries.py`); card detection from the kernel's device files and Apple silicon. Whole suite passes on Ubuntu.
-- Setup plays a sample task beside the approval choices; a What to get step lists the model, engine and voice the choices need.
-- Discover opens on the month's most downloaded chat models; load estimates give the share that runs on the CPU; Add vision asks first and downloads in Downloads.
-- `crash.log` (faulthandler) records every thread's stack when native code takes a process down; the window restarts a backend that died.
-- A turn on a provider brain shows what it cost: every call's tokens added up (cached input apart) and priced from the model catalog, or the provider's own figure when it gives one (`model_facts.turn_cost`). Every agent brain ends a turn the same way: its own figure, else its tokens at catalog prices (`claude_brain.priced`), marked as plan usage when Codex is signed in with ChatGPT, for Cursor, and for Claude Code on a Claude plan.
-- Run in background on a slow command's card (`/bg` in the terminal): the wait ends at once and the command carries on as a job that reports when it ends (`jobs.background_now`).
-- Skills page redone: a switch per skill (`skills_off` setting; a switched-off skill is left out of the prompt and `load_skill` refuses it), a readable detail view, and the add box takes any Agent Skills folder on GitHub.
-- Reminders can be changed in place (`update_reminder`, /api/reminders/update: words, time, repeat, last day `until_iso`) and paused and resumed (`pause_reminder`, the row's pause button); a repeating one resumes at its next slot. The row's old ten-minute snooze is gone from the list, since on a reminder not yet due it made it fire sooner.
-- The app is called Inglen in everything a person reads. Names on disk stay (`hearth` package, `HEARTH_*`, `%LOCALAPPDATA%\Hearth`, `Hearth.exe`), so an update keeps settings, memory and chats. The assistant is Inglen on a new install (files in `~/Inglen`); an install from before keeps `~/Jarvis` and JARVIS (`agent_name`, renamed in Settings, Behavior).
-- An agent brain that goes quiet: after 90 s with no event and no step running, every surface says it may still be thinking and Stop ends it (`HEARTH_AGENT_QUIET_S`); nothing ends on a timer. An error the agent wrote to its own log (an ACP spec's `log`) ends the turn with its words, and /status reports it with when it was logged.
-- Inglen Plus (Settings, Plus): a licence key turns it on for this PC, and a phone pairs by scanning a QR code and checking that both screens show the same six numbers. The phone app reaches this PC from anywhere through a relay that only carries messages sealed with the pairing's keys (`hearth/relay_bridge.py`, `hearth/relay_crypto.py`). On the phone: the chats, a reply as it is written with its steps and what each ran, approvals, the brain and approval mode, files and pictures from the PC as cards fetched when opened, the Team room, recent file changes with Undo, and the Claude Code, Codex and other coding agents' sessions on the PC, read and carried on. The window and the phone see each other's changes as they happen. Notifications for a question waiting (with Allow and Deny), a finished reply, and a coding agent finishing on the PC.
-- Voice calls from the phone (`hearth/call.py`, `hearth/call_audio.js`): one shape in the accent shows connecting, listening, thinking, speaking and muted; both sides' words appear as they are said, with the steps. The call's time starts once the PC is listening, with a soft ready tone and two falling notes at the end (both can be turned off in the call's settings). Mute and End, or a waiting question's Allow and Deny, sit in a notification while the app is out of sight, and the call keeps going in the background. A spoken yes counts only for a step Auto would run; anything riskier asks for a tap, and says so out loud. Voice and language can be changed from the call and are kept on the PC. A phone that goes quiet ends the call on the PC.
-- The agent can call the phone (`hearth/call_me.py`), off until "Let JARVIS call me" is turned on in Settings, Plus, and then only for the reasons switched on: a reminder coming due, background work that finished or needs you, or a question unanswered for a set number of minutes. Never in quiet hours (22:00 to 08:00 by default), never while the PC is in use, one ring at a time, and not again for five minutes after a declined or missed call. An unanswered ring becomes a missed call; an answered one starts by saying why it called.
-- Voice mode in the window runs on the call's path: the page opens the mic with echo cancelling and plays the voice through a WebRTC loop, so talking over a reply works on speakers. A spoken yes counts only for what Auto would run, with Allow and Deny on the voice screen for the rest. The mic, camera and clipboard are granted to Inglen's own page and nothing else, without the web view's own prompt; Windows' microphone privacy setting is the gate, and when it blocks the mic voice mode says so with a button to that setting. On macOS, and where the page can't open a mic, voice mode listens through the PC's own mic. Speakers mode is now for the terminal's `/listen`.
-- Chats started from the phone or a chat app are named by the brain after their first real turn, as window and terminal chats are; a chat renamed by hand keeps its name.
-- `send_to_phone` in a turn from the phone or a chat app answers in that same conversation and can send a file.
-- Auto's reviewer (`hearth/auto_review.py`, Settings, Behavior): in Auto, a step that would stop to ask goes ahead when your own words in the chat asked for exactly it. It reads only your messages and the pending step, never the brain's words or a tool's output. A model is used as the reviewer only after it passes a labelled set of steps, checked the first time Auto meets it or from Settings. Shutting down, disks, accounts and the registry, security and start-up settings, hidden commands and saved passwords always ask.
-- Undo for file changes: tools that write, edit, delete or move copy what was there first, and `/undo` in the window and the terminal (Recent changes on the phone) lists recent changes and puts one back. Auto no longer asks before deleting or moving something Inglen's own tools made in the past week.
-- `agent_sessions`: the brain lists the Claude Code, Codex and other coding agents' sessions on this PC, reads where one got to, and sends one a message. Sending asks in Ask mode.
-- Helpers on the model that is already loaded share its server, each on a slot of its own, instead of loading it twice. Concurrent agents defaults to Automatic, picked from graphics memory.
-- A provider that answered with a reset time is not asked again before then ("Groq is out of usage until 4:30 PM"), and a turn that failed reaches the brain on the next one as a note before your message, on every surface.
-- An opened memory says whether it was noticed on its own or saved on purpose, and links to the chat it came from. What setup learns about the PC is kept for the app, not as memories.
-### Fixed
-- Other builds of llama.cpp (Models, Engine, Add an engine): by a GitHub page, fetched for the card like the official build, or by a folder. When the official build can't read a model (invalid ggml type, unknown architecture) Inglen tries the added builds and remembers which one read it. They never replace the official build for other models.
-- Engine install and repair took llama.cpp's "latest" release, which now points at a tag with no Windows files; the newest numbered build is used.
-- Repair checks real files, restores skills, art and the engine, and frees the patch backup. The update patch now carries `hearth/**` and `assets/**`.
-- The window's private mode forgot the chosen look on every launch; the server writes the saved look into the page.
-- The send wrapper dropped its options, so a notification flush ran as an ordinary turn.
-- Stop closes the open request at once, also while a local model is still reading the prompt.
-- A turn's tool calls and results stay in the history for the next turn, in the window and the terminal.
-- Memories matched by keyword are no longer attached to every message; the index stays in the system prompt and the model recalls on demand.
-- A built-in server started by another window or the terminal is reused for the same model instead of failing on a taken port; a second terminal starts its own chat.
-- The context count after a one-round turn is the server's measured one, not an estimate.
-- Chat bubbles take the theme's accent instead of a fixed blue.
-- An opened memory shows the fact, when it was saved and how often it was recalled, not the raw file with its header; graph labels no longer overlap.
-- The terminal's `/help` lists `/context` and `/tokens` again.
-- PortAudio start and stop are serialized (`listen._PA_LOCK`): the wake word retrying a missing mic while the window listed devices crashed the app.
-- Fresh installs from source pulled mcp 2, which removed FastMCP; major versions are capped in `constraints.txt`.
-- Provider limits: Retry-After and Gemini's retryDelay are honoured, a spent quota or a 402 is said once in the provider's words, an agent out of plan usage gets no turns until it resets.
-- Pictures go to the model at most 1280 px on the long side (a 2560x1440 screenshot on a 9B: 195 s to 6 s).
-- An agent brain's session restarts from the chat as it reads when an earlier message was edited or a reply regenerated.
-- The saved voice and speed are read when speaking, not at import.
-- A turn that hit the step limit or ended on an error no longer leaves the turn flag set (memory passes and reminders waited forever).
-- Repeating reminders hold while nobody is at the PC and say how many came by.
-- The terminal's pickers fall back to a numbered list without prompt_toolkit.
+The long version, with how each part works, is in [docs/RELEASE_NOTES_v0.7.6.md](docs/RELEASE_NOTES_v0.7.6.md).
 
-### Removed
-- ntfy. Reminders go to the connected Telegram or Discord (`phone_reminders`).
+### Agent brains under one approval switch
+- Claude Code, Codex and Cursor can be the brain, on the plan you already pay for and without an API key. They keep Inglen's tools, memory, voice and persona, and each chat stays one continuing session.
+- Any agent that speaks the Agent Client Protocol can be the brain too. OpenCode has been run this way; Copilot CLI, Goose, Grok Build, Gemini CLI, and Pi, Amp and Antigravity through their adapters follow the same protocol.
+- Every brain answers to one switch in the chat bar (Shift+Tab cycles it, `/mode` in the terminal). Ask asks before anything that acts on the PC, Auto-edit lets workspace edits through, and Auto runs routine work. The agents' own commands and file changes come back to Inglen to be allowed or asked about, with a diff for each change.
+- In Auto, a reviewer reads your own words in the chat and the pending step, never the brain's words or a tool's output, and lets a step through when you asked for exactly that. Power, disk, account and security changes always ask.
+- The model menu lists each agent's own models as your install reports them, Think sets how hard the model reasons, and Fast switches Codex's priority tier and Claude Code's fast mode.
+- Anthropic's API is spoken natively, with effort levels and streamed thinking. Each turn on a provider shows what it cost; on a plan it shows as plan usage.
+- An agent that goes quiet for a minute and a half is reported on every surface with Stop to end it, and a usage limit says when it resets.
+- `delegate` hands one task to an installed coding agent and brings back its answer, with adapters for twenty-three of them. Inglen can also read the Claude Code and Codex sessions on the PC and send one a message.
 
-### Security
-- The local API refuses requests from other sites; a page in any browser tab could read stored keys and call tools.
-- Command approval is a per-process token, so model output cannot approve its own call. The destructive-command guard covers PowerShell's aliases and .NET forms, and background jobs share it.
-- MCP tools go through the permission prompt and no longer inherit credentials from the environment. `smart_click` and `browse_key` are gated like the other input tools.
-- Write confinement compares real paths, so a link inside the workspace cannot carry a write outside it. `grep_search` passes its pattern after `-e` and `--`. `web_fetch` takes http(s) only, so `file://` no longer bypasses read lockdown. CLI `/lockdown` uses the persisted toggle.
-- WhatsApp's own-chat mode answers only the linked number's own chat. More key shapes are redacted. The TUI is removed.
-- An update patch is applied only when it is signed by a release key (`hearth/release_keys.py`) and every file in it matches the signed list; anything else is refused before a file is written.
-- Auto asks before deletes and hidden commands that slipped past its patterns: `rd /s /q` after `cmd /c`, `find -delete`, inline interpreter code that deletes or overwrites, encoded PowerShell, decoded text piped into a shell, `shred`, `dd of=`, and redirects into the home folder's own files.
+### Helpers and the Team room
+- Helpers can run on the brain, on this PC's model, on a saved provider model or on an installed agent, and one sentence can start a mixed team that knows who is on it.
+- The Team room shows each helper at a desk in a pixel house by the fire, up to eight to a room across four rooms. Click anyone for who asked, the task, each step and what it changed.
+- You can tell a working helper something part-way, and helpers message each other and Inglen.
+- An agent working in a git repository gets its own copy, and its changes wait for you to bring them in, discard them or undo them. `race_helpers` gives one task to several agents and compares the results of a check run in each.
+
+### Computer use
+- When Inglen drives the desktop, an edge in your accent breathes round the screen and a pill names the action. At the end the edge fades, a chime plays and the window you were in comes back.
+- Its pointer is the Inglen mark, on the desktop and in the browser, turning toward where it moves and filling its dot on a click, so its actions read apart from your own mouse.
+- A click raises the target window first, apps it opens stay open after the turn, and typing adds to a filled field unless told to replace it.
+
+### The phone, with Inglen Plus
+- Plus is a paid add-on with a phone app of its own, in the browser at app.inglen.app or as an Android app. Pair by scanning a QR code in Settings, Plus and checking that both screens show the same six numbers. Messages between the phone and the PC are sealed with the pairing's keys, so the relay in between can't read them.
+- On the phone you get your chats with each reply's steps as they happen, Allow and Deny, the brain and approval mode, files and pictures from the PC, the Team room, recent changes with Undo, memory, and the sessions of Claude Code, Codex and other coding agents on the PC, which you can read, carry on or start. The window and the phone follow each other live.
+- Notifications for a waiting question (with Allow and Deny on it), a finished reply and a coding agent finishing on the PC.
+- Voice calls from the phone, with both sides' words on screen and Mute and End in the notification while the app is away. A spoken yes is enough for what Auto would run; anything riskier takes a tap.
+- Inglen can call you, once you turn it on and pick the reasons, such as a reminder coming due or a question left waiting. Never in quiet hours or while you are at the PC. A coding agent can ask for a call when it's done.
+- Without Plus, Telegram, Discord and WhatsApp still work as before, now with pairing codes for new senders, approvals asked in the chat, and voice notes, photos and files both ways. A custom connector is one Python file.
 
 ### Voice
-- Speak and listen in the eight languages the voice bank ships (54 voices); multilingual Whisper sizes and a spoken-language setting.
-- Voice sessions end with the recorder shut down, releasing the mic and the Whisper process; each session owns its recorder and callbacks, so reopening voice no longer stalls or stops.
-- The mic is saved by name and looked up in the table of the library that opens it; no fallback to a virtual or loopback device.
-- The wake word keeps a pre-roll and every block of an utterance, keeps the start of long speech, and releases the mic while voice mode runs.
-- Failures in synthesis, playback and transcription are reported. A settings save no longer unloads the TTS engine.
-- With no listening language set, speech is heard as the chosen voice's language or English, whichever it is; only a language named in Settings is forced.
-
-### Agent
-- Persona cut from about 10K to 2K tokens and always-on tool descriptions roughly halved. Native tool calls on the standalone llama.cpp engine.
-- Deferred tools are all named to the model and selectable by name; every tool has a category.
-- Mistral and Command-R turns keep every call; a partly unparsed reply is reported rather than dropped.
-- Reminders take an ISO time or a duration, converted by the model, and read back the stored time in words.
-
-### Commands
-- `run_command` and `start_job` run in PowerShell, cmd or bash (Git Bash or WSL), with UTF-8 output and exit codes that reflect errors.
+- Voice mode in the window runs with echo cancelling, so you can talk over a reply on speakers. A spoken yes is enough for what Auto would run, with Allow and Deny on screen for the rest.
+- Hindi is spoken and understood. Inglen picks a listening model that can hear Hindi and reads a Hindi reply sentence by sentence.
+- The voice is picked per sentence, so a reply that changes language changes voice and comes back.
+- Listening set to the graphics card now runs there, and a turn's first spoken words come sooner.
+- The wake word loads its model when needed and lets it go when idle.
 
 ### Memory
-- Slugs keep non-Latin titles; the index is derived from the fact files and heals itself. Extraction can update a saved fact, archiving the previous version. Supersede and curate act only on exact matches.
+- Each chat keeps a short card of where it stands (the goal, what you settled on, what's left), written once the chat goes quiet. A new chat starts with the newest open ones, so a follow-up days later picks up where you were.
+- Facts record when they became true and when they stopped, and where they came from. Every chat is searchable by words and by time, so "what did we decide last week" works.
+- The memory pass and chat titles run on every brain, on a model loaded on this PC first.
+- The "in mind" list under a reply shows each fact and chat used, with forget and done.
+- Share with agents gives Claude Code, Codex, Cursor and OpenCode your memory as a tool.
 
-### Bridges and teams
-- Bridges log to `<workspace>/logs/<channel>_bridge.log` instead of an undrained pipe. WhatsApp sends files; all bridges send quoted paths with spaces.
-- Team panes, opened for a team started in the terminal, show each step as what it was pointed at; `launch_team` reports members that did not start. A phone bridge ends with the Inglen that started it.
+### Images and video
+- Pictures and short videos are made on your own graphics card through stable-diffusion.cpp, installed for your card from the Models page. A saved Grok, OpenAI or Gemini key covers the cloud.
+- Models, Discover lists image and video families beside the chat models. Download fetches a whole set (diffusion model, text encoder, VAE and any LoRA) and offers GGUF sizes, picking the largest that fits your card.
+- Models already in a ComfyUI or WebUI folder are read where they are. My Models lists image and video models beside the chat ones.
 
-### Terminal
-- Fixed the first-tool-call crash, the Ctrl+Z spin, `--help`, `/brain lmstudio` and `/brain builtin`, model sync on cloud brains, vision detection on llama.cpp, context-overflow retries and `/history` with images.
+### Security
+- Saved keys are sealed with Windows' own encryption instead of kept as plain text, and never reach a model or the phone. Reading a place that holds keys, such as `.env` files or `~/.ssh`, asks in every mode.
+- Once a chat has read a web page, an email or a downloaded file, a request to an address nobody gave asks first in every mode. Fetching from this PC or the local network needs the host named.
+- Update patches and installers must carry Inglen's release signature, or they are refused. Engine and voice downloads are checked against published hashes.
+- Every file Inglen's tools write, edit, delete or move is copied first, and `/undo` puts it back.
+- Auto asks before destructive git commands, emptying the Recycle Bin, and hidden or encoded commands.
+- The local server refuses requests from other sites, and dialogs show text as text.
+- An install count is opt-in, off by default, and setup shows exactly what it would send.
 
-### Models, updates and storage
-- Measured load progress; downloads that pause, resume, recover from a bad range, keep going with the window closed and pick up after a restart; updates that recover from an interrupted patch; atomic chat, settings and reminder writes; reminders that fire once across processes.
+### The window and the terminal
+- New looks (Classic, Light, Dark, System) with six accents. A new install opens in Dark with Rose.
+- A quiet new chat with the mark showing the model's state and up to three suggestions by the message box.
+- Setup in eight steps that acts on your answers, finds the agents and models already on the PC, and ends in a short tour.
+- Every Settings page is always shown, with expert rows in closed Advanced sections. Detail in chats, Simple or Full, sets how much of each step a chat shows.
+- A Files tab that opens on your recent files and folders, pinned chats, a Logs page, `/status` with plan limits, and `@` to attach chats, files and folders.
+- Reminders can be edited and paused, a due one opens in its own chat, and its notice has Snooze and Done.
+- One set of chats for the window, the terminal and the phone.
+- The terminal streams replies above an input that stays open for steering, uses arrow-key pickers for brain, model, mode and chats, and takes its colours from the window's look.
+- AMD and Intel graphics cards get llama.cpp's Vulkan build.
+- On Linux and macOS, engine downloads and app lists work from source, and Inglen can start at login on Linux.
+
+### Removed
+- ntfy. Reminders go to the paired phone or to Telegram or Discord.
+- The Forge WebUI tools. Images run on the built-in engine, and a Forge install's models are still read in place.
 
 ## v0.7.1 to v0.7.5
 
