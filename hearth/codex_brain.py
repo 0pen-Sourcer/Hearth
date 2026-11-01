@@ -219,6 +219,7 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
     started: Dict[str, float] = {}
     text_parts: List[str] = []
     sid, usage, failure = None, None, ""
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -308,6 +309,8 @@ async def _run_exec(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]
         return 1
     finally:
         _base._checks.pop(_base._TOKEN, None)
+        from .aproc import reap
+        await reap(proc)
 
     if sid:
         _base._save_session(key, sid, last=_base.asked(prompt))
@@ -464,6 +467,7 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
     cwd = _env.get("WORKSPACE") or __import__("hearth").default_workspace()
     os.makedirs(cwd, exist_ok=True)
 
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *_server_args(exe), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -662,16 +666,8 @@ async def _run_app_server(prompt: str, *, emit, history, permission_check, shoul
             except Exception:
                 pass
         reader.cancel()
-        try:
-            proc.stdin.close()
-        except Exception:
-            pass
-        try:
-            proc.kill()
-            # Waited for here, so its pipes close while the loop still runs.
-            await asyncio.wait_for(proc.wait(), 5)
-        except Exception:
-            pass
+        from .aproc import reap
+        await reap(proc, 5)       # its pipes close while the loop still runs
 
     if tid:
         _base._save_session(key, tid, last=_base.asked(prompt))

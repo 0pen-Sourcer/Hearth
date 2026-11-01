@@ -398,15 +398,8 @@ async def _use_model(rpc: _Rpc, provider: str, sid: Any, opened: Dict[str, Any])
 
 async def _end(proc, reader) -> None:
     reader.cancel()
-    try:
-        proc.kill()
-    except ProcessLookupError:
-        pass
-    # Let its pipes close inside this loop, not after it is gone.
-    try:
-        await asyncio.wait_for(proc.wait(), 10)
-    except Exception:
-        pass
+    from .aproc import reap
+    await reap(proc)           # its pipes close inside this loop, not after it is gone
 
 
 async def once(provider: str, prompt: str) -> tuple:
