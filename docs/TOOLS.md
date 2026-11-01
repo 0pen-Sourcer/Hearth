@@ -41,8 +41,8 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `list_browsers` † | List installed browsers detected on this machine |
 | `open_in_browser` | Open a link in a browser the person names, optionally in a given profile, where they see it and it stays open |
 | `open_url` | Open a URL in the user's default browser for them to use |
-| `web_fetch` | Fetch a page's readable text for you to read; the user sees nothing |
-| `web_search` | Search the web (DuckDuckGo) and get the top results: titles, snippets and links |
+| `web_fetch` | Fetch a page's readable text for you to read (the article, without menus; a PDF's text too); the user sees nothing |
+| `web_search` | Search the web and get the top results: titles, snippets and links, merged from several search services at once |
 
 ## Desktop control
 

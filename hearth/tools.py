@@ -256,7 +256,7 @@ RESULT_CAPS: Dict[str, int] = {
     "grep_search": 8000,
     "glob_files": 4000,
     "web_search": 5000,
-    "web_fetch": 8000,
+    "web_fetch": 8400,             # 8000 of page text and its header
     "run_command": 6000,
     "list_processes": 5000,
     "list_installed_apps": 6000,
@@ -978,9 +978,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "web_search",
         "description": (
-            "Search the web (DuckDuckGo) and get the top results: titles, snippets and links. The person "
-            "doesn't see these results; they are for your research. To show them a page, use open_url, "
-            "open_in_browser or browse."
+            "Search the web and get the top results: titles, snippets and links, merged from several "
+            "search services at once. The person doesn't see these results; they are for your research. "
+            "Snippets are short: web_fetch the best one or two pages before answering from them. To show "
+            "them a page, use open_url, open_in_browser or browse."
         ),
         "parameters": {
             "type": "object",
@@ -994,9 +995,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "web_fetch",
         "description": (
-            "Fetch a page's readable text for you to read; the user sees nothing. To "
-            "open something for them to watch or use, use open_url, open_in_browser or "
-            "browse."
+            "Fetch a page's readable text for you to read (the article, without menus; a PDF's "
+            "text too); the user sees nothing. A page that needs JavaScript or a login reads "
+            "better with browse. To open something for them to watch or use, use open_url, "
+            "open_in_browser or browse."
         ),
         "parameters": {
             "type": "object",
@@ -1006,6 +1008,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "Characters of page text to return (default 8000). Raise it, up "
                     "to 60000, when you need the whole page, for example reading full "
                     "docs or source rather than a summary."},
+                "offset": {"type": "integer", "description":
+                    "Where to start in the page's text, to read on past what an earlier call showed "
+                    "(the result says the next offset)."},
             },
             "required": ["url"],
         },
@@ -3197,29 +3202,6 @@ def _find_file(p: Dict) -> str:
 # WEB
 # ============================================================
 
-class _HTMLText(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.parts: List[str] = []
-        self.skip = 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style", "noscript"):
-            self.skip += 1
-
-    def handle_endtag(self, tag):
-        if tag in ("script", "style", "noscript") and self.skip:
-            self.skip -= 1
-        if tag in ("p", "br", "div", "h1", "h2", "h3", "h4", "li", "tr"):
-            self.parts.append("\n")
-
-    def handle_data(self, data):
-        if not self.skip:
-            text = data.strip()
-            if text:
-                self.parts.append(text + " ")
-
-
 class _LocalRefused(Exception):
     pass
 
@@ -3238,15 +3220,21 @@ class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+# A browser's own name: sites refuse an unknown agent ("Inglen-Local") outright.
+_FETCH_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+_FETCH_MAX = 15 * 1024 * 1024
+
+
 def _http_get(url: str, timeout: int = 15) -> Tuple[int, str, bytes]:
     from .outbound import current
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Inglen-Local)",
-        "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.5",
+        "User-Agent": _FETCH_UA, "Accept-Language": "en-US,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/pdf,application/json;q=0.9,*/*;q=0.5",
     })
     opener = urllib.request.build_opener(_CheckedRedirects(current()))
     with opener.open(req, timeout=timeout) as r:
-        return r.status, r.headers.get("Content-Type", ""), r.read()
+        return r.status, r.headers.get("Content-Type", ""), r.read(_FETCH_MAX)
 
 
 # Cooldown breaker for web_search. A small model can't tell "no results" from
@@ -3286,84 +3274,14 @@ def _web_search(p: Dict) -> str:
 
 
 def _web_search_raw(p: Dict) -> str:
-    """Ask the search providers, then fall back to scraping.
-
-    The scrape below is DuckDuckGo's HTML endpoint, which they serve a bot-check
-    page for whenever they choose. It was the only backend, so a block meant no
-    search at all. Real providers are tried first now; the scrape and the
-    Wikipedia lookup are what is left when none of them answer."""
-    query = p["query"]
-    limit = int(p.get("limit") or 6)
-    try:
-        from . import websearch as _ws
-        _text, _prov = _ws.search(query, limit)
-        if _text:
-            return _text
-    except Exception:
-        pass
-    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-    try:
-        data = urllib.parse.urlencode({"q": query, "kl": "us-en"}).encode("utf-8")
-        req = urllib.request.Request(
-            "https://html.duckduckgo.com/html/",
-            data=data,
-            headers={
-                "User-Agent": ua,
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "text/html",
-                "Referer": "https://duckduckgo.com/",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=15) as r:
-            html = r.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        return f"Error: search failed: {e}"
-    # Result block: <h2 class="result__title"><a class="result__a" href="...">title</a></h2>
-    # ... <a class="result__snippet" ...>snippet</a>
-    pattern = re.compile(
-        r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>'
-        r'(?:.*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>)?',
-        re.S,
-    )
-    out = []
-    for m in pattern.finditer(html):
-        href, title, snippet = m.group(1), m.group(2), m.group(3) or ""
-        # DDG wraps real URL inside a /l/?uddg= redirect — extract.
-        try:
-            qs = urllib.parse.urlparse(href).query
-            real = urllib.parse.parse_qs(qs).get("uddg", [href])[0]
-        except Exception:
-            real = href
-        title_t = re.sub(r"<[^>]+>", "", title).strip()
-        snip_t = re.sub(r"<[^>]+>", "", snippet).strip()
-        out.append(f"• {title_t}\n  {real}\n  {snip_t}")
-        if len(out) >= limit:
-            break
-    if out:
-        return "\n\n".join(out)
-    # Fallback: Wikipedia opensearch so the model still gets SOMETHING
-    # when DDG rate-limits / blocks. Better than "(no results)" forever.
-    try:
-        wq = urllib.parse.urlencode({
-            "action": "opensearch", "search": query, "limit": str(limit),
-            "namespace": "0", "format": "json",
-        })
-        req = urllib.request.Request(
-            "https://en.wikipedia.org/w/api.php?" + wq,
-            headers={"User-Agent": ua, "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        titles, descs, urls = data[1], data[2], data[3]
-        if titles:
-            lines = []
-            for t, d, u in zip(titles[:limit], descs[:limit], urls[:limit]):
-                lines.append(f"• {t}\n  {u}\n  {d}")
-            return "[wikipedia fallback - DDG returned 0 results]\n\n" + "\n\n".join(lines)
-    except Exception:
-        pass
-    return "(no results)"
+    """Every search backend at once (websearch.py), merged; an error that says
+    which backends failed and why when none answered."""
+    from . import websearch as _ws
+    text, how = _ws.search(p["query"], _coerce_int(p.get("limit"), 6))
+    if text:
+        return text
+    return (f"Error: no search backend answered ({how or 'none reachable'}). The network may be "
+            f"blocking them; web_fetch a page you know, or browse, which uses a real browser.")
 
 
 def _web_fetch(p: Dict) -> str:
@@ -3387,18 +3305,54 @@ def _web_fetch(p: Dict) -> str:
         status, ctype, body = _http_get(url, 20)
     except _LocalRefused as e:
         return f"Error: {e}"
+    except urllib.error.HTTPError as e:
+        why = {401: "it needs a login", 403: "the site refused a non-browser visitor",
+               404: "there is no page at that address", 429: "the site is rate-limiting requests",
+               451: "the site won't serve it here"}.get(e.code, "the site answered with an error")
+        nxt = ("Try browse, which opens it in a real browser." if e.code in (401, 403, 429) else
+               "web_search for where it lives now.")
+        return f"Error: {url} answered {e.code}: {why}. {nxt}"
     except Exception as e:
-        return f"Error: fetch failed for {url}: {e}"
-    text = body.decode("utf-8", errors="replace")
-    if "json" in ctype.lower():
-        return f"[{status}] {url}\n{text}"
-    parser = _HTMLText()
+        return f"Error: couldn't fetch {url}: {type(e).__name__}: {e}"
+    title, text = _page_text(ctype, body)
+    if text.startswith("Error"):
+        return text
+    if not text.strip():
+        return (f"[{status}] {url}\n(no readable text: the page builds itself with JavaScript, "
+                f"or it is not text. Try browse, which opens it in a real browser.)")
+    start = max(0, _coerce_int(p.get("offset"), 0))
+    size = max(500, min(_coerce_int(p.get("max_chars"), 8000), MAX_REQUESTED_CAP))
+    part = text[start:start + size]
+    head = f"[{status}] {url}" + (f"\n# {title}" if title and start == 0 else "")
+    if start or start + size < len(text):
+        more = (f"next offset {start + size}" if start + size < len(text) else "the end")
+        head += f"\n(characters {start}-{start + len(part)} of {len(text)}; {more})"
+    return f"{head}\n{part}"
+
+
+def _page_text(ctype: str, body: bytes) -> Tuple[str, str]:
+    """(title, text) of a fetched body: a page's article, a PDF's text, JSON or plain text as it is."""
+    ct = ctype.lower()
+    if "pdf" in ct or body[:5] == b"%PDF-":
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(body)
+        try:
+            return "", _extract_pdf(f.name, {}).replace(f.name, "This PDF", 1)
+        finally:
+            try:
+                os.remove(f.name)
+            except OSError:
+                pass
+    m = re.search(r"charset=([\w-]+)", ct)
     try:
-        parser.feed(text)
-    except Exception:
-        return f"[{status}] {url}\n{text[:5000]}"
-    cleaned = re.sub(r"\n{3,}", "\n\n", "".join(parser.parts)).strip()
-    return f"[{status}] {url}\n{cleaned}"
+        text = body.decode(m.group(1) if m else "utf-8", errors="replace")
+    except LookupError:
+        text = body.decode("utf-8", errors="replace")
+    if "html" in ct or (not ct and "<html" in text[:2000].lower()):
+        from .readable import extract
+        return extract(text)
+    return "", text
 
 
 # ============================================================

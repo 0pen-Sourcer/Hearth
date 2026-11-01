@@ -6672,11 +6672,11 @@ async function showMcpServersModal() {
     + '<div id="mcp-preset-hint" style="font-size:11px;color:var(--fg-faint);margin-bottom:10px"></div>'
     + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Name</label>'
     + '<input id="mcp-name" placeholder="filesystem" spellcheck="false" autocomplete="off" style="' + FCSS + ';margin-bottom:10px"/>'
-    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Command</label>'
-    + '<input id="mcp-cmd" placeholder="npx" spellcheck="false" autocomplete="off" style="' + FCSS + ';margin-bottom:10px"/>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Command, or the server\'s address</label>'
+    + '<input id="mcp-cmd" placeholder="npx, or https://example.com/mcp" spellcheck="false" autocomplete="off" style="' + FCSS + ';margin-bottom:10px"/>'
     + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Arguments, one per line</label>'
     + '<textarea id="mcp-args" rows="4" spellcheck="false" style="' + FCSS + ';resize:vertical;margin-bottom:10px"></textarea>'
-    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Environment, one KEY=value per line (optional)</label>'
+    + '<label style="display:block;font-size:12px;color:var(--fg-dim);margin-bottom:4px">Environment, one KEY=value per line (optional). For an address, its headers: Authorization=Bearer &lt;token&gt;</label>'
     + '<textarea id="mcp-env" rows="2" spellcheck="false" style="' + FCSS + ';resize:vertical"></textarea>'
     + '<div id="mcp-form-err" style="color:var(--err);font-size:11px;margin-top:6px;min-height:14px"></div>'
     + '</div>';
@@ -6695,7 +6695,9 @@ async function showMcpServersModal() {
           err.textContent = 'Replace the placeholder in angle brackets with a real path first.';
           return false;
         }
-        cfg.mcpServers[name] = { command: cmd, args: args, env: _mcpParseEnv(document.getElementById('mcp-env').value) };
+        const kv = _mcpParseEnv(document.getElementById('mcp-env').value);
+        cfg.mcpServers[name] = /^https?:\/\//i.test(cmd) ? { url: cmd, headers: kv }
+                                                       : { command: cmd, args: args, env: kv };
         await _mcpSaveAndReload(cfg);
       } },
   ]);
