@@ -145,6 +145,19 @@ def plain_failure(exc: BaseException, stderr: str = "", command: str = "") -> Tu
     if missing:
         missing = re.sub(r"\.(exe|cmd|bat)$", "", missing, flags=re.I)
         return f"Couldn't start: {missing} can't be found", detail
+    said = f"{leaf} {stderr}".lower()
+    if command.lower().startswith(("http://", "https://")):
+        if re.search(r"\b401\b|unauthori[sz]ed", said):
+            return ("Couldn't connect: it needs signing in. Put its token in this server's \"headers\" "
+                    "(\"Authorization\": \"Bearer ...\"); sign-in through the browser isn't supported yet"), detail
+        if re.search(r"\b403\b|forbidden", said):
+            return "Couldn't connect: it refused the token given", detail
+        if re.search(r"\b40[45]\b|not found|method not allowed", said):
+            return "Couldn't connect: no MCP server answers at that address", detail
+        if re.search(r"connect(ion)? ?(error|refused)|connection attempts failed|getaddrinfo|name or service", said):
+            return "Couldn't connect: that address can't be reached", detail
+        msg = str(leaf).strip().splitlines()[0][:120] if str(leaf).strip() else ""
+        return f"Couldn't connect: {msg or type(leaf).__name__}", detail
     if isinstance(leaf, (asyncio.TimeoutError, TimeoutError)):
         return "Couldn't start: it didn't answer in time", detail
     if isinstance(leaf, PermissionError):
@@ -213,6 +226,24 @@ def server_site(spec: Dict[str, Any]) -> Tuple[str, str]:
 # Asyncio side — runs on the dedicated _LOOP thread
 # ---------------------------------------------------------------------------
 
+def remote_url(spec: Dict[str, Any]) -> str:
+    """The address of a server reached over the web rather than started here."""
+    url = str(spec.get("url") or spec.get("serverUrl") or "").strip()
+    return url if url.lower().startswith(("http://", "https://")) else ""
+
+
+def _remote_transport(url: str, spec: Dict[str, Any]):
+    """Streamable HTTP, the current way; the older SSE way when the config says
+    so or the address ends in /sse. Headers (a token) come from the config."""
+    headers = {str(k): str(v) for k, v in (spec.get("headers") or {}).items()}
+    kind = str(spec.get("type") or spec.get("transport") or "").lower()
+    if kind == "sse" or (not kind and url.rstrip("/").lower().endswith("/sse")):
+        from mcp.client.sse import sse_client
+        return sse_client(url, headers=headers or None)
+    from mcp.client.streamable_http import streamablehttp_client
+    return streamablehttp_client(url, headers=headers or None)
+
+
 async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
     """Spawn one MCP server subprocess, open a stdio session, list its
     tools, stash everything in _BRIDGES. Keeps the session alive for the
@@ -245,28 +276,34 @@ async def _connect_one(name: str, spec: Dict[str, Any]) -> None:
         }
 
     command = (spec.get("command") or "").strip()
-    args = list(spec.get("args") or [])
-    # An MCP server is third-party code, usually fetched at run time by npx.
-    # Handing it the whole environment hands it the cloud API key and the mail
-    # password too, so anything secret-shaped is withheld. A server that
-    # genuinely needs one can still be given it explicitly in its own "env"
-    # block, which is a deliberate choice rather than a silent default.
-    env = {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
-    env.update({str(k): str(v) for k, v in (spec.get("env") or {}).items()})
-    from . import node_env
-    env = node_env.child_env(env)
-    command = node_env.resolve(command)
-    if not command:
-        with _BRIDGES_LOCK:
-            _BRIDGES[safe].update(state="error",
-                                  error="no 'command' in mcp.json")
-        return
-
-    params = StdioServerParameters(command=command, args=args, env=env)
-    # The server's stderr goes to a file, not the terminal; a failure reads it for the reason.
+    url = remote_url(spec)
     errlog = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    if url and not command:
+        transport = _remote_transport(url, spec)
+        command = url
+    else:
+        args = list(spec.get("args") or [])
+        # An MCP server is third-party code, usually fetched at run time by npx.
+        # Handing it the whole environment hands it the cloud API key and the mail
+        # password too, so anything secret-shaped is withheld. A server that
+        # genuinely needs one can still be given it explicitly in its own "env"
+        # block, which is a deliberate choice rather than a silent default.
+        env = {k: v for k, v in os.environ.items() if not _is_secret_env(k)}
+        env.update({str(k): str(v) for k, v in (spec.get("env") or {}).items()})
+        from . import node_env
+        env = node_env.child_env(env)
+        command = node_env.resolve(command)
+        if not command:
+            with _BRIDGES_LOCK:
+                _BRIDGES[safe].update(state="error",
+                                      error="no 'command' or 'url' in mcp.json")
+            return
+        params = StdioServerParameters(command=command, args=args, env=env)
+        # The server's stderr goes to a file, not the terminal; a failure reads it for the reason.
+        transport = stdio_client(params, errlog=errlog)
     try:
-        async with stdio_client(params, errlog=errlog) as (read, write):
+        async with transport as streams:
+            read, write = streams[0], streams[1]
             async with ClientSession(read, write) as session:
                 await asyncio.wait_for(session.initialize(), timeout=30.0)
                 tool_list = await asyncio.wait_for(
@@ -317,6 +354,40 @@ async def _bootstrap_async(servers: Dict[str, Dict[str, Any]]) -> None:
         asyncio.create_task(_connect_one(name, spec))
 
 
+def content_text(c: Any, server: str) -> str:
+    """One piece of a tool's answer as the model reads it. A picture or a sound is
+    saved in the workspace and named by path (view_image shows a picture), never
+    pasted in as base64, which filled the context with noise."""
+    text = getattr(c, "text", None)
+    if text is not None:
+        return str(text)
+    data, mime = getattr(c, "data", None), str(getattr(c, "mimeType", "") or "")
+    if isinstance(data, str) and data:
+        import base64
+        import mimetypes
+        ext = mimetypes.guess_extension(mime.split(";")[0]) or ".bin"
+        folder = _workspace() / "mcp_files"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{_sanitize(server)}-{int(time.time() * 1000)}{ext}"
+        try:
+            path.write_bytes(base64.b64decode(data))
+        except Exception as e:
+            return f"({mime or 'binary'} content that couldn't be saved: {type(e).__name__})"
+        if mime.startswith("image/"):
+            from .tools import media_line
+            return media_line("image", str(path), path.stat().st_size, ext)
+        return f"{mime or 'File'} saved: {path}"
+    res = getattr(c, "resource", None)
+    if res is not None:
+        inner = getattr(res, "text", None)
+        uri = str(getattr(res, "uri", "") or "")
+        return f"{uri}\n{inner}" if inner is not None else f"(a resource: {uri})"
+    uri = getattr(c, "uri", None)
+    if uri:
+        return f"(a link: {getattr(c, 'name', '') or ''} {uri})".replace("  ", " ")
+    return f"({type(c).__name__})"
+
+
 async def _call_tool_async(server: str, tool: str,
                             args: Dict[str, Any]) -> Dict[str, Any]:
     """Forward a tool call to the named MCP server, return its result."""
@@ -337,14 +408,7 @@ async def _call_tool_async(server: str, tool: str,
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     # CallToolResult has .content (list of TextContent / ImageContent)
-    out_parts: List[str] = []
-    for c in (getattr(result, "content", None) or []):
-        text = getattr(c, "text", None)
-        if text is not None:
-            out_parts.append(str(text))
-        else:
-            # ImageContent / other — fall back to a repr the model can read
-            out_parts.append(repr(c))
+    out_parts = [content_text(c, server) for c in (getattr(result, "content", None) or [])]
     is_error = bool(getattr(result, "isError", False))
     return {
         "ok": not is_error,
