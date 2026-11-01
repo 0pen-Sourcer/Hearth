@@ -178,9 +178,8 @@ def _ask_hearth(tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
 
 # Helpers live in the Hearth that started this server, so their tools run there.
 # A helper started by Hearth gets none of them: it does its task and reports.
-_IN_HEARTH = (("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes", "delegate",
-               "race_helpers")
-              if (_BRAIN_URL and _BRAIN_TOKEN and not os.environ.get("HEARTH_HELPER")) else ())
+from hearth.claude_brain import HEARTH_SIDE
+_IN_HEARTH = HEARTH_SIDE if (_BRAIN_URL and _BRAIN_TOKEN and not os.environ.get("HEARTH_HELPER")) else ()
 
 
 def _run(name: str, args: Dict[str, Any]):
@@ -195,7 +194,7 @@ def _run(name: str, args: Dict[str, Any]):
         args = dict(args, _approved=APPROVAL_TOKEN)
     elif secret and not (_BRAIN_GATE and _BRAIN_URL):
         return f"Not done. {secret} Nobody here can say yes to it."
-    elif _BRAIN_GATE and _BRAIN_URL and (name in _RISKY_TOOLS or name in URL_ARGS or secret):
+    elif _BRAIN_GATE and _BRAIN_URL and (name in _RISKY_TOOLS or name in URL_ARGS or secret or name.startswith("mcp_")):
         # Whether a request would carry data out depends on what the turn has
         # read from outside, which the Inglen that started this server keeps.
         if name in URL_ARGS or not mode_allows(name, args):
@@ -205,8 +204,8 @@ def _run(name: str, args: Dict[str, Any]):
         # Allowed by the switch or by the person: marked approved, as the window's own turns mark it,
         # so run_command's guard doesn't refuse again what Auto let through (deleting what the app made).
         args = dict(args, _approved=APPROVAL_TOKEN)
-    if name in _IN_HEARTH:
-        # Helpers live in the Hearth that started this server: their tools run there.
+    if name in _IN_HEARTH or (_IN_HEARTH and name.startswith("mcp_")):
+        # Helpers, and the MCP servers Inglen connects to, live in the Hearth that started this server.
         try:
             return str(_post_hearth("/api/brain/tool", name, args).get("result") or "")
         except Exception as e:
@@ -284,7 +283,8 @@ _MCP_ALL_TOOLS = os.environ.get("HEARTH_MCP_ALL_TOOLS", "") in ("1", "true", "ye
 #   - ask_user: renders numbered options in Hearth's UI; a host can't show them.
 #   - spawn_subagent / launch_team: results come back through Hearth's OWN
 #     turn-notification loop, which an external host never sees — it just hangs.
-_MCP_NEVER = {"ask_user", "spawn_subagent", "launch_team"}
+#   - set_up: a download that reports back the same way, and it installs programs.
+_MCP_NEVER = {"ask_user", "spawn_subagent", "launch_team", "set_up"}
 # Low-level computer-use PRIMITIVES: redundant on MCP with smart_click (fused
 # vision + accessibility) and desktop_snapshot/click/type + screenshot, which are
 # the reliable interface. Hidden by default to keep the host's tool list clean;
@@ -310,15 +310,23 @@ for td in TOOL_DEFINITIONS:
 # the way load_tools does in Hearth itself.
 if _BRAIN_URL and _BRAIN_TOKEN and not _MCP_ALL_TOOLS:
     def _reachable(name: str) -> bool:
-        return name in _DEFERRED_TOOLS and name not in _MCP_NEVER and name not in _IN_HEARTH
+        return name in _IN_HEARTH or (_IN_HEARTH and name.startswith("mcp_")) or (
+            name in _DEFERRED_TOOLS and name not in _MCP_NEVER)
+
+    from hearth.tools import deferred_menu
 
     @mcp.tool(name="find_tools", structured_output=False,
-              description="Find more of Inglen's tools (they aren't all listed, to save room): "
-                          "archives, images, plugins, system details, voice, MCP servers and more. "
-                          "Give a word for what you need, or 'all'. Run one with use_tool.")
+              description="Find more of Inglen's tools (they aren't all listed, to save room). Check here "
+                          "before saying you can't do something. Give a tool's name or a word for what you "
+                          "need, or 'all', then run it with use_tool. They are: " + deferred_menu() + ".")
     def find_tools(query: str) -> str:
         from hearth.tools import unlock_tools
         found = [td for td in unlock_tools(query, touch=False) if _reachable(td["name"])]
+        if _IN_HEARTH:
+            try:
+                found += _post_hearth("/api/brain/tool", "find_mcp_tools", {"query": query}).get("result") or []
+            except Exception:
+                pass
         if not found:
             return "Nothing more matched that. Try another word, or 'all'."
         return "\n\n".join(f"{td['name']}: {td.get('description', '')}\nparameters: "

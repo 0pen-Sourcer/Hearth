@@ -1374,6 +1374,52 @@ _SETS_V = 2                                     # parts carry their GGUF sizes
 _SETS_RUN: Dict[str, Any] = {"thread": None}
 
 
+def _add_sizes(part: Dict[str, Any], recipe: Dict[str, Any], needed: List[dict]) -> None:
+    """A model part offers its smaller GGUF builds beside the full file."""
+    if "diffusion_model" not in part["slot"]:
+        return
+    slot = next((s for s in needed if s["id"] == part["slot"]), {"id": part["slot"]})
+    try:
+        q = quant_options(recipe, slot, needed, part["name"])
+    except Exception:
+        q = []
+    if q:
+        full = {k: part[k] for k in ("repo", "path", "name", "size")}
+        part["options"] = sorted(q + [dict(full, quant=quant_label(part["name"]))], key=lambda o: -o["size"])
+
+
+def plan_for_this_pc(recipe_id: str) -> Dict[str, Any]:
+    """download_plan with each part's size chosen for this graphics card, the size
+    Discover would pick."""
+    got = api("GET", "/sdcpp/v1/recipes")
+    recipe = next((r for r in got.get("recipes") or [] if r.get("id") == recipe_id), None)
+    if recipe is None:
+        return {"ok": False, "error": got.get("error") or f"the engine has no recipe '{recipe_id}'"}
+    plan = download_plan(recipe_id, recipe)
+    if not plan.get("ok"):
+        return plan
+    roots, needed = model_roots(), _needed_slots(recipe)
+    for x in plan["parts"]:
+        _add_sizes(x, recipe, needed)
+        if x.get("options"):
+            _choose_size(x, roots)
+    plan["bytes"] = sum(x["size"] for x in plan["parts"] if not x["have"])
+    return plan
+
+
+def find_recipe(words: str) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    """The recipe these words name, from the running engine: (recipe, []) when one
+    fits, else (None, the ids that came close)."""
+    rows = api("GET", "/sdcpp/v1/recipes").get("recipes") or []
+    want = (words or "").strip().lower()
+    exact = [r for r in rows if want in (str(r.get("id")).lower(), str(r.get("name")).lower())]
+    if exact:
+        return exact[0], []
+    toks = _words(want)
+    hits = [r for r in rows if toks and toks <= _recipe_words(r)]
+    return (hits[0], []) if len(hits) == 1 else (None, [str(r.get("id")) for r in hits[:8]])
+
+
 def _sets_build(recipes: List[dict]) -> None:
     """Find a whole download for every family the engine runs, and keep them."""
     out = []
@@ -1386,15 +1432,7 @@ def _sets_build(recipes: List[dict]) -> None:
                  for x in p.get("parts") or []] if p.get("ok") else []
         needed = _needed_slots(r)
         for x in parts:
-            if "diffusion_model" in x["slot"]:
-                slot = next((s for s in needed if s["id"] == x["slot"]), {"id": x["slot"]})
-                try:
-                    q = quant_options(r, slot, needed, x["name"])
-                except Exception:
-                    q = []
-                if q:
-                    full = {k: x[k] for k in ("repo", "path", "name", "size")}
-                    x["options"] = sorted(q + [dict(full, quant=quant_label(x["name"]))], key=lambda o: -o["size"])
+            _add_sizes(x, r, needed)
         out.append({"id": r["id"], "name": r.get("name") or r["id"], "video": "video_frames" in (r.get("defaults") or {}),
                     "blurb": blurb(r), "url": r.get("model_url") or "", "ok": bool(p.get("ok")),
                     "repo": p.get("repo") or "", "downloads": int((_REPOS.get("downloads") or {}).get(p.get("repo") or "", 0)),

@@ -7433,6 +7433,13 @@ function onLiveEvent(ev) {
     if ((ev.keys || []).some(k => k === 'ui_theme' || k === 'ui_accent')) followLook();
     return;
   }
+  if (ev.kind === 'setup') {
+    // Something the agent is setting up: a row in Downloads like any other.
+    dlUpsert('setup:' + ev.id, { name: ev.name, kind: 'setup', job: ev.id, status: ev.status, pct: ev.pct,
+                                 done: ev.total ? ev.done : undefined, total: ev.total || undefined,
+                                 speed: ev.speed, eta: ev.eta });
+    return;
+  }
   if (ev.kind !== 'turn' || ev.from === 'window') return;
   let c = STATE.conversations.find(x => x.id === ev.chat);
   if (ev.type === 'start' && (!c || c._stub)) {
@@ -20725,7 +20732,9 @@ function dlToggle(force) {
           else if (d.vision) modelsAddVision(d.vision, false);
           else if (d.repo && d.filename) modelsDownloadHF(d.repo, d.filename, {}, d.kind, d.category);
         } else if (ds.dlact === 'cancel') {
-          if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          if (kind === 'setup') api('/api/setup/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                           body: JSON.stringify({ id: d.job }) }).catch(() => {});
+          else if (kind === 'agent') api('/api/agents/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                            body: JSON.stringify({ id: d.agent }) }).catch(() => {});
           else if (kind === 'engine') api('/api/runtime/discard', { method: 'POST' }).catch(() => {});
           else if (kind === 'imgengine') api('/api/images/cancel', { method: 'POST' }).catch(() => {});
@@ -20780,7 +20789,7 @@ function dlRender() {
     const kind = d.kind || 'model';
     const _da = `data-dlid="${esc(id)}" data-dlkind="${kind}"`;
     let ctrlBtn = '';
-    if (d.status === 'downloading' && isAgent) {
+    if (d.status === 'downloading' && (isAgent || kind === 'setup')) {
       ctrlBtn = `<button data-dlact="cancel" ${_da} style="${_btnCss}">✕ Cancel</button>`;
     } else if (d.status === 'downloading') {
       ctrlBtn = `<button data-dlact="pause" ${_da} style="${_btnCss}">❚❚ Pause</button>`

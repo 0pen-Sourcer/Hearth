@@ -18,6 +18,8 @@ The long version, with how each part works, is in [docs/RELEASE_NOTES_v0.7.6.md]
 - An agent that goes quiet for a minute and a half is reported on every surface with Stop to end it, and a usage limit says when it resets.
 - `delegate` hands one task to an installed coding agent and brings back its answer, with adapters for twenty-three of them. Inglen can also read the Claude Code and Codex sessions on the PC and send one a message.
 
+- Ask the assistant what it can do and it checks this PC: engines, models, keys, phone, chat apps, helpers. What's missing it installs itself once you say yes, the image engine and a model that fits your card, a chat model, voice, an agent program, with the progress in Downloads. It can also take back a change it made to your files.
+
 ### Helpers and the Team room
 - Helpers can run on the brain, on this PC's model, on a saved provider model or on an installed agent, and one sentence can start a mixed team that knows who is on it.
 - The Team room shows each helper at a desk in a pixel house by the fire, up to eight to a room across four rooms. Click anyone for who asked, the task, each step and what it changed.

@@ -649,7 +649,7 @@ def _decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
 # talks to. The server passes these calls here, so a helper the brain sends
 # is one of Hearth's own: it shows in the Team view and can be told things.
 HEARTH_SIDE = ("spawn_subagent", "tell_subagent", "get_subagent_result", "launch_team", "helper_changes", "delegate",
-               "race_helpers")
+               "race_helpers", "what_can_i_do", "set_up", "load_model", "connectors")
 _sent: Dict[str, int] = {}     # helpers this turn sent -> checks since one was last seen running
 
 
@@ -666,10 +666,14 @@ def desktop(token: str, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run_tool(token: str, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    if token != _TOKEN or name not in HEARTH_SIDE:
+    # An MCP server is connected here too, so its tools run here and are found here.
+    if token != _TOKEN or not (name in HEARTH_SIDE or name.startswith("mcp_") or name == "find_mcp_tools"):
         return {"result": "Error: not an Inglen session"}
-    from .tools import execute_tool
+    from .tools import execute_tool, unlock_tools
     args = dict(args or {})
+    if name == "find_mcp_tools":
+        return {"result": [td for td in unlock_tools(str(args.get("query") or ""), touch=False)
+                           if td["name"].startswith("mcp_")]}
     if name == "spawn_subagent":
         args["mode"] = "background"               # the turn waits for it and hands over its report
     out = str(execute_tool(name, args))
@@ -822,7 +826,8 @@ def persona_text(voice: bool, host: str = "Claude Code", tools: str = "mcp__hear
         f"when it finishes, so after sending them you can simply end your message. "
         f"A helper can think with the model on this PC (runs_on 'local'), with a provider and model "
         f"you name, or be an agent program; never call a model server's API yourself to get work done. "
-        f"More of Inglen's tools exist than are listed: find them with find_tools and run one with use_tool. "
+        f"More of Inglen's tools exist than are listed: find them with find_tools and run one with use_tool; "
+        f"wherever the text below says load_tools, that is find_tools. "
         f"Answer as the persona, never as {host}.\n\n")
     return preface + system_prompt(voice=voice)
 
