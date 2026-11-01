@@ -4392,6 +4392,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             from . import external_agents as _xa
             ok = _xa.cancel_job(str(body.get("id") or ""))
             return self._send_json(200 if ok else 400, {"ok": ok} if ok else {"ok": False, "error": "nothing to stop"})
+        if path == "/api/setup/cancel":
+            # The Cancel button on something the agent is setting up, in the Downloads list.
+            from . import capabilities
+            return self._send_json(200, {"ok": capabilities.cancel(str((self._read_json() or {}).get("id") or ""))})
         if path == "/api/agents/update":
             # Asked for from the "a newer one is out" prompt; never on its own.
             body = self._read_json() or {}

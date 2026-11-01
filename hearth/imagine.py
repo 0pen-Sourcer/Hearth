@@ -332,8 +332,8 @@ def generate_image(
     provider = _detect_provider(base)
     if not _supported_for_images(provider):
         return {
-            "ok": False,
-            "error": ("Making images needs a key saved for xAI Grok, OpenAI or Google Gemini. "
+            "ok": False, "code": "no_provider",
+            "error": ("Making images in the cloud needs a key saved for xAI Grok, OpenAI or Google Gemini. "
                       "Add one in Settings under Brain; it doesn't have to be the brain in use."),
         }
     if not api_key:
@@ -478,8 +478,8 @@ def start_video(
     provider = _detect_provider(base)
     if not _supported_for_video(provider):
         return {
-            "ok": False,
-            "error": ("Making videos needs a key saved for xAI Grok. Add one in Settings "
+            "ok": False, "code": "no_provider",
+            "error": ("Making videos in the cloud needs a key saved for xAI Grok. Add one in Settings "
                       "under Brain; it doesn't have to be the brain in use."),
         }
     if not api_key:

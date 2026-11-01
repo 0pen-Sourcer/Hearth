@@ -815,7 +815,7 @@ _CONFIRM_ON_FIRE = {
     "execute_actions",
     "browse", "browse_click", "browse_type", "browse_scroll",
     "generate_image", "generate_video", "create_plugin", "delete_plugin",
-    "install_skill", "memory_forget",
+    "install_skill", "memory_forget", "set_up", "undo",
 }
 
 

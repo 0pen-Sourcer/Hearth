@@ -33,6 +33,8 @@ _OWN: Dict[str, Tuple[str, str, str]] = {
     "spawn_subagent": ("Starting a helper:", "Started a helper:", "persona"),
     "generate_image": ("Making an image:", "Made an image:", "prompt"), "disk_usage": ("Measuring", "Measured", "path"),
     "load_tools": ("Getting tools for", "Got tools for", "query"),
+    "what_can_i_do": ("Checking what's set up", "Checked what's set up", ""),
+    "set_up": ("Setting up", "Set up", "what"), "undo": ("Taking back a change", "Took back a change", ""),
     "end_session": ("Saying goodbye", "Said goodbye", ""),
     "worklog": ("Taking notes", "Took notes", ""), "ask_user": ("Asking you", "Asked you", "question"),
 }

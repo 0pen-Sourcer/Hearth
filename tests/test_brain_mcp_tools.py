@@ -71,6 +71,10 @@ try:
     names = start(p)
     check(f"an agent brain is offered find_tools and use_tool beside the everyday tools ({len(names)})",
           {"find_tools", "use_tool", "spawn_subagent", "read_file"} <= names and "list_archive" not in names)
+    check("it can ask what's set up and install what isn't", {"what_can_i_do", "set_up"} <= names)
+    listed = rpc(p, 30, "tools/list")["tools"]
+    check("find_tools names the held-back tools, the phone among them",
+          "send_to_phone" in next(t["description"] for t in listed if t["name"] == "find_tools"))
     found = text(rpc(p, 3, "tools/call", {"name": "find_tools", "arguments": {"query": "archive"}}))
     check("find_tools names a tool the list left out, with its parameters",
           "list_archive" in found and "parameters" in found)
@@ -89,7 +93,9 @@ finally:
 
 p = server(brain=False)
 try:
-    check("another host (LM Studio, Claude Desktop) doesn't get them", "find_tools" not in start(p))
+    others = start(p)
+    check("another host (LM Studio, Claude Desktop) doesn't get them", "find_tools" not in others)
+    check("nor set_up, while it can still ask what's set up", "set_up" not in others and "what_can_i_do" in others)
 finally:
     p.kill()
 

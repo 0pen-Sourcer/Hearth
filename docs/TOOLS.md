@@ -1,8 +1,8 @@
 # Tools
 
-Inglen gives the model **109 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
+Inglen gives the model **112 tools** to operate your machine. Most work is local, but tools that are explicitly about the network (for example web search/fetch, email, phone/connectors, or configured cloud generation services) make the requests needed for that feature. Actions that change the machine or have external side effects follow Inglen's permission rules; see `SECURITY.md` for the threat model and known sharp edges.
 
-To keep the prompt small, **36** core tools load with their full description and **73** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
+To keep the prompt small, **37** core tools load with their full description and **75** niche ones (marked †) are listed by name only until the model pulls one in with `load_tools`. Set `HEARTH_ALL_TOOLS=1` to load everything up front.
 
 _This file is generated from the live tool definitions (`scripts/gen_tools_doc.py`), so don't edit it by hand._
 
@@ -25,6 +25,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `read_file` | Read a file |
 | `read_pdf_large` † | Summarize a very large PDF (hundreds of pages) that won't fit in one context: it is read in page windows, each summarized by a small model call, then combined… |
 | `summarize_file` † | Summarise a long document instead of reading all of it |
+| `undo` † | Take back a change a tool made to files: a write, an edit, a move or a delete |
 | `write_file` | Create a new file in the workspace |
 
 ## Web & browser
@@ -83,8 +84,10 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `open_app` | Open an app by name, a file with its default program, a folder in Explorer, or a URL |
 | `run_command` | Run a shell command |
 | `screenshot` | Capture the whole screen and return the saved path; follow with view_image to see it |
+| `set_up` † | Install what's missing on this PC yourself, so nobody has to fetch a server from the web |
 | `system_info` | Machine snapshot in one call: OS, CPU, GPUs with VRAM, temperature and load, RAM, disks, hostname, user, uptime, battery |
 | `view_image` | Load an image file so you can see it (png, jpg, gif, webp, bmp) |
+| `what_can_i_do` | What you can do on this PC and what is set up right now, read live: brain and keys, chat and image engines and models, voice, phone, chat apps, email, helpers,… |
 | `whoami` † | Introspect your own runtime config |
 
 ## Background jobs
@@ -110,7 +113,7 @@ _This file is generated from the live tool definitions (`scripts/gen_tools_doc.p
 | `list_subagent_personas` † | List the personas available for spawn_subagent |
 | `message_helper` † | For a helper: ask or tell another helper that is working at the same time, by name, or the assistant that sent you (to: 'main') |
 | `race_helpers` † | Give one coding task to two or more agent programs at once (say codex and claude-code), each on its own copy of a git repository, to compare their work |
-| `spawn_subagent` | Start a scoped sub-agent (see list_subagent_personas for personas) |
+| `spawn_subagent` | Start a helper that works beside you |
 | `tell_subagent` † | Give a helper that is still working a message: a correction, an extra detail, a change of direction |
 
 ## Memory

@@ -32,10 +32,9 @@ import time
 from typing import Any, Callable, Optional, Tuple
 
 _INSTALL_HINT = (
-    "Browser control needs Playwright + Chromium (one-time):\n"
+    "Browser control needs Playwright + Chromium, once. Run these yourself with start_job, then retry:\n"
     "  pip install playwright\n"
-    "  python -m playwright install chromium\n"
-    "Then retry."
+    "  python -m playwright install chromium"
 )
 
 _worker: "Optional[_BrowserWorker]" = None

@@ -741,7 +741,7 @@ def describe() -> str:
     """One line for tool descriptions: what can be delegated to here."""
     found = available()
     if not found:
-        return "No other agent CLIs are installed here."
+        return "No other agent CLIs are installed here. what_can_i_do(area='agents') lists the ones set_up can install."
     return "Installed here: " + ", ".join(
         f"{a['label']} (agent='{a['id']}'" + (", not usable now: its account refused it" if a["refused"] else "") + ")"
         for a in found) + "."

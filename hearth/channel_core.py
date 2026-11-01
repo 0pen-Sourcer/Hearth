@@ -1014,6 +1014,10 @@ def _what(name: str, args: Dict[str, Any]) -> str:
         return f"make {'a video' if 'video' in name else 'an image'}" + (f" of \"{cut(a.get('prompt'), 80)}\"" if a.get("prompt") else "")
     if name == "load_model":
         return f"load {a.get('model') or a.get('name') or 'another model'}"
+    if name == "set_up":
+        return f"install {a.get('name') or a.get('what') or 'what is missing'} on your PC"
+    if name == "undo":
+        return "take back a change to your files"
     if name.startswith(("computer_", "desktop_", "browse_")) or name in ("execute_actions", "smart_click"):
         return "use the mouse and keyboard on your PC"
     if name == "read_inbox":

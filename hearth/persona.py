@@ -116,6 +116,19 @@ def _phone_line() -> str:
         return ""
 
 
+def _mcp_line() -> str:
+    """The MCP servers connected now: their tools are held back and named nowhere else.
+    Changes when one connects, not per turn."""
+    try:
+        from .mcp_client import list_bridges
+        names = sorted(b["raw_name"] for b in list_bridges() if b.get("state") == "connected")
+    except Exception:
+        return ""
+    if not names:
+        return ""
+    return f"\nMCP servers connected here: {', '.join(names)}. load_tools with a server's name brings in its tools.\n"
+
+
 def system_prompt(voice: bool = False) -> str:
     # Date only (no %H:%M) so the system prompt stays byte-identical all day —
     # a minute-resolution stamp here changes the prefix every 60s and forces the
@@ -197,6 +210,9 @@ line, never forced. No emoji unless they use them.
   never from memory or assumption. Don't call anything closed, gone, missing or
   finished unless a tool confirmed it this turn. If they say you're wrong, check
   again before you argue; they can see the screen and you can't.
+- What you can do and what's installed here is state too. "What can you do", "is X
+  set up", "can you Y": call what_can_i_do first and answer from its result, and
+  check it before saying you can't.
 - After a tool confirms something, speak from what you saw, not from how things
   usually work. Don't invent URLs, file contents, or what an image shows. No
   image in their message and no view_image call from you means you have no image.
@@ -221,12 +237,16 @@ line, never forced. No emoji unless they use them.
 - Use the lightest tool that answers. Folder contents: list_directory (open_app
   opens it for them to look at). Drives and free space: Get-PSDrive. Is X
   running: Get-Process X. Walk a whole drive only when nothing smaller answers.
-- The tool you need isn't loaded: load_tools. Every held-back tool is named there.
+- The tool you need isn't loaded: load_tools. Every held-back tool is named there,
+  generate_image and generate_video among them: a picture or video is one call away.
+- A missing engine, model or program is yours to fix: set_up installs it here with
+  their yes. Never send them to a website for it.
 - A document (PDF, deck, spreadsheet, report): load_skill first rather than
   hand-writing library code, and research the facts before writing, never from
   memory.
-- Work that splits into parallel pieces, runs long, or belongs in the background:
-  spawn_subagent. Its result says how many can really run at once; on a one-slot
+- Work that splits into parallel pieces, runs long, or belongs in the background,
+  or any ask for helpers or parallel work: spawn_subagent, one per piece, rather
+  than doing it all yourself in a row. Its result says how many can really run at once; on a one-slot
   server they queue, so send fewer, bigger pieces. A task notification is your
   helper reporting back, not a new request: carry on with the task. Never state
   a subagent's result before it arrives.
@@ -305,6 +325,9 @@ one short goodbye line, then end_session. A mid-task "thanks" is not a goodbye.
     phone = _phone_line()
     if phone:
         parts.append(phone)
+    mcp = _mcp_line()
+    if mcp:
+        parts.append(mcp)
 
     if profile:
         # The USER-model layer (who this person is + how they want replies),

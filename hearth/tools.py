@@ -756,7 +756,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "spawn_subagent",
         "description": (
-            "Start a scoped sub-agent (see list_subagent_personas for personas). "
+            "Start a helper that works beside you. Use it when work splits into independent "
+            "parts (several topics to research, several files to change), runs long, or the "
+            "person asks for helpers or parallel work; you keep talking meanwhile. "
             "mode='background' returns an agent_id at once and the result arrives later"
             " as a task notification: use it for anything long, and for several agents "
             "spawn them all in one turn. mode='sync' waits for the result: use it only "
@@ -1092,7 +1094,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "or change one (pass its path as image). On this PC when an image model "
             "is set up under Models, else with a cloud model that has a key saved "
             "(xAI Grok, OpenAI, Google Gemini). where='cloud' or 'local' picks one. "
-            "Saves it in the workspace's generated folder and shows it in the chat."
+            "Saves it in the workspace's generated folder and shows it in the chat. "
+            "Try it rather than guess: when nothing is set up, the result says how to fix that."
         ),
         "parameters": {
             "type": "object",
@@ -1549,7 +1552,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "description": (
             "Introspect your own runtime config. Call this instead of guessing "
             "or running shell commands when the user asks 'what model are you', "
-            "'what's your endpoint', 'are you local or cloud', 'what can you do', "
+            "'what's your endpoint', 'are you local or cloud', "
             "'what's your context window', or 'who built you'. Returns the live "
             "model id, API endpoint (local vs cloud), context window, tool count, "
             "memory count, workspace path, persona name, and repo. Zero side effects."
@@ -6219,10 +6222,12 @@ def _list_models(p: Dict) -> str:
         if _disk:
             return (f"No model server is running at {base} ({err_kind}), so nothing is "
                     f"loaded right now." + "\n".join(_disk)
-                    + "\nStart one from the Models tab, or /models use <n> in the CLI.")
+                    + "\nload_model starts one.")
+        _touch_unlocked("set_up")
         return (f"Couldn't reach the local server at {base}: {err_kind}: {e}. "
                 f"No model server is running there, and no .gguf models were found on "
-                f"disk either - the Models tab can download one.")
+                f"disk either. what_can_i_do(area='chat') suggests one that fits this PC and "
+                f"set_up(what='chat', name=...) fetches it and the engine, with their yes.")
 
 
 def _learn_environment(p: Dict) -> str:
@@ -6267,6 +6272,13 @@ def _media_lines(paths, how: str, prompt: str, video: bool = False) -> str:
 _LOCAL_VIDEOS: Dict[str, Dict[str, Any]] = {}
 
 
+def _media_fix(video: bool) -> str:
+    """How to get what a picture or a video was missing; set_up comes along with it."""
+    from . import capabilities
+    _touch_unlocked("set_up")
+    return capabilities.media_gap(video)
+
+
 def _generate_image(p: Dict) -> str:
     from . import imagine
     where = (p.get("where") or "").strip().lower()
@@ -6277,7 +6289,9 @@ def _generate_image(p: Dict) -> str:
                               image=(p.get("image") or "").strip(), negative=(p.get("negative_prompt") or ""))
         if r.get("ok"):
             return _media_lines(r["paths"], f"on this PC with {r.get('recipe')} in {r.get('seconds')}s", prompt)
-        if where == "local" or r.get("code") not in ("no_model", "not_installed"):
+        if r.get("code") in ("no_model", "not_installed") and where == "local":
+            return f"Error (on this PC): {r.get('error')}. " + _media_fix(False)
+        if r.get("code") not in ("no_model", "not_installed"):
             return f"Error (on this PC): {r.get('error')}"
     r = imagine.generate_image(
         prompt=(p.get("prompt") or "").strip(),
@@ -6286,7 +6300,7 @@ def _generate_image(p: Dict) -> str:
         resolution=(p.get("resolution") or "1k"),
     )
     if not r.get("ok"):
-        return f"Error: {r.get('error')}"
+        return f"Error: {r.get('error')}" + (" " + _media_fix(False) if r.get("code") == "no_provider" else "")
     paths = r.get("paths") or []
     if not paths:
         return "Error: provider returned no images."
@@ -6312,6 +6326,8 @@ def _generate_video(p: Dict) -> str:
         image = (p.get("image_url") or "").strip()
         if image and not os.path.isfile(image):
             return "Error: on this PC a video starts from a picture's path, not a link"
+        if where == "local" and not _local_media(True, ""):
+            return "Error (on this PC): " + _media_fix(True)
         tid = f"local_{uuid.uuid4().hex[:8]}"
         _LOCAL_VIDEOS[tid] = {"status": "pending", "prompt": prompt}
 
@@ -6343,7 +6359,7 @@ def _generate_video(p: Dict) -> str:
         image_url=(p.get("image_url") or None),
     )
     if not r.get("ok"):
-        return f"Error: {r.get('error')}"
+        return f"Error: {r.get('error')}" + (" " + _media_fix(True) if r.get("code") == "no_provider" else "")
     _watch_video(str(r.get("task_id") or ""), (p.get("prompt") or "").strip())
     return (
         f"Video started (task {r.get('task_id')}), usually about a minute. A report "
@@ -7511,8 +7527,9 @@ TOOL_DEFINITIONS.append({
         "phone, where it arrives with a notification. When they are talking to you from the phone "
         "app or a chat app, it goes to that same conversation; from the window or terminal, to "
         "the Inglen app on their paired phone, else the chat app they connected (Telegram, or "
-        "Discord as a DM). Use for 'send me a photo', 'text me this', 'ping my phone'. It never "
-        "rings: to ring them, use call_phone. Leave channel out unless they named one."
+        "Discord as a DM). Use for 'send me a photo', 'text me this', 'ping my phone', and for any "
+        "picture you made or found. It never rings: to ring them, use call_phone. Leave channel "
+        "out unless they named one."
     ),
     "parameters": {
         "type": "object",
@@ -7522,7 +7539,6 @@ TOOL_DEFINITIONS.append({
             "message": {"type": "string", "description": "The text to send."},
             "path": {"type": "string", "description": "A file on this PC to send (a screenshot, a photo, a PDF): it arrives as an attachment."},
         },
-        "required": ["message"],
     },
 })
 
@@ -8347,6 +8363,61 @@ TOOL_DEFINITIONS.append({
 })
 
 
+def _what_can_i_do(p: Dict) -> str:
+    from . import capabilities
+    _touch_unlocked("set_up")          # what it finds missing is one call away
+    return capabilities.report(str(p.get("area") or ""))
+
+
+def _set_up(p: Dict) -> str:
+    from . import capabilities
+    return capabilities.set_up(str(p.get("what") or ""), str(p.get("name") or ""))
+
+
+def _undo_change(p: Dict) -> str:
+    from . import undo
+    r = undo.undo(str(p.get("id") or "").strip())
+    return f"{r.get('said')}." if r.get("ok") else f"Error: {r.get('error')}"
+
+
+_HANDLERS["what_can_i_do"] = _what_can_i_do
+_HANDLERS["set_up"] = _set_up
+_HANDLERS["undo"] = _undo_change
+TOOL_DEFINITIONS.append({
+    "name": "what_can_i_do",
+    "description":
+        "What you can do on this PC and what is set up right now, read live: brain and keys, chat and image "
+        "engines and models, voice, phone, chat apps, email, helpers, agent programs, MCP servers, skills, undo. "
+        "Use it when asked what you can do, and before saying you can't or telling them to install anything.",
+    "parameters": {"type": "object", "properties": {
+        "area": {"type": "string", "enum": __import__("hearth.capabilities", fromlist=["area_names"]).area_names(),
+                 "description": "One area in full (the models to download, say). Leave out for all of them."},
+    }},
+})
+TOOL_DEFINITIONS.append({
+    "name": "set_up",
+    "description":
+        "Install what's missing on this PC yourself, so nobody has to fetch a server from the web. images: the "
+        "picture and video engine, with name also a model and all its files, sized for this graphics card. chat: "
+        "the chat engine, with name also a Hugging Face model (words, a repo or repo/file.gguf). voice: speech in "
+        "and out. agent: an agent program, by name. Say what it fetches and its size first, then get their yes. "
+        "Runs in the background and shows in Downloads; a report arrives when it ends.",
+    "parameters": {"type": "object", "properties": {
+        "what": {"type": "string", "enum": ["images", "chat", "voice", "agent"], "description": "What to install."},
+        "name": {"type": "string", "description": "The model or agent program; what_can_i_do lists them."},
+    }, "required": ["what"]},
+})
+TOOL_DEFINITIONS.append({
+    "name": "undo",
+    "description":
+        "Take back a change a tool made to files: a write, an edit, a move or a delete. Files are copied aside "
+        "first and kept a week. what_can_i_do(area='undo') lists the changes with their ids.",
+    "parameters": {"type": "object", "properties": {
+        "id": {"type": "string", "description": "The change's id."},
+    }, "required": ["id"]},
+})
+
+
 # Auto-load user/agent plugins. Fully guarded — a broken plugin is skipped and
 # can NEVER take down the core tools.
 try:
@@ -8401,6 +8472,7 @@ _DRYRUN_GUARDED = {
     "race_helpers",                      # starts agent programs and runs a command
     "load_model",                        # starts the engine and fills the graphics card
     "agent_sessions",                    # sends a message into a coding agent's session
+    "set_up", "undo",                    # downloads and installs; rewrites files
 }
 
 
@@ -8777,6 +8849,8 @@ _DEFERRED_TOOLS = {
     "call_phone",          # so is ringing it; the prompt names both when a phone is paired
     "agent_sessions",      # reaching a coding agent's session is an occasional ask
     "connectors",          # setting up a chat app is occasional
+    "set_up",              # what_can_i_do and a failed tool bring it in
+    "undo",                # taking a change back is occasional
     "focus_window",        # niche window management
     "glob_files",          # find_file already accepts glob patterns + is fuzzier
     "clipboard_read", "clipboard_write",  # niche; rarely needed as a tool call
@@ -8981,9 +9055,8 @@ def unlock_tools(query: str = "", touch: bool = True) -> "List[Dict[str, Any]]":
 def _h_load_tools(p: "Dict[str, Any]") -> str:
     matched = unlock_tools(p.get("query", ""))
     if not matched:
-        return ("No extra tools matched that. Groups you can ask for: image "
-                "generation, plugins, archive, system, voice, team, mcp, "
-                "end_session (or 'all').")
+        return ("No extra tools matched that. what_can_i_do shows what this PC can do and has set "
+                "up; this tool's description names every held-back tool, and 'all' loads them.")
     lines = ["Loaded these tools — you can call them now:"]
     for td in matched:
         props = ", ".join((td["parameters"].get("properties") or {}).keys())
@@ -9061,6 +9134,8 @@ _RISKY_TOOLS: set = {
     "race_helpers",
     # Takes the graphics card, and can change what the brain is.
     "load_model",
+    # Downloads and installs programs and models; puts files back as they were.
+    "set_up", "undo",
 }
 _NEVER_PERM: set = {"ask_user", "spawn_subagent"}
 
@@ -9389,7 +9464,7 @@ _CATEGORY_ORDER = [
 ]
 _TOOL_CATEGORY = {
     # Files & docs
-    "read_file": "Files & docs", "write_file": "Files & docs", "edit_file": "Files & docs",
+    "read_file": "Files & docs", "write_file": "Files & docs", "edit_file": "Files & docs", "undo": "Files & docs",
     "list_directory": "Files & docs",
     "create_directory": "Files & docs", "delete_path": "Files & docs", "move_path": "Files & docs",
     "find_file": "Files & docs", "grep_search": "Files & docs", "glob_files": "Files & docs",
@@ -9416,6 +9491,7 @@ _TOOL_CATEGORY = {
     "disk_usage": "System & apps", "open_app": "System & apps", "screenshot": "System & apps",
     "view_image": "System & apps", "clipboard_read": "System & apps", "clipboard_write": "System & apps",
     "get_time": "System & apps", "whoami": "System & apps", "list_models": "System & apps", "load_model": "System & apps",
+    "what_can_i_do": "System & apps", "set_up": "System & apps",
     "learn_environment": "System & apps",
     # Background jobs
     "start_job": "Background jobs", "job_status": "Background jobs", "job_wait": "Background jobs",
@@ -9930,17 +10006,23 @@ def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
 # reminders, jobs), which is why the model sometimes "forgot" it had a tool and
 # either gave up or reached for run_command instead of loading the right one.
 # Runs at import, after _DEFERRED_TOOLS, tools_by_category, and the schema exist.
-try:
-    _menu_parts = []
-    for _cat, _tds in tools_by_category():
-        _dn = [td["name"] for td in _tds if td["name"] in _DEFERRED_TOOLS]
-        if _dn:
+def deferred_menu() -> str:
+    """Every held-back tool, by group, for whichever tool reveals them."""
+    parts = []
+    for cat, tds in tools_by_category():
+        names = [td["name"] for td in tds if td["name"] in _DEFERRED_TOOLS]
+        if names:
             # Every name, never a sample. Five per group with "..." left 23 of
             # 64 tools reachable only by guessing a keyword that happened to hit
             # them, among them the window, click and team tools. Listing all of
             # them costs about seventy-five tokens.
-            _menu_parts.append(f"{_cat.lower()} ({', '.join(_dn)})")
-    if _menu_parts:
+            parts.append(f"{cat.lower()} ({', '.join(names)})")
+    return "; ".join(parts)
+
+
+try:
+    _menu = deferred_menu()
+    if _menu:
         _LOAD_TOOLS_SCHEMA["function"]["description"] = (
             "Reveal extra built-in tools kept off the default prompt to save "
             "context. BEFORE assuming you can't do something, or reaching for "
@@ -9948,6 +10030,6 @@ try:
             "call away. Every one of them is named below: pick by name with "
             "'select:name' or 'select:name1,name2', then call it. A keyword also "
             "works when you are not sure of the name. Available on demand, by "
-            "group: " + "; ".join(_menu_parts) + ". Pass 'all' to load everything.")
+            "group: " + _menu + ". Pass 'all' to load everything.")
 except Exception:
     pass
