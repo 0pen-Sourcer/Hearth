@@ -160,12 +160,20 @@ def _asked(name: str, args: Dict[str, Any]) -> int:
         because = why(name, args)
     except Exception:
         because = ""
-    try:
-        from .step_words import doing
-        said = doing(name, args)
-    except Exception:
-        said = name
-    return cu_panel.ask(name, args, because, said)
+    return cu_panel.ask(name, args, because)
+
+
+def _answered(name: str, args: Dict[str, Any], out: Any) -> Any:
+    """A no leaves one quiet line among the panel's steps, however it was given."""
+    d = out.get("decision") if isinstance(out, dict) else out
+    if _active and d in ("deny", "never", "timeout", "aside"):
+        try:
+            from . import cu_panel
+            from .approval import parts
+            cu_panel.declined(parts(name, args or {})[0], aside=d == "aside")
+        except Exception:
+            pass
+    return out
 
 
 def _check_wrap(check, emit, pending: Dict[str, Any]):
@@ -191,7 +199,7 @@ def _check_wrap(check, emit, pending: Dict[str, Any]):
             task = asyncio.ensure_future(check(name, args))
             await asyncio.wait({task}, timeout=0.25)
             if task.done():
-                return task.result()
+                return _answered(name, args, task.result())
             tok = _asked(name, args)
             try:
                 while not task.done():
@@ -199,9 +207,9 @@ def _check_wrap(check, emit, pending: Dict[str, Any]):
                     if ans:
                         task.cancel()
                         settled(pending.get("id"), ans)
-                        return ans
+                        return _answered(name, args, ans)
                     await asyncio.wait({task}, timeout=0.05)
-                return task.result()
+                return _answered(name, args, task.result())
             finally:
                 cu_panel.clear_ask(tok)
         return wrapped_async
@@ -226,7 +234,7 @@ def _check_wrap(check, emit, pending: Dict[str, Any]):
         def result():
             if "e" in box:
                 raise box["e"]
-            return box.get("r")
+            return _answered(name, args, box.get("r"))
         if done.wait(0.25):
             return result()
         tok = _asked(name, args)
@@ -238,7 +246,7 @@ def _check_wrap(check, emit, pending: Dict[str, Any]):
                     if rid and _deliver(rid, ans) and done.wait(5.0):
                         out = result()               # the window keeps its own bookkeeping
                     else:
-                        out = ans
+                        out = _answered(name, args, ans)
                     settled(rid, ans)
                     return out
             return result()

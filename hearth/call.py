@@ -591,7 +591,10 @@ def voice_permission_check(check, emit_fn, prompt: str, history, *, asks, tapped
         asks[rid] = {"name": name, "key": key, "tap": tap, "at": time.time()}
         for old in [k for k, v in asks.items() if time.time() - v["at"] > 600]:
             asks.pop(old, None)
-        emit_fn("permission_request", id=rid, name=name, args=args, aloud=True, **({"tap": True} if tap else {}))
+        from .approval import card as _card
+        _c = _card(name, args)
+        emit_fn("permission_request", id=rid, name=name, args=args, aloud=True, head=_c["head"], what=_c["what"],
+                detail=_c["detail"], **({"tap": True} if tap else {}))
         return {"decision": "ask_aloud", "reason": ASK_TAP if tap else ASK_ALOUD}
     return _check
 

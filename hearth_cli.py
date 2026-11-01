@@ -6241,22 +6241,22 @@ class JarvisCLI:
             self._steer_paused = False
 
     async def _ask_permission_picker(self, name: str, args: Dict[str, Any]):
-        from hearth import term_pick
-        what = _term_render.tool_words(name, args if isinstance(args, dict) else {})
+        from hearth import approval, term_pick
         try:
             from hearth.auto_review import why as _why
             because = _why(name, args)          # the reviewer's or the floor's reason
         except Exception:
             because = ""
-        if because:
-            print(f"  {C_DIM}{because}{C_RESET}")
+        card = approval.card(name, args if isinstance(args, dict) else {}, why=because)
+        # The card goes with the picker once answered; a no leaves one quiet line.
+        lines = approval.terminal(card, dim=C_DIM, reset=C_RESET, bold=BOLD_ON)
         picked = await term_pick.pick(
-            f"{C_WARN}Allow this?{C_RESET}",
-            [("allow", "Yes, this once"), ("always", f"Yes, and don't ask again for {name}"),
-             ("deny", "No"), ("why", "No, and tell it what to do instead")], default="allow")
-        said = {"allow": "allowed", "always": f"allowed, and won't ask again for {name}",
-                "deny": "declined", "why": "declined"}.get(picked, "declined")
-        print(f"  {C_DIM}↳ {said}{C_RESET}")
+            "\n".join(lines) + "\n", [("allow", "Allow"), ("deny", "Deny"), ("always", "Always"),
+                                      ("why", "Deny, and say what to do instead")], default="allow")
+        if picked in ("deny", "why", None):
+            print(f"  {C_DIM}{approval.declined(card)}{C_RESET}")
+        elif picked == "always":
+            print(f"  {C_DIM}Always allowed: {card['what']}{C_RESET}")
         if picked == "always":
             self.tool_perms[name] = "always"
             _save_persisted_perms(self.tool_perms)

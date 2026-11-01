@@ -1211,10 +1211,10 @@ class Relay(cc.Adapter):
             run = hub._busy.get(c) or hub._busy.get(str(chat)) or {}
             return bool(run.get("tap"))
 
-    def ask_voice(self, chat, text, aid, tap):
+    def ask_voice(self, chat, text, aid, tap, detail=None):
         """A step in a spoken turn the brain asks about in its own words: the card shows on the
         phone and the call waits on it, and nothing is read out from a template."""
-        return self.ask(chat, text, aid=aid, tap=tap, aloud=False)
+        return self.ask(chat, text, aid=aid, tap=tap, aloud=False, detail=detail)
 
     takes_detail = True                    # channel_core hands over the whole command
 

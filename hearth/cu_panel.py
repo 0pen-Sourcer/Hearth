@@ -35,6 +35,7 @@ FG = overlays.hexrgb("#ecebe7")
 FG_DIM = overlays.hexrgb("#a6a29b")
 FG_FAINT = overlays.hexrgb("#6e6a64")
 OK = overlays.hexrgb("#6fbf8e")
+ERR = overlays.hexrgb("#e2695f")
 ON_ACCENT = overlays.hexrgb("#16110e")
 
 W = 300                 # panel width, px at 100%
@@ -142,21 +143,35 @@ def finish(said: str = "Done") -> None:
         pass
 
 
-def ask(tool: str, args: Optional[Dict[str, Any]] = None, why: str = "", words: str = "") -> int:
-    """Show a question with Allow and Deny. Returns a token for answer()."""
+def ask(tool: str, args: Optional[Dict[str, Any]] = None, why: str = "", who: str = "") -> int:
+    """Show a question with Allow and Deny, said as every surface says it
+    (approval.py). Returns a token for answer()."""
     try:
-        detail = _detail(tool, args or {})
+        from .approval import card
+        c = card(tool, args or {}, who=who, why=why)
         with _lock:
             _S["seq"] += 1
             tok = _S["seq"]
-            _S["ask"] = {"token": tok, "tool": str(tool or ""), "words": str(words or ""),
-                         "detail": detail, "why": str(why or "")}
+            _S["ask"] = {"token": tok, "tool": str(tool or ""), "head": c["head"], "what": c["what"],
+                         "detail": c["detail"], "why": c["why"]}
             _S["collapsed_before_ask"] = _S["collapsed"]
             _S["collapsed"] = False             # a question needs to be seen
             _bump()
         return tok
     except Exception:
         return 0
+
+
+def declined(what: str, aside: bool = False) -> None:
+    """A step that was declined leaves one quiet line among the steps."""
+    try:
+        with _lock:
+            _S["seq"] += 1
+            _S["steps"].append({"id": _S["seq"], "name": "", "doing": "", "state": "declined",
+                                "done": f"{'Not run' if aside else 'Declined'}: {what}"})
+            _bump()
+    except Exception:
+        pass
 
 
 def answer(token: int) -> Optional[str]:
@@ -216,17 +231,6 @@ def make_way(x: int, y: int) -> None:
         p.make_way(x, y)
 
 
-def _detail(tool: str, args: Dict[str, Any]) -> str:
-    if not isinstance(args, dict) or not args:
-        return ""
-    if len(args) == 1:
-        v = next(iter(args.values()))
-        s = str(v)
-    else:
-        s = ", ".join(f"{k}: {v}" for k, v in args.items() if v not in (None, "", [], {}))
-    return " ".join(s.split())[:400]
-
-
 def _ensure() -> None:
     global _panel, _failed
     if _failed or not _WIN:
@@ -272,7 +276,7 @@ def _stroke(np, img, x, y, w, h, segs, half, rgb, alpha=1.0):
     overlays.paint(np, img[y0:y1, x0:x1], cov, rgb, alpha)
 
 
-def _mark(np, img, x, y, size, ink, dot_rgb):
+def _mark(np, img, x, y, size, ink, dot_rgb, alpha=1.0):
     """The brand mark (assets/mark.svg, viewBox -2 -2 64 64) in a size x size box."""
     k = size / 64.0
     x0, y0 = int(math.floor(x)), int(math.floor(y))
@@ -288,9 +292,9 @@ def _mark(np, img, x, y, size, ink, dot_rgb):
     d3 = np.where((mx <= 22.0) & (my <= 22.0), arc, 1e9)
     d = np.minimum(np.minimum(d1, d2), d3)
     cov = np.clip((3.0 - d) * k + 0.5, 0.0, 1.0)
-    overlays.paint(np, img[y0:y0 + n, x0:x0 + n], cov, ink)
+    overlays.paint(np, img[y0:y0 + n, x0:x0 + n], cov, ink, alpha)
     dd = (np.sqrt((mx - 38.0) ** 2 + (my - 38.0) ** 2) - 9.0) * k
-    overlays.paint(np, img[y0:y0 + n, x0:x0 + n], np.clip(0.5 - dd, 0.0, 1.0), dot_rgb)
+    overlays.paint(np, img[y0:y0 + n, x0:x0 + n], np.clip(0.5 - dd, 0.0, 1.0), dot_rgb, alpha)
 
 
 def _spinner(np, img, cx, cy, r, half, rgb, track, angle):
@@ -587,19 +591,16 @@ class _Panel(threading.Thread):
             cy = y + px(4)
             parts = []
             yy = cy + px(10)
-            parts.append(("title", "Allow this?", yy, px(18)))
-            yy += px(20)
-            words = a["words"] or a["tool"]
-            _, h1 = s.measure(words, f["small"], iw, 0x10 | 0x800)
-            h1 = min(h1, 2 * s.measure("Ag", f["small"], iw, 0)[1])
-            parts.append(("words", words, yy, h1))
-            yy += h1 + px(6)
-            if a["detail"] or a["tool"]:
-                mono = (a["tool"] + "  " + a["detail"]).strip() if a["detail"] else a["tool"]
+            lh = s.measure("Ag", f["title"], iw, 0)[1]
+            _, h1 = s.measure(a["head"], f["title"], iw, 0x10 | 0x800)
+            h1 = min(h1, 2 * lh)
+            parts.append(("head", a["head"], yy, h1))
+            yy += h1 + px(8)
+            if a["detail"]:
                 lh = s.measure("Ag", f["mono"], iw, 0)[1]
-                _, hm = s.measure(mono, f["mono"], iw - px(16), 0x10 | 0x800 | 0x2000)
-                hm = min(hm, 2 * lh)
-                parts.append(("detail", mono, yy, hm + px(12)))
+                _, hm = s.measure(a["detail"], f["mono"], iw - px(16), 0x10 | 0x800 | 0x2000)
+                hm = min(hm, 4 * lh)
+                parts.append(("detail", a["detail"], yy, hm + px(12)))
                 yy += hm + px(12) + px(6)
             if a["why"]:
                 lh = s.measure("Ag", f["small"], iw, 0)[1]
@@ -638,8 +639,12 @@ class _Panel(threading.Thread):
         # bottom-right anchored, MARGIN of air outside it
         bx1, by1 = Wc - px(MARGIN), Hc - px(MARGIN)
         bx0, by0 = bx1 - sw, by1 - sh
-        content = max(0.0, min(1.0, (m - 0.35) / 0.65))
+        # Nothing is clipped while it folds: the words fade out in the first part of
+        # the move, the card alone changes shape, and the mark fades in at the end.
+        content = max(0.0, min(1.0, (m - 0.72) / 0.28))
         content = content * content * (3 - 2 * content)
+        mark_a = max(0.0, min(1.0, (0.4 - m) / 0.4))
+        mark_a = mark_a * mark_a * (3 - 2 * mark_a)
         arr[...] = 0
         self.hits = []
         self.spinners = []
@@ -656,13 +661,14 @@ class _Panel(threading.Thread):
             icon[...] = BG
             cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
             ms = px(26)
-            _mark(np, icon, cx - ms / 2 - rx0, cy - ms / 2 - ry0, ms, FG, accent)
+            if mark_a > 0.0:
+                _mark(np, icon, cx - ms / 2 - rx0, cy - ms / 2 - ry0, ms, FG, accent, mark_a)
             cur = reg[..., :3].astype(np.float32)[..., ::-1]
             mixed = cur * content + icon * (1 - content)
             reg[..., :3] = np.clip(mixed[..., ::-1] + 0.5, 0, 255).astype(np.uint8)
             if m < 0.5:
                 self.hits = [(int(bx0), int(by0), int(bx1), int(by1), "expand")]
-            if content == 0.0 and snap["phase"] == "work":
+            if m < 0.02 and snap["phase"] == "work":          # the ring only once it has folded
                 self.spinners.append((cx, cy, sw / 2 - px(3.5), px(1.0), accent, None))
         # the shape and its border, then premultiplied
         # Inside, the card is opaque and unchanged: only its rim (corners and edges) is worked out.
@@ -750,18 +756,11 @@ class _Panel(threading.Thread):
             ix = ox + L["pad"] + 1
             if kind == "step" and st["state"] == "run":
                 self.spinners.append((ix + ic / 2, cy, ic / 2 - px(1.5), px(0.75), accent2, BORDER_STRONG))
-            elif kind == "step" and st["state"] == "err":
-                q = ic * 0.28
+            elif kind == "step" and st["state"] == "declined":
+                q = ic * 0.24
                 _stroke(np, img, ix, cy - ic / 2, ic, ic,
                         [(ix + ic / 2 - q, cy - q, ix + ic / 2 + q, cy + q),
                          (ix + ic / 2 - q, cy + q, ix + ic / 2 + q, cy - q)], px(0.8), FG_FAINT)
-            elif kind == "step":
-                _stroke(np, img, ix, cy - ic / 2, ic, ic,
-                        [(ix + ic * 0.18, cy + ic * 0.02, ix + ic * 0.42, cy + ic * 0.26),
-                         (ix + ic * 0.42, cy + ic * 0.26, ix + ic * 0.84, cy - ic * 0.24)], px(0.8), FG_FAINT)
-            else:
-                for i in range(3):
-                    overlays.fill_circle(np, img, ix + ic * (0.2 + 0.3 * i), cy, px(1.1), FG_FAINT)
         card = L["card"]
         if card:
             x0, y0, x1, y1, parts = card
@@ -844,16 +843,14 @@ class _Panel(threading.Thread):
                 continue
             running = st["state"] == "run"
             words = st["doing"] if running else st["done"]
-            T(words, (tx, y0, ox + Wp - L["pad"], y0 + L["row_h"]), f["small"], FG if running else FG_DIM,
-              SL | VC | ELL | NP)
+            col = {"run": FG, "err": ERR, "declined": FG_FAINT}.get(st["state"], FG_DIM)
+            T(words, (tx, y0, ox + Wp - L["pad"], y0 + L["row_h"]), f["small"], col, SL | VC | ELL | NP)
         if card:
             x0, y0, x1, y1, parts = card
             ix0, ix1 = ox + x0 + px(10), ox + x1 - px(10)
             for kind, t, yy, hh in parts:
-                if kind == "title":
-                    T(t, (ix0, oy + yy, ix1, oy + yy + hh), f["title"], FG, SL | VC | NP)
-                elif kind == "words":
-                    T(t, (ix0, oy + yy, ix1, oy + yy + hh), f["small"], FG, WB | NP | EC | ELL)
+                if kind == "head":
+                    T(t, (ix0, oy + yy, ix1, oy + yy + hh), f["title"], FG, WB | NP | EC | ELL)
                 elif kind == "detail":
                     T(t, (ix0 + px(8), oy + yy + px(6), ix1 - px(8), oy + yy + hh - px(6)), f["mono"], FG_DIM,
                       WB | NP | EC)                  # wraps as it was measured

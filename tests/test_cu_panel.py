@@ -272,8 +272,9 @@ headless._run_once = asking_turn
 asyncio.run(headless.run_once("Delete the copy", emit=lambda k, **f: events.append((k, f)),
                               permission_check=window_check))
 q = mid["ask"]
-check("the question shows on the panel with what it would do",
-      bool(q.get("ask")) and q["ask"]["tool"] == "delete_path" and "a.pdf" in q["ask"]["detail"])
+check(f"the question leads with who wants to do what, the path apart, never the tool's name ({q.get('ask')})",
+      bool(q.get("ask")) and q["ask"]["head"].endswith("wants to delete a file") and q["ask"]["detail"] == "a.pdf"
+      and "delete_path" not in q["ask"]["head"] + q["ask"]["detail"])
 check("Allow on the panel answers the window's own question", q.get("d") == "allow")
 check("the window is told the question was answered",
       any(k == "permission_settled" and f.get("id") == "perm_1" for k, f in events))
@@ -311,6 +312,56 @@ async def terminal_check(name, args):
 headless._run_once = cli_turn
 asyncio.run(headless.run_once("Run it", emit=lambda k, **f: None, permission_check=terminal_check))
 check("an async check (the terminal's) is answered from the panel too", mid["cli"] == "deny")
+rows = cu_panel.state()["steps"]
+check(f"a no leaves one quiet line among the steps ({rows[-1:]})",
+      rows and rows[-1]["state"] == "declined" and rows[-1]["done"] == "Declined: run a command")
+
+# ------------------------------------------------ one approval, said the same everywhere
+from hearth import approval, channel_core  # noqa: E402
+c = approval.card("delete_path", {"path": "C:/Bills/old.pdf"}, who="Inglen")
+check(f"the card says who wants what in plain words ({c})",
+      c["head"] == "Inglen wants to delete a file" and c["detail"] == "C:/Bills/old.pdf")
+c2 = approval.card("run_command", {"command": "npm run build"}, who="Codex")
+check("a command is the specifics, apart from the words",
+      c2["head"] == "Codex wants to run a command" and c2["detail"] == "npm run build")
+check("never a tool's raw name, even for a tool with no words of its own",
+      "_" not in approval.card("frob_widget", {"x": 1})["head"])
+lines = approval.terminal(c)
+check(f"the terminal says the same: the who-and-what line, the path indented ({lines})",
+      lines[0].strip() == c["head"] and lines[1] == "      C:/Bills/old.pdf")
+
+
+class _App:
+    name, takes_detail = "phone", True
+
+    def __init__(self):
+        self.asked = []
+
+    def ask(self, chat, text, detail=None):
+        self.asked.append((text, detail))
+
+
+from hearth import relay_bridge  # noqa: E402
+app = _App()
+hub = channel_core.Hub.__new__(channel_core.Hub)
+hub.a, hub._lock = app, threading.Lock()
+run = {}
+tools_mod = sys.modules["hearth.tools"]
+real_allows = tools_mod.mode_allows
+tools_mod.mode_allows = lambda n, a: False
+import hearth.call_me as _cm  # noqa: E402
+real_wait = getattr(_cm, "ask_wait", None)
+_cm.ask_wait = lambda s: 0.01
+try:
+    channel_core.Hub._ask(hub, "me", run, "delete_path", {"path": "C:/Bills/old.pdf"})
+finally:
+    tools_mod.mode_allows = real_allows
+    if real_wait:
+        _cm.ask_wait = real_wait
+text, detail = app.asked[0]
+pp = relay_bridge.ask_parts("Inglen", text, (detail or {}).get("cmd", ""))
+check(f"the phone card from a chat turn reads the same ({pp})",
+      pp["head"] == "Inglen wants to delete a file" and pp["cmd"] == "C:/Bills/old.pdf")
 
 headless._run_once = real_run
 sys.modules.pop("hearth.web", None)
