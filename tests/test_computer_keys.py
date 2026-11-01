@@ -136,6 +136,17 @@ try:
 finally:
     A.snapshot, A._last, T._HANDLERS["desktop_click"], A.available = saved
 
+# ------------------------------------------- a batch stays on the window it read
+asked = []
+saved = (A.snapshot, A.last_window, T._HANDLERS["desktop_click"])
+A.snapshot, A.last_window = (lambda cap=50, window="": (asked.append(window), {})[1]), "Calculator"
+T._HANDLERS["desktop_click"] = lambda p: "clicked"
+try:
+    T._execute_actions({"actions": [{"tool": "desktop_click", "name": "Three"}]})
+    check("a name is looked up in the window the model read, not whatever's in front", asked == ["Calculator"])
+finally:
+    A.snapshot, A.last_window, T._HANDLERS["desktop_click"] = saved
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

@@ -8081,7 +8081,7 @@ def _execute_actions(p: Dict) -> str:
         args = {k: v for k, v in s.items() if k != "tool"}
         if name in ("desktop_click", "desktop_type"):
             if args.get("idx") is not None and acted:
-                _a.snapshot(60, window=(args.get("window") or ""))
+                _a.snapshot(60, window=(args.get("window") or _a.last_window))
                 now = _a.same_control(args["idx"], seen.get(args["idx"]))
                 if now is None:
                     out.append(f"{i}. {name}: skipped. An earlier step changed the "
@@ -8090,9 +8090,9 @@ def _execute_actions(p: Dict) -> str:
                     break
                 args["idx"] = now
             if args.get("idx") is None and args.get("name"):
-                # Resolve the name against the window as it is now, not as it
-                # was when the model last looked at it.
-                _a.snapshot(60, window=(args.get("window") or ""))
+                # Resolve the name against the window as it is now, not as it was
+                # when the model last looked at it: the one it looked at, in front or not.
+                _a.snapshot(60, window=(args.get("window") or _a.last_window))
         try:
             res = _HANDLERS[name](args)
         except Exception as e:                     # a step must not kill the batch

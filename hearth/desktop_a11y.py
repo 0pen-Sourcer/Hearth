@@ -97,11 +97,16 @@ def unsupported_reason() -> str:
     return "not supported on this OS"
 
 
+last_window = ""      # the window the latest snapshot was asked for
+
+
 def snapshot(max_elements: int = 50, window: str = "") -> dict:
     """Walk a window's a11y tree; return interactive elements as
     {window, elements:[{idx,type,name,x,y}]}. Caches element refs for click().
     `window` (Windows only) targets a top-level window by name substring so a
     BACKGROUND window can be inspected + written to; empty = foreground window."""
+    global last_window
+    last_window = window
     if _WIN:
         return _snapshot_win(max_elements, window)
     if _LINUX:
