@@ -424,6 +424,42 @@ errs = [f.get("message") for k, f in got_ev if k == "error"]
 check(f"a live session that stops on a usage limit ends the turn at once with that error ({time.time() - t0:.1f} s, {errs})",
       rc == 1 and bool(errs) and "5-hour limit" in errs[0] and time.time() - t0 < 10)
 
+# What the phone sends into a live session reads as the person's own message, with its sender named.
+sent = os.path.join(tempfile.mkdtemp(), "pipe.txt")
+open(sent, "w").close()
+claude_sessions.deliver({"pipe": sent, "token": "t"}, "Is the build green?")
+lines = [json.loads(l) for l in open(sent, encoding="utf-8") if l.strip()]
+body = lines[1]["message"]["content"]
+check(f"it leads with where it came from and says whose words they are, with no 'Claude session' of its own ({body!r})",
+      body.startswith("From your phone:") and "Is the build green?" in body and "their own message" in body
+      and "Claude session" not in body and lines[1].get("from") == S.PHONE_FROM)
+wrapped = {"type": "user", "origin": {"kind": "peer"}, "message": {"content": "Another Claude session sent a message:\n"
+           + body + "\n\nThis came from another Claude session — not typed by your user"}}
+old = {"type": "user", "origin": {"kind": "peer"}, "message": {"content": "Another Claude session sent a message:\n"
+       "Sent by the user from their phone, through Inglen:\n\nHi there\n\nThis came from another Claude session"}}
+check("and it reads back as just their words, as do ones sent before",
+      S.from_phone(wrapped) == "Is the build green?" and S.from_phone(old) == "Hi there")
+
+# Who sets how a session runs: open on the PC, its own program (read from the session); run here, the phone.
+cfile = os.path.join(tempfile.mkdtemp(), "c.jsonl")
+with open(cfile, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"type": "user", "permissionMode": "acceptEdits", "message": {"content": "a"}}) + "\n")
+    f.write(json.dumps({"type": "assistant", "message": {"model": "claude-opus-5-5", "content": []}}) + "\n")
+    f.write(json.dumps({"type": "user", "permissionMode": "auto", "message": {"content": "b"}}) + "\n")
+    f.write(json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": "x" * 900000}]}}) + "\n")
+xfile = os.path.join(tempfile.mkdtemp(), "x.jsonl")
+with open(xfile, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"type": "turn_context", "payload": {"approval_policy": "on-request", "model": "gpt-6.1-sol",
+                        "effort": "high", "sandbox_policy": {"type": "danger-full-access"}}}) + "\n")
+cs, xs = S.pc_settings("claude-code", cfile), S.pc_settings("codex", xfile)
+check(f"a Claude Code session's own mode and model, the newest ones, past a long tool output ({cs})",
+      cs.get("pc_mode") == "Auto" and cs.get("pc_model") == "claude-opus-5-5")
+check(f"a Codex session's own sandbox, model and effort ({xs})",
+      xs.get("pc_mode") == "Full access" and xs.get("pc_model") == "gpt-6.1-sol" and xs.get("pc_effort") == "high")
+check("a session Inglen runs is set from the phone", S.control("claude-code", "no-such-session", cfile) == {"control": "here"})
+check("the effort picked for a session Inglen runs is passed to Claude Code",
+      claude_sessions.args_for(["claude"], "s1", "default", "", "high")[-4:-2] == ["--effort", "high"])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

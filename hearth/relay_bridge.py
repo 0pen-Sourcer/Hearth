@@ -1795,6 +1795,7 @@ class Bridge:
         text = (str(m.get("text") or "").strip() + agent_sessions.attached(m.get("paths") or [])).strip()
         # The model picked under the phone's message box for this session ('' is the session's own).
         model = re.sub(r"[^\w.:/@\[\]-]", "", str(m.get("model") or ""))[:120]
+        effort = re.sub(r"[^a-z]", "", str(m.get("effort") or "").lower())[:12]   # its thinking effort, picked the same way
         turn = secrets.token_hex(5)
 
         def push(obj: Dict[str, Any]) -> None:
@@ -1918,7 +1919,7 @@ class Bridge:
                 if call is not None:
                     call.begin()                     # its reply is spoken on the call
                 push({"type": "typing"})
-                asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain, model=model))
+                asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain, model=model, effort=effort))
             finally:
                 def finished() -> None:
                     for k in run["keys"]:
@@ -1927,7 +1928,7 @@ class Bridge:
                     left = drain()
                     if left:
                         # What came after its last turn ended starts the next one.
-                        self.agent_say(room, {"chat": cid, "text": "\n\n".join(left), "model": model})
+                        self.agent_say(room, {"chat": cid, "text": "\n\n".join(left), "model": model, "effort": effort})
                 self.loop.call_soon_threadsafe(finished)
 
         threading.Thread(target=go, daemon=True, name="relay-agent-session").start()
