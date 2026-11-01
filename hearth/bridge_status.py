@@ -101,16 +101,49 @@ _PATH_IN_TEXT = re.compile(
     r"|((?:(?<!\w)[A-Za-z]:[\\/]|(?<![\w.:/])/|(?<![\w.:/])~/)[^\s`\"'<>|]+\.[A-Za-z0-9]{1,5})")
 
 
-def files_in(text: str, max_bytes: int, limit: int = 4) -> list:
-    """Existing local files named in `text`, in order, under `max_bytes` each."""
+# A markdown link's target: [name](C:\a\b.pdf), [name](<C:\My files\b.pdf>), [x](file:///C:/a%20b.pdf),
+# or relative to the folder the reply was written in ([relay_bridge.py](hearth/relay_bridge.py#L12)).
+_MD_LINK = re.compile(r"\]\(\s*<?([^)<>\r\n]+?)>?\s*\)")
+_LINE_REF = re.compile(r"(?:#L\d+(?:-L?\d+)?|:\d+(?::\d+)?(?:-\d+)?)$")
+
+
+def _link_target(t: str, base: str) -> str:
+    from urllib.parse import unquote
+    t = t.strip()
+    if re.match(r"^[a-z][a-z0-9+.-]*://", t, re.I) and not t.lower().startswith("file://"):
+        return ""                                    # a web link
+    if t.lower().startswith("file://"):
+        t = unquote(re.sub(r"^file:/*", "", t, flags=re.I))
+        t = t if re.match(r"^[A-Za-z]:", t) else "/" + t
+    else:
+        t = unquote(t)
+    t = os.path.expanduser(t)
+    if not os.path.isabs(t):
+        if not base:
+            return ""
+        t = os.path.join(base, t)
+    return t
+
+
+def files_in(text: str, max_bytes: int, limit: int = 4, base: str = "", also: tuple = ()) -> list:
+    """Existing local files named in `text` (a path, or a markdown link to one; relative ones from `base`),
+    in order, under `max_bytes` each, that may be sent (places.servable: no key files, only from the
+    Files tab's places or `also`)."""
+    from .places import servable
     seen, out = set(), []
-    for m in _PATH_IN_TEXT.finditer(text or ""):
-        p = os.path.expanduser((m.group(1) or m.group(2)).strip().rstrip(".,;:)"))
+    found = [(m.start(), m.group(1) or m.group(2), False) for m in _PATH_IN_TEXT.finditer(text or "")]
+    found += [(m.start(), m.group(1), True) for m in _MD_LINK.finditer(text or "")]
+    for _, raw, link in sorted(found):
+        p = _link_target(raw, base) if link else os.path.expanduser(raw.strip().rstrip(".,;:)"))
+        if not p:
+            continue
+        if not os.path.isfile(p):
+            p = _LINE_REF.sub("", p)                 # file.py:120, file.py#L12-L30
         key = os.path.normcase(os.path.abspath(p)) if p else ""
         if not p or key in seen:
             continue
         try:
-            ok = os.path.isfile(p) and os.path.getsize(p) < max_bytes
+            ok = os.path.isfile(p) and os.path.getsize(p) < max_bytes and servable(p, also)
         except OSError:
             ok = False
         if ok:

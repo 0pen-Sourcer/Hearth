@@ -95,6 +95,26 @@ def root_for(place: str) -> Optional[str]:
     return roots().get(place)
 
 
+def servable(path: str, also: tuple = ()) -> bool:
+    """Whether a file may go to the phone or a chat app: never one that holds keys, and only from
+    the places the Files tab serves (Desktop, Documents, Downloads, the workspace and the folders
+    added to it) or `also` (an agent session's own project folder). Read lockdown keeps it to the
+    workspace."""
+    from . import secret_places
+    from .tools import WORKSPACE, list_extra_workspaces, path_within, read_locked
+    try:
+        real = os.path.realpath(path)
+    except (OSError, ValueError):
+        return False
+    if secret_places.what_path(real):
+        return False
+    inside = [WORKSPACE] + list(list_extra_workspaces())
+    if not read_locked():
+        inside += list(roots().values()) + [a for a in also if a]
+    # Both sides as the disk names them (a short 8.3 name and its long one are the same folder).
+    return any(path_within(real, os.path.realpath(r)) for r in inside)
+
+
 def touched(limit: int = 60) -> List[Dict]:
     """Files Inglen wrote, changed or moved lately, newest first, each once, still there."""
     from . import undo

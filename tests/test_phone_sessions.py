@@ -460,6 +460,27 @@ check("a session Inglen runs is set from the phone", S.control("claude-code", "n
 check("the effort picked for a session Inglen runs is passed to Claude Code",
       claude_sessions.args_for(["claude"], "s1", "default", "", "high")[-4:-2] == ["--effort", "high"])
 
+# Files a reply names go to the phone as cards, by the Files tab's rules: the session's own folder or the
+# Files tab's places; never a file that holds keys; never one from elsewhere.
+proj, elsewhere = tempfile.mkdtemp(prefix="proj-"), tempfile.mkdtemp(prefix="elsewhere-")
+os.makedirs(os.path.join(proj, "src"))
+for rel in ("src/app.py", "notes v2.md", ".env"):
+    open(os.path.join(proj, rel), "w").write("x = 1\n")
+open(os.path.join(elsewhere, "far.txt"), "w").write("far\n")
+reply = ("Fixed it in [app.py](src/app.py#L12), see [the notes](<notes v2.md>) and [keys](.env); "
+         f"the old copy is at {os.path.join(elsewhere, 'far.txt')}.")
+cards = RB.session_files(reply, proj)
+names = [c["name"] for c in cards]
+check(f"a reply's links to its own files become cards, relative to its folder, line numbers dropped ({names})",
+      names == ["app.py", "notes v2.md"])
+check("a file that holds keys, or one outside the places the Files tab serves, is never carded",
+      ".env" not in names and "far.txt" not in names and __import__("hearth.relay_media", fromlist=["card"]).card(os.path.join(proj, ".env")) is None)
+ws_file = os.path.join(os.environ["HEARTH_WORKSPACE"], "report.txt")
+open(ws_file, "w").write("done\n")
+from hearth.bridge_status import files_in  # noqa: E402
+check("Inglen's own reply naming a file in its workspace still sends it; one elsewhere doesn't",
+      files_in(f"Saved to {ws_file} and {os.path.join(elsewhere, 'far.txt')}", 10 ** 8) == [ws_file])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")
