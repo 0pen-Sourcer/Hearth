@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 Emit = Callable[..., None]
 
 
-def args_for(exe: List[str], sid: str, mode: str, model: str = "") -> List[str]:
+def args_for(exe: List[str], sid: str, mode: str, model: str = "", effort: str = "") -> List[str]:
     from .claude_brain import claude_settings
     from .shared_memory import NAME, launch
     # Inglen's tools for agents ride along (memory, and call_me so "call me when you're done" works).
@@ -26,18 +26,19 @@ def args_for(exe: List[str], sid: str, mode: str, model: str = "") -> List[str]:
     return list(exe) + ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                         "--include-partial-messages", "--permission-prompt-tool", "stdio",
                         "--permission-mode", mode, "--settings", json.dumps(claude_settings()),
-                        "--mcp-config", tools] + (["--model", model] if model else []) + (["--resume", sid] if sid else [])
+                        "--mcp-config", tools] + (["--model", model] if model else []) + (["--effort", effort] if effort else []) + (["--resume", sid] if sid else [])
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
-              mode: str = "default", drain: Optional[Callable[[], List[str]]] = None, model: str = "") -> int:
+              mode: str = "default", drain: Optional[Callable[[], List[str]]] = None, model: str = "",
+              effort: str = "") -> int:
     """Resume session `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _result_text, _steps_of
     from .channel_core import _what, out_of
     from .claude_brain import _QUIET_TOOLS, hearth_view, agent_env
 
     proc = await asyncio.create_subprocess_exec(
-        *args_for(exe, sid, mode, model), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        *args_for(exe, sid, mode, model, effort), cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024, env=agent_env(),
         creationflags=0x08000000 if sys.platform == "win32" else 0)
     errs = asyncio.ensure_future(proc.stderr.read())
@@ -155,12 +156,8 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
         if line is not None:
             line.cancel()
             await asyncio.gather(line, return_exceptions=True)
-        if proc.returncode is None:
-            try:
-                proc.kill()
-                await proc.wait()
-            except ProcessLookupError:
-                pass
+        from .aproc import reap
+        await reap(proc)
         errs.cancel()
         await asyncio.gather(errs, return_exceptions=True)
     if failed:
@@ -172,12 +169,12 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
 
 def deliver(inbox: Dict[str, Any], words: str) -> bool:
     """One message into a live session's messaging inbox: the token line, then the message line."""
-    from .agent_sessions import PHONE_MARK
+    from .agent_sessions import PHONE_FROM, phone_words
     try:
         with open(inbox["pipe"], "r+b", buffering=0) as f:
             f.write((json.dumps({"type": "auth", "token": inbox["token"]}) + "\n").encode("utf-8"))
-            f.write((json.dumps({"type": "user", "message": {"role": "user", "content": f"{PHONE_MARK}\n\n{words}"}})
-                     + "\n").encode("utf-8"))
+            f.write((json.dumps({"type": "user", "from": PHONE_FROM,
+                                 "message": {"role": "user", "content": phone_words(words)}}) + "\n").encode("utf-8"))
         return True
     except OSError:
         return False

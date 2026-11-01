@@ -306,6 +306,7 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
     sid, result, used = None, None, ""
     gap = False
     stretch = ""                                  # the text streamed since the last tool call
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -378,6 +379,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
         return 1
     finally:
         _base._checks.pop(_base._TOKEN, None)
+        from .aproc import reap
+        await reap(proc)
 
     if sid:
         _base._save_session(key, sid, last=_base.asked(prompt))

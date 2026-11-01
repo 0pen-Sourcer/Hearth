@@ -833,9 +833,18 @@ def _known_folders() -> List[str]:
     return seen
 
 
-# What Inglen writes into a live Claude Code session for the person, and how Claude Code wraps a
-# message that came in through its messaging inbox (a peer's, as far as it knows).
-PHONE_MARK = "Sent by the user from their phone, through Inglen:"
+# What Inglen writes into a live Claude Code session for the person. Claude Code wraps whatever
+# comes in through its messaging inbox as a peer session's message ("Another Claude session sent
+# a message: ..."), so the words lead with where they came from and end saying whose they are.
+PHONE_MARK = "From your phone:"
+PHONE_NOTE = "(Typed by the person on their phone and passed into this session by Inglen: their own message.)"
+PHONE_FROM = "your phone, through Inglen"     # the sender Claude Code records for it (origin.from)
+_OLD_MARKS = ("Sent by the user from their phone, through Inglen:",)
+
+
+def phone_words(words: str) -> str:
+    """The text of a phone message as it goes into a live Claude Code session."""
+    return f"{PHONE_MARK}\n\n{words}\n\n{PHONE_NOTE}"
 
 
 def from_phone(o: Dict[str, Any]) -> str:
@@ -843,12 +852,18 @@ def from_phone(o: Dict[str, Any]) -> str:
     if not (o.get("type") == "user" and (o.get("origin") or {}).get("kind") == "peer"):
         return ""
     text = _text_of((o.get("message") or {}).get("content"))
-    i = text.find(PHONE_MARK)
-    if i < 0:
+    for mark in (PHONE_MARK,) + _OLD_MARKS:
+        i = text.find(mark)
+        if i >= 0:
+            break
+    else:
         return ""
-    said = text[i + len(PHONE_MARK):]
-    end = said.find("\n\nThis came from another Claude session")
-    return (said[:end] if end >= 0 else said).strip()
+    said = text[i + len(mark):]
+    for end_at in ("\n\n" + PHONE_NOTE, "\n\nThis came from another Claude session"):
+        end = said.find(end_at)
+        if end >= 0:
+            said = said[:end]
+    return said.strip()
 
 
 def claude_inbox(sid: str) -> Dict[str, Any]:
@@ -1161,8 +1176,98 @@ def transcript(cid: str, last: int = 60) -> Dict[str, Any]:
         mtime = 0
     return {"chat": cid, "title": d.get("title") or "", "source": agent, "agent": agent, "label": label(agent),
             "working": working(msgs, mtime), **_reach(agent, sid, d.get("path") or ""),
+            **control(agent, sid, d.get("path") or ""),
             "cwd": d.get("cwd") or "", "messages": msgs[-last:], "more": max(0, len(msgs) - last),
             **({"earlier": True} if cut else {})}
+
+
+# Each agent's own permission modes, as the phone names them: (short, what it means).
+_CLAUDE_MODES = {
+    "default": ("Asks", "asks before edits and commands"),
+    "acceptEdits": ("Accepts edits", "makes edits itself and asks before commands"),
+    "plan": ("Plan mode", "reads and plans, and changes nothing"),
+    "auto": ("Auto", "acts on its own and asks only about risky steps"),
+    "bypassPermissions": ("Bypasses permissions", "runs every step without asking"),
+    "dontAsk": ("Doesn't ask", "runs what its settings allow and refuses the rest"),
+}
+_CODEX_SANDBOX = {
+    "read-only": ("Read only", "reads files and asks before changing anything"),
+    "workspace-write": ("Auto", "works in the project folder and asks before going beyond it"),
+    "danger-full-access": ("Full access", "runs every step without asking"),
+}
+
+
+def _lines_back(path: str, most: int):
+    """A file's whole lines from its end backwards, reading no more than `most` bytes."""
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return
+    with f:
+        end = f.seek(0, 2)
+        pos, rest, read = end, b"", 0
+        while pos > 0 and read < most:
+            step = min(512 * 1024, pos)
+            pos -= step
+            f.seek(pos)
+            chunk = f.read(step) + rest
+            read += step
+            lines = chunk.split(b"\n")
+            rest = lines.pop(0) if pos > 0 else b""
+            for raw in reversed(lines):
+                if raw.strip():
+                    yield raw
+        if rest.strip() and pos == 0:
+            yield rest
+
+
+def control(agent: str, sid: str, path: str) -> Dict[str, str]:
+    """Who sets how a session runs. 'pc' when it is open on the PC and the phone's words go into it there
+    (Claude Code's inbox, Codex's queue): that program's own permission mode, model and effort apply,
+    read from the session. 'here' when Inglen runs it: the approval switch, model and effort picked apply."""
+    live = False
+    if agent == "claude-code":
+        live = bool(claude_inbox(sid))
+    elif agent == "codex" and _exe(agent):
+        state = live_state(agent, sid, path)
+        live = state == "open" or (state == "recent" and _RAN_HERE.get((agent, sid)) != _mtime(path))
+    if not live:
+        return {"control": "here"}
+    return {"control": "pc", **pc_settings(agent, path)}
+
+
+def pc_settings(agent: str, path: str) -> Dict[str, str]:
+    """The permission mode, model and effort a session open on the PC last ran with, from its own file."""
+    mode = model = effort = ""
+    for raw in _lines_back(path, 16 * 1024 * 1024):
+        if mode and (model or agent != "claude-code"):
+            break
+        if agent == "claude-code" and b"permissionMode" not in raw and (model or b'"model"' not in raw):
+            continue
+        if agent == "codex" and b'"turn_context"' not in raw:
+            continue
+        try:
+            o = json.loads(raw.decode("utf-8", "replace"))
+        except ValueError:
+            continue
+        if not isinstance(o, dict) or o.get("isSidechain"):
+            continue
+        if agent == "claude-code":
+            mode = mode or str(o.get("permissionMode") or "")
+            m = (o.get("message") or {}).get("model") if o.get("type") == "assistant" else ""
+            if m and m != "<synthetic>":
+                model = model or str(m)
+            if mode and model:
+                break
+        else:
+            p = o.get("payload") or {}
+            mode = str((p.get("sandbox_policy") or {}).get("type") or "")
+            model, effort = str(p.get("model") or ""), str(p.get("effort") or "")
+            break
+    named = (_CLAUDE_MODES if agent == "claude-code" else _CODEX_SANDBOX).get(mode)
+    out = {"pc_mode": named[0] if named else (mode or ""), "pc_mode_about": named[1] if named else "",
+           "pc_model": model, "pc_effort": effort}
+    return {k: v for k, v in out.items() if v}
 
 
 def _reach(agent: str, sid: str, path: str) -> Dict[str, str]:
@@ -1193,7 +1298,7 @@ def _mode() -> str:
         return "ask"
 
 
-async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None, model: str = "") -> int:
+async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None, model: str = "", effort: str = "") -> int:
     """Send `text` into a session: its agent program carries it on in the session's own
     folder, with the session's own model and permissions. What the agent asks about
     comes to `ask`; what `drain` gives while it works reaches the turn it is on (Codex
@@ -1217,7 +1322,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None, model: s
     draft = agent_launch.DRAFTS.pop(cid, None)
     if draft:
         try:
-            return await agent_launch.start(draft, text, emit, ask, drain=drain, model=model)
+            return await agent_launch.start(draft, text, emit, ask, drain=drain, model=model, effort=effort)
         finally:
             _remember(ran)
     d = read(agent, sid)
@@ -1263,7 +1368,7 @@ async def say(cid: str, text: str, emit: Emit, ask: Ask, *, drain=None, model: s
         emit("error", message=f"{name} isn't installed on this PC any more.")
         return 2
     try:
-        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain, model=model)
+        return await run_in(agent, exe, sid, cwd, text, emit, ask, drain=drain, model=model, effort=effort)
     finally:
         _remember(ran)
 
@@ -1283,7 +1388,7 @@ def _remember(ran: List[Tuple[str, str]]) -> None:
 
 
 async def run_in(agent: str, exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ask, *,
-                 drain=None, model: str = "") -> int:
+                 drain=None, model: str = "", effort: str = "") -> int:
     """Run `text` in the agent's own harness: session `sid`, or a new one in `cwd` when sid is empty.
     `model` (one of claude_brain.agent_models' ids) runs this turn on that model; '' keeps the session's."""
     try:
@@ -1291,10 +1396,10 @@ async def run_in(agent: str, exe: List[str], sid: str, cwd: str, text: str, emit
             from . import claude_sessions
             return await claude_sessions.run(exe, sid, cwd, text, emit, ask,
                                              mode="acceptEdits" if _mode() in ("edits", "auto") else "default",
-                                             drain=drain, model=model)
+                                             drain=drain, model=model, effort=effort)
         if agent == "codex":
             from . import codex_sessions
-            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain, model=model)
+            return await codex_sessions.run(exe, sid, cwd, text, emit, ask, drain=drain, model=model, effort=effort)
         return await _say_acp(agent, sid, cwd, text, emit, ask, model=model)
     except Exception as e:
         emit("error", message=f"{label(agent)} didn't run: {type(e).__name__}: {e}")
@@ -1315,9 +1420,8 @@ async def _queue_codex(exe: List[str], sid: str, cwd: str, text: str) -> bool:
     except Exception:
         return False
     finally:
-        if proc is not None and proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+        from .aproc import reap
+        await reap(proc)
 
 
 def acp_tools() -> List[Dict[str, Any]]:
@@ -1423,6 +1527,8 @@ async def _say_acp(agent: str, sid: str, cwd: str, text: str, emit: Emit, ask: A
             await stderr
         except ProcessLookupError:
             pass
+        from .aproc import reap
+        await reap(proc)
     reply = "".join(parts).strip()
     if reply:
         emit("text", text=reply)

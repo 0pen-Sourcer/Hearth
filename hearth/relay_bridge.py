@@ -355,7 +355,24 @@ def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
                 c = relay_media.card(path)
                 if c is not None:
                     st["file"] = c
+        if msg.get("role") == "assistant" and not msg.get("error"):
+            cards = session_files(msg.get("text") or "", got.get("cwd") or "")
+            if cards:
+                msg["files"] = cards
     return got
+
+
+def session_files(text: str, cwd: str) -> List[Dict[str, Any]]:
+    """Cards for the files an agent's reply names (a path, or a markdown link, relative to its folder):
+    the ones the Files tab could serve, or in the session's own project folder."""
+    from . import relay_media
+    from .bridge_status import files_in
+    cards = []
+    for p in files_in(text, relay_media.MAX_FILE, base=cwd, also=(cwd,) if cwd else ()):
+        c = relay_media.card(p)
+        if c is not None:
+            cards.append(c)
+    return cards
 
 
 def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
@@ -1795,6 +1812,7 @@ class Bridge:
         text = (str(m.get("text") or "").strip() + agent_sessions.attached(m.get("paths") or [])).strip()
         # The model picked under the phone's message box for this session ('' is the session's own).
         model = re.sub(r"[^\w.:/@\[\]-]", "", str(m.get("model") or ""))[:120]
+        effort = re.sub(r"[^a-z]", "", str(m.get("effort") or "").lower())[:12]   # its thinking effort, picked the same way
         turn = secrets.token_hex(5)
 
         def push(obj: Dict[str, Any]) -> None:
@@ -1881,6 +1899,14 @@ class Bridge:
                 push({"type": "text", "text": f.get("text") or "", "note": True})
             elif kind == "text":
                 push({"type": "text", "text": f.get("text") or ""})
+                try:
+                    # The files its reply names, as cards the phone opens from here (the Files tab's rules).
+                    got = agent_sessions.parse_chat(cid)
+                    where = (agent_sessions.read(*got) or {}).get("cwd") or "" if got else ""
+                    for c in session_files(f.get("text") or "", where):
+                        push({"type": "file", **c})
+                except Exception:
+                    pass
                 self.adapter.finished(room.chat, name, f.get("text") or "", cid, turn)
                 _log(f"{name} session {cid[-8:]} replied")
                 _activity("agent_session_reply", agent=agent, chat=cid, chars=len(f.get("text") or ""))
@@ -1918,7 +1944,7 @@ class Bridge:
                 if call is not None:
                     call.begin()                     # its reply is spoken on the call
                 push({"type": "typing"})
-                asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain, model=model))
+                asyncio.run(agent_sessions.say(cid, text, emit, ask, drain=drain, model=model, effort=effort))
             finally:
                 def finished() -> None:
                     for k in run["keys"]:
@@ -1927,7 +1953,7 @@ class Bridge:
                     left = drain()
                     if left:
                         # What came after its last turn ended starts the next one.
-                        self.agent_say(room, {"chat": cid, "text": "\n\n".join(left), "model": model})
+                        self.agent_say(room, {"chat": cid, "text": "\n\n".join(left), "model": model, "effort": effort})
                 self.loop.call_soon_threadsafe(finished)
 
         threading.Thread(target=go, daemon=True, name="relay-agent-session").start()

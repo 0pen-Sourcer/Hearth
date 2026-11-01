@@ -38,7 +38,7 @@ def check(label, cond):
         FAILS.append(label)
 
 
-pic = os.path.join(HOME, "chart.png")
+pic = os.path.join(os.environ["HEARTH_WORKSPACE"], "chart.png")   # where Inglen writes: a place the phone may open
 Image.effect_noise((1600, 1200), 80).convert("RGB").save(pic)
 big = os.path.join(HOME, "video.mp4")
 with open(big, "wb") as f:

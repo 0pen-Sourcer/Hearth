@@ -46,7 +46,7 @@ def lifted(resumed: Dict[str, Any], cwd: str) -> Dict[str, Any]:
 
 
 async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Callable[[str], bool], *,
-              drain: Optional[Callable[[], List[str]]] = None, model: str = "") -> int:
+              drain: Optional[Callable[[], List[str]]] = None, model: str = "", effort: str = "") -> int:
     """Resume thread `sid` (or start one in `cwd` when sid is empty) and run `text` as a turn."""
     from .agent_sessions import _step
     from .channel_core import _what, out_of, question_for
@@ -113,7 +113,8 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
                 return None
             model = _NEXT_MODEL.pop(tid, "")
             r = await rpc.call("turn/start", {"threadId": tid, "input": [{"type": "text", "text": words}], **override,
-                                              **({"model": model} if model else {})}, 60)
+                                              **({"model": model} if model else {}),
+                                              **({"effort": effort} if effort else {})}, 60)
             return str((r.get("turn") or {}).get("id") or "")
 
         turn_id = await begin(text)
@@ -195,14 +196,8 @@ async def run(exe: List[str], sid: str, cwd: str, text: str, emit: Emit, ask: Ca
     finally:
         reader.cancel()
         await asyncio.gather(reader, return_exceptions=True)
-        try:
-            if proc.stdin and not proc.stdin.is_closing():
-                proc.stdin.close()
-            if proc.returncode is None:
-                proc.kill()
-            await asyncio.wait_for(proc.wait(), 5)
-        except (ProcessLookupError, asyncio.TimeoutError):
-            pass
+        from .aproc import reap
+        await reap(proc, 5)
     reply = "\n\n".join(t for t in replies.values() if t).strip()
     if failure:
         emit("error", message=f"Codex stopped: {failure}"[:600])

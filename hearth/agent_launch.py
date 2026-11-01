@@ -81,10 +81,10 @@ def reserve(agent: str, cwd: str, text: str) -> Dict[str, Any]:
     return row
 
 
-async def start(row: Dict[str, Any], text: str, emit, ask, *, drain=None, model: str = "") -> int:
+async def start(row: Dict[str, Any], text: str, emit, ask, *, drain=None, model: str = "", effort: str = "") -> int:
     from . import agent_sessions as S
     exe = S._exe(row["agent"])
     if not exe:
         emit("error", message=f"{row['label']} isn't installed on this PC any more.")
         return 2
-    return await S.run_in(row["agent"], exe, "", row["cwd"], text, emit, ask, drain=drain, model=model)
+    return await S.run_in(row["agent"], exe, "", row["cwd"], text, emit, ask, drain=drain, model=model, effort=effort)

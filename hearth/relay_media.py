@@ -109,6 +109,9 @@ def card(path: str) -> Optional[Dict[str, Any]]:
         return None
     if not os.path.isfile(path) or st.st_size > MAX_FILE:
         return None
+    from .secret_places import what_path
+    if what_path(path):
+        return None                      # a file that holds keys never goes to the phone
     name = os.path.basename(path)
     mid = _id_for(path)
     with _LOCK:

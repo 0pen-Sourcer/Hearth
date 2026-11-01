@@ -990,6 +990,7 @@ async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, 
     from .codex_brain import _Rpc, _shown_command, _mcp_text
     flags = (["-c", "sandbox_workspace_write.network_access=true"] if allow == "auto"
              else ["-c", "features.shell_tool=false", "-c", "features.unified_exec=false"])
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *head, "app-server", *flags, cwd=work, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -1081,14 +1082,8 @@ async def _codex_app(head: List[str], prompt: str, work: str, allow: str, emit, 
         with _OPEN_LOCK:
             _STEER.pop(agent_id, None)
         reader.cancel()
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(proc.wait(), 10)
-        except Exception:
-            pass
+        from .aproc import reap
+        await reap(proc)
 
 
 

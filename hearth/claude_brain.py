@@ -1307,6 +1307,7 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     streamed = False
     gap = False                                   # a tool call came between two stretches of text
     writing: Optional[Dict[str, Any]] = None      # the tool call being generated right now
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=cwd, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -1427,6 +1428,8 @@ async def _run_claude(prompt: str, *, emit, history: Optional[List[Dict[str, Any
     finally:
         _checks.pop(_TOKEN, None)
         _turns.pop(_TOKEN, None)
+        from .aproc import reap
+        await reap(proc)
 
     if sid:
         _save_session(key, sid, last=asked(prompt))
