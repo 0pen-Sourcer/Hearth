@@ -270,7 +270,10 @@ def stopped_note(name: str, error: Any) -> str:
         m = re.search(r"(?:resets|try again)(?:\s+(?:at|on))?\s+([^·(]+?)\s*(?:\(|·|\.(?:\s|$)|$)", t, re.I)
         when = m.group(1).strip(" .,") if m else ""
         when = re.sub(r"(\d)\s*([ap])\.?m\.?\b", lambda g: f"{g.group(1)} {g.group(2).lower()}m", when, flags=re.I)
-        return f"{name} stopped: its usage limit " + (f"resets at {when}" if when else "was reached")
+        kind = re.search(r"\b(weekly|daily|monthly|hourly|\d+[- ]hours?|session)\s+(?:usage\s+)?limit\b", t, re.I)
+        what = f"{kind.group(1).lower().replace(' ', '-')} limit" if kind else "usage limit"
+        at = "on" if re.match(r"(?i)(mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}[/-])", when) else "at"
+        return f"{name} stopped: its {what} " + (f"resets {at} {when}" if when else "was reached")
     t = re.sub(r"^(?:API Error|Error)\s*:?\s*", "", t, flags=re.I)
     if not t:
         return f"{name} stopped."
@@ -1088,7 +1091,7 @@ class AgentWatch:
             return True
         body = str(n.get("body") or "").strip()
         if n.get("stopped"):
-            return "stopped: its usage limit" not in body
+            return not re.search(r"stopped: its [\w-]+ limit", body)
         return len(body) >= 24 and not TRIVIAL.match(body)
 
 

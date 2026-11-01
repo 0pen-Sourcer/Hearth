@@ -110,7 +110,7 @@ check("a turn whose whole reply is \"No response requested.\" tells the phone no
       note_for("No response requested.") is None)
 lim = note_for("You've hit your 5-hour limit · resets 5:30pm", error=True)
 check(f"a usage limit is a notification, in plain words, and no call ({(lim or {}).get('body')})",
-      lim is not None and lim["body"] == "Claude Code stopped: its usage limit resets at 5:30 pm"
+      lim is not None and lim["body"] == "Claude Code stopped: its 5-hour limit resets at 5:30 pm"
       and bridge.agent_call(lim, idle=AWAY) is None)
 
 # One ring per session per stretch of work, however many turns end in it.

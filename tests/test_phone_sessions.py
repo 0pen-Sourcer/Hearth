@@ -389,10 +389,12 @@ check(f"a step the brain asks about in its own words shows quietly; one asked fr
 
 # An agent's error reads as plain words from that agent, on the phone and in its notification.
 said = [RB.stopped_note("Claude Code", "You've hit your 5-hour limit · resets 5:30pm"),
-        RB.stopped_note("Codex", "You've hit your usage limit. Upgrade to Pro or try again at Nov 4th, 2026 2:59 PM.")]
-check(f"a usage limit says when it resets ({said})",
-      said == ["Claude Code stopped: its usage limit resets at 5:30 pm",
-               "Codex stopped: its usage limit resets at Nov 4th, 2026 2:59 pm"])
+        RB.stopped_note("Codex", "You've hit your usage limit. Upgrade to Pro or try again at Nov 4th, 2026 2:59 PM."),
+        RB.stopped_note("Claude Code", "You've hit your weekly limit · resets 1:30am (Asia/Kolkata)")]
+check(f"a usage limit says which limit and when it resets ({said})",
+      said == ["Claude Code stopped: its 5-hour limit resets at 5:30 pm",
+               "Codex stopped: its usage limit resets on Nov 4th, 2026 2:59 pm",
+               "Claude Code stopped: its weekly limit resets at 1:30 am"])
 
 # A session open on the PC that stops on its own error (a usage limit) ends the phone's turn there and then.
 tpath = os.path.join(tempfile.mkdtemp(), "s.jsonl")
