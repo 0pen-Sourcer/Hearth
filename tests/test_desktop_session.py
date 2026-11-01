@@ -18,6 +18,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from hearth import activity_hud, claude_brain, desktop_session as ds, headless, tools  # noqa: E402
+from hearth import cu_panel  # noqa: E402
+
+cu_panel._ensure = lambda: None                    # the steps panel is never drawn here
 
 FAILS: list = []
 

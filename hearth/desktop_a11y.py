@@ -222,6 +222,15 @@ def _walk_win(root, max_elements: int) -> list:
     return out
 
 
+def _overlay(ctrl) -> bool:
+    """One of Inglen's own overlays (overlays.py), never read as a window."""
+    try:
+        from .overlays import is_overlay
+        return is_overlay(ctrl.NativeWindowHandle)
+    except Exception:
+        return False
+
+
 def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
     global _native_a11y_enabled
     try:
@@ -239,7 +248,7 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
         # pulled to the foreground.
         try:
             w = auto.WindowControl(searchDepth=1, SubName=window_name)
-            if w.Exists(1.0):
+            if w.Exists(1.0) and not _overlay(w):
                 root = w
         except Exception:
             root = None
@@ -247,7 +256,7 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
             try:
                 wl = window_name.lower()
                 for w in auto.GetRootControl().GetChildren():
-                    if wl in (w.Name or "").lower():
+                    if wl in (w.Name or "").lower() and not _overlay(w):
                         root = w
                         break
             except Exception:
@@ -258,6 +267,8 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
     if root is None:
         try:
             root = auto.GetForegroundControl()
+            if _overlay(root):
+                root = None
         except Exception:
             root = None
     if root is None:
@@ -573,6 +584,11 @@ def click(idx=None, name=None, double=False, button="left"):
     if target.get("backend") == "uia":
         ctrl = target["ctrl"]
         _raise_owner(ctrl)
+        try:
+            from .overlays import make_way
+            make_way(target["x"], target["y"])
+        except Exception:
+            pass
         try:
             if double:
                 ctrl.DoubleClick(simulateMove=True)

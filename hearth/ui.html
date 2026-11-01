@@ -5215,7 +5215,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Activity overlay</div>
-            <div class="hint">While Inglen works the desktop, a small label at the top of the screen says what it is doing. It never takes focus or blocks a click.</div>
+            <div class="hint">While Inglen works the desktop, a small label at the top of the screen and a panel at the right edge show what it is doing, with Stop. Neither takes focus or blocks a click.</div>
           </div>
           <div class="switch" data-key="activity_hud"></div>
         </div>
@@ -12235,6 +12235,12 @@ async function send(forced = null, displayAs = null, opts = {}) {
     if (ev.type === 'permission_request') {
       // Inline strip above the input - keyboard-driven, no center modal.
       showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '', !!ev.aloud, !!ev.tap);
+      return;
+    }
+
+    if (ev.type === 'permission_settled') {
+      // Answered on the desktop panel: the strip here has nothing left to ask.
+      if (pendingPermId && pendingPermId === ev.id) hideInlinePermission();
       return;
     }
 

@@ -61,6 +61,11 @@ def begin(tool: str, args: Optional[Dict[str, Any]] = None) -> None:
         pass
     if first and _enabled():
         _Glow.show()
+        try:
+            from . import cu_panel
+            cu_panel.show()
+        except Exception:
+            pass
 
 
 def raised(hwnd: int) -> None:
@@ -85,6 +90,11 @@ def end(said: str = "Done") -> bool:
         activity_hud.done(said)
     except Exception:
         pass
+    try:
+        from . import cu_panel
+        cu_panel.finish(said)
+    except Exception:
+        pass
     _chime()
     for h in flashing:
         _stop_flash(h)
@@ -95,6 +105,185 @@ def end(said: str = "Done") -> bool:
 
 def is_active() -> bool:
     return _active
+
+
+# ---------------------------------------------------------------- the turn, for the panel
+
+_owner: Optional[object] = None
+
+
+class _Emit:
+    """The turn's emit, also feeding the panel its steps."""
+
+    def __init__(self, emit, pending: Dict[str, Any]):
+        self.emit, self.pending = emit, pending
+
+    def __call__(self, kind: str, **f) -> Any:
+        try:
+            from . import cu_panel
+            if kind == "tool_call" and f.get("name"):
+                w = f.get("words")
+                if not isinstance(w, dict):
+                    from .step_words import words
+                    w = words(f["name"], f.get("args"), str(f.get("says") or ""))
+                cu_panel.step_start(f["name"], w.get("doing", ""), w.get("done", ""))
+            elif kind == "tool_result" and f.get("name"):
+                said = str(f.get("content") or "").lstrip().lower()
+                cu_panel.step_end(f["name"], not said.startswith(("error", "not run")))
+            elif kind == "permission_request" and f.get("id"):
+                self.pending["id"] = f.get("id")
+        except Exception:
+            pass
+        return self.emit(kind, **f) if self.emit else None
+
+    def __getattr__(self, item):
+        return getattr(self.emit, item)
+
+
+def _deliver(req_id: str, decision: str) -> bool:
+    """An answer given on the panel, handed to the window's own waiting question."""
+    web = sys.modules.get("hearth.web")
+    q = getattr(web, "_permission_queues", {}).get(req_id) if web else None
+    if q is None:
+        return False
+    try:
+        q.put(decision)
+        return True
+    except Exception:
+        return False
+
+
+def _asked(name: str, args: Dict[str, Any]) -> int:
+    from . import cu_panel
+    try:
+        from .auto_review import why
+        because = why(name, args)
+    except Exception:
+        because = ""
+    try:
+        from .step_words import doing
+        said = doing(name, args)
+    except Exception:
+        said = name
+    return cu_panel.ask(name, args, because, said)
+
+
+def _check_wrap(check, emit, pending: Dict[str, Any]):
+    """The turn's approval check, with the question also on the panel while it
+    is up. Whichever answers first, the panel or the surface, wins."""
+    import asyncio
+    import contextvars
+    import inspect
+    from . import cu_panel
+
+    def settled(rid, ans):
+        if rid and emit is not None:
+            try:
+                emit("permission_settled", id=rid, decision=ans)
+            except Exception:
+                pass
+
+    if inspect.iscoroutinefunction(check):
+        async def wrapped_async(name, args):
+            if not _active:
+                return await check(name, args)
+            pending["id"] = None
+            task = asyncio.ensure_future(check(name, args))
+            await asyncio.wait({task}, timeout=0.25)
+            if task.done():
+                return task.result()
+            tok = _asked(name, args)
+            try:
+                while not task.done():
+                    ans = cu_panel.answer(tok)
+                    if ans:
+                        task.cancel()
+                        settled(pending.get("id"), ans)
+                        return ans
+                    await asyncio.wait({task}, timeout=0.05)
+                return task.result()
+            finally:
+                cu_panel.clear_ask(tok)
+        return wrapped_async
+
+    def wrapped(name, args):
+        if not _active:
+            return check(name, args)
+        pending["id"] = None
+        box: Dict[str, Any] = {}
+        done = threading.Event()
+        ctx = contextvars.copy_context()
+
+        def run():
+            try:
+                box["r"] = ctx.run(check, name, args)
+            except Exception as e:
+                box["e"] = e
+            finally:
+                done.set()
+        threading.Thread(target=run, daemon=True, name="hearth-approval").start()
+
+        def result():
+            if "e" in box:
+                raise box["e"]
+            return box.get("r")
+        if done.wait(0.25):
+            return result()
+        tok = _asked(name, args)
+        try:
+            while not done.wait(0.05):
+                ans = cu_panel.answer(tok)
+                if ans:
+                    rid = pending.get("id")
+                    if rid and _deliver(rid, ans) and done.wait(5.0):
+                        out = result()               # the window keeps its own bookkeeping
+                    else:
+                        out = ans
+                    settled(rid, ans)
+                    return out
+            return result()
+        finally:
+            cu_panel.clear_ask(tok)
+    return wrapped
+
+
+def watch(prompt: str, kw: Dict[str, Any]):
+    """Feed the panel from a turn: its steps, its questions, and Stop. Returns
+    the turn's arguments to use and a token for unwatch(). One turn at a time:
+    one that starts while another runs is left as it is."""
+    global _owner
+    tok = object()
+    with _LOCK:
+        if _owner is not None:
+            return kw, None
+        _owner = tok
+    try:
+        from . import cu_panel
+        cu_panel.begin_turn(prompt)
+        pending: Dict[str, Any] = {"id": None}
+        out = dict(kw)
+        emit = _Emit(kw.get("emit"), pending)
+        out["emit"] = emit
+        if kw.get("permission_check") is not None:
+            out["permission_check"] = _check_wrap(kw["permission_check"], kw.get("emit"), pending)
+        cancel = kw.get("should_cancel")
+        out["should_cancel"] = lambda: bool(cancel and cancel()) or cu_panel.stop_requested()
+        return out, tok
+    except Exception:
+        with _LOCK:
+            _owner = None
+        return kw, None
+
+
+def turn_over(tok) -> None:
+    """A turn ended. The session ends with the turn that watched it, or with any
+    turn when none did; a turn that ran beside it leaves it running."""
+    global _owner
+    with _LOCK:
+        if _owner is not None and tok is not _owner:
+            return
+        _owner = None
+    end()
 
 
 # ---------------------------------------------------------------- windows
@@ -347,9 +536,9 @@ class _Glow:
         hwnd = u.CreateWindowExW(ex, "HearthEdgeGlow", None, 0x80000000, x0, y0, w, h, None, None, hinst, None)
         if not hwnd:
             return None
-        # Out of screenshots and recordings, the way the activity pill is.
         try:
-            u.SetWindowDisplayAffinity(HWND(hwnd), 0x00000011)
+            from . import overlays
+            overlays.register(int(hwnd))
         except Exception:
             pass
 

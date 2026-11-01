@@ -1350,9 +1350,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "screenshot",
         "description": (
             "Capture the whole screen and return the saved path; follow with view_image"
-            " to see it. Inglen's own windows are left out, so you see what is behind "
-            "them. For one app, capture_active_window is tighter. When the question is "
-            "about Inglen itself, pass include_hearth: true."
+            " to see it. Inglen's window is in it like any other; its overlays (the "
+            "steps panel, the status pill, the edge glow, the pointer) are left out. "
+            "For one app, capture_active_window is tighter."
         ),
         "parameters": {
             "type": "object",
@@ -1361,10 +1361,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "Seconds to wait before capturing (0-10). Use 3-5 "
                     "when the user wants a different app captured so "
                     "they can switch to it. Default 0 (immediate)."},
-                "include_hearth": {"type": "boolean", "description":
-                    "Keep Inglen's own windows in the image. Default false. "
-                    "Set true to inspect Inglen itself, which is the only way "
-                    "to answer a question about its own interface."},
+                "include_overlays": {"type": "boolean", "description":
+                    "Keep Inglen's overlays in the image. Default false. Set true "
+                    "only when the question is about one of them, such as what "
+                    "the steps panel says."},
             },
         },
     },
@@ -1387,6 +1387,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "delay_s": {"type": "number", "description":
                     "Seconds to wait before capturing (0-10), so the user can "
                     "focus the target window first. Default 0."},
+                "include_overlays": {"type": "boolean", "description":
+                    "Keep Inglen's own overlays (steps panel, status pill, pointer) in the image. "
+                    "Default false."},
             },
         },
     },
@@ -5334,6 +5337,12 @@ def _prune_shots(keep: int = 40) -> None:
         pass
 
 
+def _wants_overlays(p: Dict) -> bool:
+    """A look that is about Inglen's own overlays (the panel, the pill, the
+    pointer). include_hearth is the older name for it."""
+    return bool(p.get("include_overlays") or p.get("include_hearth"))
+
+
 def _screenshot(p: Dict) -> str:
     # Optional delay so the user can switch to the window they want
     # captured before the shutter fires. Without this, the screenshot
@@ -5354,14 +5363,6 @@ def _screenshot(p: Dict) -> str:
         capture_overlay.flash(cue)
     except Exception:
         pass
-    # Fade the activity pill out too, so JARVIS's own status HUD isn't sitting in
-    # the screenshot it's about to read (it would see "Reading the screen" text
-    # floating over the app and get confused). It comes back on the next action.
-    try:
-        from . import activity_hud
-        activity_hud.hide()
-    except Exception:
-        pass
     _t.sleep(cue)         # wait out the delay (or the brief cue when delay==0)
     # The cue fades to fully transparent by the end of `cue`; this extra settle
     # guarantees it's off-screen + destroyed before we grab, so it's never in
@@ -5376,12 +5377,9 @@ def _screenshot(p: Dict) -> str:
     img = None
     try:
         from PIL import ImageGrab  # type: ignore
-        # A shot taken while Hearth is in front contains Hearth, and the model
-        # then describes its own chat or clicks a control belonging to the
-        # assistant. Excluded only for the moment of the grab, so a screen
-        # recorder still sees the window.
-        from .win_capture import own_windows_hidden as _own_hidden
-        with _own_hidden(enabled=not bool(p.get("include_hearth"))):
+        # Inglen's overlays are never in a capture (overlays.py); its window is.
+        from .overlays import visible_to_model
+        with visible_to_model(_wants_overlays(p)):
             img = ImageGrab.grab()
         img.save(out)
     except Exception as e:
@@ -5468,21 +5466,14 @@ def _capture_active_window(p: Dict) -> str:
         except Exception:
             pass
         _t.sleep(delay + 0.35)
-    # Fade the activity pill so it isn't sitting in the captured window (a prior
-    # action may still have it up). When there's no delay, give it a beat to fade.
-    try:
-        from . import activity_hud
-        activity_hud.hide()
-    except Exception:
-        pass
-    if delay <= 0:
-        _t.sleep(0.3)
+    from .overlays import is_overlay, visible_to_model
     # Resolve target: explicit title substring, else the foreground window.
     hwnd = None
     if title:
         matches: List[int] = []
         def _en(h, _):
-            if win32gui.IsWindowVisible(h) and title.lower() in (win32gui.GetWindowText(h) or "").lower():
+            if win32gui.IsWindowVisible(h) and title.lower() in (win32gui.GetWindowText(h) or "").lower() \
+                    and not is_overlay(h):
                 matches.append(h)
         win32gui.EnumWindows(_en, None)
         hwnd = matches[0] if matches else None
@@ -5510,10 +5501,7 @@ def _capture_active_window(p: Dict) -> str:
         # all_screens=True makes the bbox virtual-screen relative, matching
         # GetWindowRect — so a window on a left/secondary monitor (negative
         # coords) still grabs correctly.
-        # Hide our own windows unless one of them IS the target, which happens
-        # when the user asked about Hearth itself.
-        from .win_capture import own_window_handles as _own, own_windows_hidden as _own_hidden
-        with _own_hidden(enabled=hwnd not in set(_own())):
+        with visible_to_model(_wants_overlays(p)):
             img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
         # Downscale to <=1280 long-edge; record the scale for smart_click.
         _le = max(img.size)
@@ -7203,9 +7191,10 @@ def _list_windows(p: Dict) -> str:
         return "list_windows needs pywin32 (pip install pywin32)."
     fg = win32gui.GetForegroundWindow()
     rows: List = []
+    from .overlays import is_overlay
 
     def _cb(hwnd, _):
-        if not win32gui.IsWindowVisible(hwnd):
+        if not win32gui.IsWindowVisible(hwnd) or is_overlay(hwnd):
             return
         title = win32gui.GetWindowText(hwnd)
         if not title:

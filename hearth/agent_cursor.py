@@ -415,6 +415,11 @@ class _Pointer(threading.Thread):
                                       0, 0, 1, 1, None, None, hinst, None)
         if not self.hwnd:
             raise OSError("CreateWindowExW failed")
+        try:
+            from . import overlays
+            overlays.register(self.hwnd)
+        except Exception:
+            pass
         self.msg = wintypes.MSG()
         self.dib = self.mem_dc = None
 

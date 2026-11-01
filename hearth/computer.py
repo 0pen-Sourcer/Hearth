@@ -134,6 +134,12 @@ def move(x: int, y: int, duration: float = 0.35):
     if not (_WIN or _PYN):
         return (0, 0)
     x, y = int(x), int(y)
+    if _WIN:
+        try:
+            from . import overlays
+            overlays.make_way(x, y)            # an overlay over the target lets the action through
+        except Exception:
+            pass
     try:
         sx, sy = _pos()
     except Exception:

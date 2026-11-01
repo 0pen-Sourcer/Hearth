@@ -658,8 +658,18 @@ def desktop(token: str, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if token != _TOKEN:
         return {"ok": False}
     from . import desktop_session
+    args = args or {}
     if tool == "_raised":
-        desktop_session.raised(int((args or {}).get("hwnd") or 0))
+        desktop_session.raised(int(args.get("hwnd") or 0))
+    elif tool == "_overlays":
+        from . import overlays
+        overlays.set_visible(bool(args.get("show")))
+    elif tool == "_make_way":
+        from . import overlays
+        try:
+            overlays.make_way(int(args.get("x")), int(args.get("y")), physical=True)
+        except (TypeError, ValueError):
+            return {"ok": False}
     else:
         desktop_session.begin(tool, args or {})
     return {"ok": True}
