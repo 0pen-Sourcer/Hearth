@@ -92,7 +92,12 @@ if "--hearth-run-python" in sys.argv:
 
 # Defensive null-stderr safety (only used if PyInstaller built with no console)
 if getattr(sys, "frozen", False) and (sys.stderr is None or sys.stdout is None):
-    _log_dir = os.path.join(os.path.expanduser("~"), "Jarvis", "logs")
+    # The workspace hearth.default_workspace() will pick: ~/Jarvis only when an older install made it.
+    _home = os.path.expanduser("~")
+    _ws = (os.environ.get("HEARTH_WORKSPACE") or os.environ.get("JARVIS_WORKSPACE")
+           or (os.path.join(_home, "Jarvis") if os.path.isdir(os.path.join(_home, "Jarvis"))
+               else os.path.join(_home, "Inglen")))
+    _log_dir = os.path.join(_ws, "logs")
     try:
         os.makedirs(_log_dir, exist_ok=True)
         _f = open(os.path.join(_log_dir, "hearth_cli.log"), "a", encoding="utf-8", errors="replace", buffering=1)

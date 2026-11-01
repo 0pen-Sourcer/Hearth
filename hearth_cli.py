@@ -3991,7 +3991,8 @@ class JarvisCLI:
                 from hearth.tools import WORKSPACE as _WS
                 mcp_path = _P(_WS) / "mcp.json"
             except Exception:
-                mcp_path = _P.home() / "Jarvis" / "mcp.json"
+                from hearth import default_workspace as _dws
+                mcp_path = _P(_dws()) / "mcp.json"
             if not sub:
                 # Status: count Hearth's exported tools + show client-config file location
                 try:
