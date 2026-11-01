@@ -7984,7 +7984,7 @@ function replayAssistant(msgDiv, m, body) {
       const t = makeToolCard(ev.name, ev.args || {}, ev.words);
       // Keep the green/red diff for file writes; the terse text result would
       // clobber it. Other tools show their result as before.
-      if (!t.div.classList.contains('has-diff')) fillToolBody(t.body, ev.name, ev.result || '');
+      if (!t.div.classList.contains('has-diff')) fillToolBody(t.body, ev.name, ev.result || '', ev.args);
       if (t.div._askFill) { t.div._askFill(ev.result || ''); t.div.classList.remove('open'); }
       if (ev.ms) t.ms.textContent = `${ev.ms}ms`;
       appendPart(t.div, msgDiv);
@@ -9092,17 +9092,28 @@ const _ICON_FOLDER = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none
 function MEDIA_LINE_RE() {
   return /^(?:__JARVIS_(IMAGE|VIDEO)__|(Image|Video):)[ \t]+([^\n]+?)(?:[ \t]+\(\d[\d.]*[ \t]*(?:bytes|[KMG]?B)\b[^)\n]*\))?[ \t]*$/gm;
 }
-// A step's detail: what came back, and for a picture the model opened, the picture.
-function fillToolBody(body, name, result) {
-  const text = String(result || '');
-  const pics = name === 'view_image' ? [...text.matchAll(MEDIA_LINE_RE())].filter(m => (m[1] || m[2]).toLowerCase() === 'image') : [];
+// The pictures a step took or opened. An agent brain hands back its own note about a
+// picture in place of the tool's line, so the path comes from the step's arguments.
+function stepPictures(name, text, args) {
+  if (name === 'view_image') {
+    const named = [...text.matchAll(MEDIA_LINE_RE())].filter(m => (m[1] || m[2]).toLowerCase() === 'image').map(m => m[3].trim());
+    return named.length ? named : (!/^\s*error/i.test(text) && args && args.path ? [String(args.path)] : []);
+  }
+  const shot = text.match(/^Saved the screenshot: (.+?\.(?:png|jpe?g|webp))\b/im);
+  return shot ? [shot[1]] : [];
+}
+// A step's detail: what came back, and for a picture the model took or opened, the picture.
+function fillToolBody(body, name, result, args) {
+  const text = String(result || '').replace(/^\[Image: source: [^\n]*\]\s*$/gm, '');
+  const pics = stepPictures(name, text, args);
   // The lines naming pictures or videos aren't text to read: a made one shows in the
   // chat, one the model opened shows here.
   const said = text.replace(MEDIA_LINE_RE(), '').replace(/\n{3,}/g, '\n\n').trim();
   body.textContent = said || (text.match(MEDIA_LINE_RE()) ? '' : text);
-  for (const m of pics) {
-    const path = m[3].trim(), img = document.createElement('img');
+  for (const path of pics) {
+    const img = document.createElement('img');
     img.className = 'step-pic';
+    img.onerror = () => { img.style.display = 'none'; };
     img.alt = img.title = path.split(/[\\/]/).pop();
     img.src = '/file?path=' + encodeURIComponent(path);
     img.onclick = (e) => { e.stopPropagation(); openLightbox(img.src, 'image', path); };
@@ -12139,7 +12150,7 @@ async function send(forced = null, displayAs = null, opts = {}) {
             if (!/^\s*(error|traceback)|exit code [1-9]|command failed/i.test(raw.slice(0, 400)))
               pendingTool.div.classList.remove('open');
           } else {
-            fillToolBody(pendingTool.body, pendingTool.div._toolName, raw);
+            fillToolBody(pendingTool.body, pendingTool.div._toolName, raw, pendingTool.div._toolArgs);
           }
           if (pendingTool.div._askFill) pendingTool.div._askFill(raw);
         }

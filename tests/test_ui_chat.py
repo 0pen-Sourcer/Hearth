@@ -653,6 +653,8 @@ with sync_playwright() as pw:
       const c = newConversation();
       c.messages = [{ role: 'user', content: 'look at my screen and draw a cat' }, { role: 'assistant', content: 'Here it is.', events: [
         { kind: 'tool', name: 'view_image', args: { path: 'C:/w/shot.png' }, result: '__JARVIS_IMAGE__ C:/w/shot.png (10 bytes, png)', pos: 0 },
+        { kind: 'tool', name: 'view_image', args: { path: 'C:/w/agent.png' }, result: '[Image: source: C:/x/blob.png, original 10x10]', pos: 0 },
+        { kind: 'tool', name: 'screenshot', args: {}, result: 'Saved the screenshot: C:/w/taken.png (10x10). To see it, look at it.', pos: 0 },
         { kind: 'media', mediaKind: 'image', path: 'C:/w/shot.png', pos: 0 },
         { kind: 'tool', name: 'generate_image', args: { prompt: 'a cat' }, result: '__JARVIS_IMAGE__ C:/w/generated/cat.png (10 bytes, png)', pos: 0 },
         { kind: 'media', mediaKind: 'image', path: 'C:/w/generated/cat.png', pos: 0 },
@@ -663,6 +665,9 @@ with sync_playwright() as pw:
       const shown = [...msg.querySelectorAll('.gen-media-img')].map(i => i.getAttribute('src'));
       const barText = (msg.querySelector('.gen-media-bar') || {}).textContent || '';
       const inStep = [...msg.querySelectorAll('.step-pic')].map(i => i.getAttribute('src'));
+      const allPics = inStep.join(' ');
+      if (!allPics.includes('agent.png') || !allPics.includes('taken.png') || allPics.includes('blob'))
+        throw new Error('a step lost its picture: ' + allPics);
       const stepText = [...msg.querySelectorAll('.tool-card, [class*="tool"]')].map(x => x.textContent).join(' ');
       openLightbox('/file?path=x', 'image', 'C:/Users/someone/Jarvis/generated/cat.png');
       const lb = document.querySelector('.lightbox');
@@ -674,7 +679,7 @@ with sync_playwright() as pw:
     check(f"a picture the model only looked at stays out of the chat; what it made shows {media['shown']}",
           len(media["shown"]) == 1 and "cat.png" in media["shown"][0])
     check(f"it shows in its own step instead, and no step shows the old image marker ({media['inStep']}, marker {media['marker']})",
-          len(media["inStep"]) == 1 and "shot.png" in media["inStep"][0] and not media["marker"])
+          len(media["inStep"]) == 3 and "shot.png" in media["inStep"][0] and not media["marker"])
     check(f"the picture has no toolbar text, the viewer a line-icon close and only the file name {media}",
           media["barText"] == "" and media["closeIcon"] and media["caption"] == "cat.png")
 

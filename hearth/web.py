@@ -6267,6 +6267,7 @@ def _workspace_file(path: str):
     else ("", why). The Files tab names things from the workspace down."""
     from .tools import list_extra_workspaces
     try:
+        path = os.path.expanduser(path)
         real = os.path.realpath(path if os.path.isabs(path) else os.path.join(WORKSPACE, path))
     except Exception:
         return "", "bad path"
