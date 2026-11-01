@@ -1304,12 +1304,14 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "open_app",
         "description": (
             "Open an app by name, a file with its default program, a folder in "
-            "Explorer, or a URL. Each call opens a new window: to get back to an app "
-            "that's already open, use focus_window."
+            "Explorer, or a URL. Asked again for an app it opened in this task, it "
+            "goes back to that window."
         ),
         "parameters": {
             "type": "object",
-            "properties": {"name": {"type": "string"}},
+            "properties": {"name": {"type": "string"},
+                           "new_window": {"type": "boolean", "description":
+                                          "open another window even if this task already has one"}},
             "required": ["name"],
         },
     },
@@ -4675,10 +4677,11 @@ def _desktop_to_hearth(tool: str, args: Dict[str, Any]) -> None:
         pass
 
 
-def _bring_newest_to_front(before: set) -> None:
+def _bring_newest_to_front(before: set):
     """After launching something, raise the newly-appeared window to the front —
     Windows AND Linux open launched windows behind the active one. macOS `open`
-    already foregrounds, so this no-ops there. Best-effort + silent."""
+    already foregrounds, so this no-ops there. Best-effort + silent. Returns the
+    window on Windows, else None."""
     if sys.platform == "darwin":
         return
     try:
@@ -4697,6 +4700,7 @@ def _bring_newest_to_front(before: set) -> None:
             _desktop_to_hearth("_raised", {"hwnd": int(target)})
         else:
             desktop_session.raised(target)
+        return target
     elif sys.platform.startswith("linux"):
         wm = shutil.which("wmctrl")
         if wm:
@@ -4707,8 +4711,32 @@ def _bring_newest_to_front(before: set) -> None:
                 pass
 
 
+# The window open_app raised for each name. Calling it again for an app this run
+# already opened goes back to that window; only those: one the person had open
+# themselves may hold their work, so it's never picked up as a place to type.
+_OPENED: Dict[str, Any] = {}
+
+
+def _back_to_opened(name: str) -> bool:
+    if sys.platform != "win32":
+        return False
+    h = _OPENED.get(name.lower())
+    try:
+        import ctypes
+        if not h or not ctypes.windll.user32.IsWindow(int(h)):
+            return False
+        from . import desktop_session
+        desktop_session.bring_to_front(int(h))
+        _record_focus_target(int(h))
+        return True
+    except Exception:
+        return False
+
+
 def _open_app(p: Dict) -> str:
     name = (p.get("name") or "").strip()
+    if name and not p.get("new_window") and _back_to_opened(name):
+        return f"{name} was already open from this task, so its window is back in front."
     if not name:
         return "Error: missing app name"
     # Strip surrounding quotes — the model sometimes wraps a path in literal
@@ -4741,13 +4769,13 @@ def _open_app(p: Dict) -> str:
         cand_path = os.path.expanduser(canonical)
         if os.path.exists(cand_path):
             open_outside(cand_path)
-            _bring_newest_to_front(_before)
+            _OPENED[name.lower()] = _bring_newest_to_front(_before)
             return f"opened: {cand_path}"
 
         # 2. URL-shaped → open in default browser via os.startfile
         if canonical.startswith(("http://", "https://", "file://")):
             open_outside(canonical)
-            _bring_newest_to_front(_before)
+            _OPENED[name.lower()] = _bring_newest_to_front(_before)
             return f"opened url: {canonical}"
 
         # 3. Direct PATH lookup (calc, notepad, mspaint, explorer, etc.)
@@ -4756,7 +4784,7 @@ def _open_app(p: Dict) -> str:
             if full:
                 if start_app([full]) is None:
                     return f"Error: couldn't start {full}"
-                _bring_newest_to_front(_before)
+                _OPENED[name.lower()] = _bring_newest_to_front(_before)
                 return f"launched: {full}"
 
         # 4. UWP URI scheme (Calculator on Win10/11 lives as a UWP app)
@@ -4764,7 +4792,7 @@ def _open_app(p: Dict) -> str:
         if uri:
             try:
                 os.startfile(uri)  # type: ignore[attr-defined]
-                _bring_newest_to_front(_before)
+                _OPENED[name.lower()] = _bring_newest_to_front(_before)
                 return f"launched UWP: {uri}"
             except OSError:
                 pass
@@ -4773,7 +4801,7 @@ def _open_app(p: Dict) -> str:
         lnk = _find_start_menu_lnk(canonical)
         if lnk:
             open_outside(lnk)
-            _bring_newest_to_front(_before)
+            _OPENED[name.lower()] = _bring_newest_to_front(_before)
             return f"launched: {os.path.basename(lnk)[:-4]} (via Start Menu shortcut)"
 
         # 5. Failure. If the input is clearly a FILE PATH rather than an app name,
@@ -4860,7 +4888,7 @@ def _open_app(p: Dict) -> str:
                 subprocess.Popen([opener, target],
                                  stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
-                _bring_newest_to_front(_before)
+                _OPENED[name.lower()] = _bring_newest_to_front(_before)
                 return f"opened: {target}"
             except Exception as e:
                 return f"Error: xdg-open failed: {e}"
@@ -4874,7 +4902,7 @@ def _open_app(p: Dict) -> str:
     if entry:
         try:
             _de.launch(entry)
-            _bring_newest_to_front(_before)
+            _OPENED[name.lower()] = _bring_newest_to_front(_before)
             return f"launched: {entry['name']}"
         except Exception as e:
             return f"Error: couldn't start {entry['name']}: {e}"
@@ -4883,7 +4911,7 @@ def _open_app(p: Dict) -> str:
         try:
             subprocess.Popen([full], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
-            _bring_newest_to_front(_before)
+            _OPENED[name.lower()] = _bring_newest_to_front(_before)
             return f"launched: {full}"
         except Exception as e:
             return f"Error: {e}"

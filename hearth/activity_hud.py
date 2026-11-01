@@ -75,14 +75,19 @@ def _accent() -> int:
         return _ACCENT
 
 
-def _enabled() -> bool:
-    """On unless turned off. A turn from the phone or a chat app acts on this same
-    screen, so it shows for those too."""
+def desktop_here() -> bool:
+    """Whether the signs of desktop use can show here. A turn from the phone or a
+    chat app acts on this same screen, so they show for those too."""
     if sys.platform != "win32":
         return False
     v = _env.get("ACTIVITY_HUD")
-    if v is not None:
-        return v.strip().lower() not in ("0", "false", "no", "off")
+    return v is None or v.strip().lower() not in ("0", "false", "no", "off")
+
+
+def _enabled() -> bool:
+    """The pill is on unless turned off in Settings."""
+    if not desktop_here():
+        return False
     try:
         from .web import _load_settings
         s = _load_settings()

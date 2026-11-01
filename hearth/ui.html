@@ -5220,10 +5220,31 @@
         </div>
         <div class="field">
           <div class="label">
-            <div class="name">Activity overlay</div>
-            <div class="hint">While Inglen works the desktop, a small label at the top of the screen and a panel at the right edge show what it is doing, with Stop. Neither takes focus or blocks a click.</div>
+            <div class="name">Status label</div>
+            <div class="hint">While Inglen uses your computer, a small label at the top of the screen says what it is doing.</div>
           </div>
           <div class="switch" data-key="activity_hud"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Side panel</div>
+            <div class="hint">The steps at the right edge of the screen, with its questions and Stop. Off, questions come to the chat.</div>
+          </div>
+          <div class="switch" data-key="cu_panel"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Screen glow</div>
+            <div class="hint">A soft line round the edge of the screen while Inglen is using it.</div>
+          </div>
+          <div class="switch" data-key="cu_glow"></div>
+        </div>
+        <div class="field">
+          <div class="label">
+            <div class="name">Inglen's pointer</div>
+            <div class="hint">Its own pointer on what it clicks, so you can tell it from yours.</div>
+          </div>
+          <div class="switch" data-key="cu_pointer"></div>
         </div>
 
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Pop-ups</h4>
@@ -15245,8 +15266,9 @@ async function refreshSettings() {
     // so it's honest even when settings.llm_provider is stale/inconsistent).
     $$('.switch[data-key]').forEach(sw => {
       const k = sw.dataset.key;
-      // gen_stats, show_diffs, activity_hud and auto_memory default ON (only off when explicitly disabled); the rest default off.
-      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory' || k === 'auto_reviewer') ? (s[k] !== false) : !!s[k]);
+      // These default ON (only off when explicitly disabled); the rest default off.
+      sw.classList.toggle('on', (k === 'gen_stats' || k === 'show_diffs' || k === 'activity_hud' || k === 'auto_memory' || k === 'auto_reviewer'
+                                  || k === 'cu_panel' || k === 'cu_glow' || k === 'cu_pointer') ? (s[k] !== false) : !!s[k]);
     });
     refreshReviewer();
     refreshEmail();

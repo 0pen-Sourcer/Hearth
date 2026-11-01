@@ -25,6 +25,14 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# A spawned child of a windowed build has no streams either, and it never reaches
+# the redirect further down: a library printing from the speech worker would kill it.
+if "--multiprocessing-fork" in sys.argv:
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 # PyInstaller + multiprocessing: RealtimeSTT spawns its STT recorder as a CHILD
 # process, which on frozen Windows re-launches THIS exe with
 # `--multiprocessing-fork parent_pid=… pipe_handle=…`. Without freeze_support()

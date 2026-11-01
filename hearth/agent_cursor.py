@@ -516,12 +516,29 @@ _failed = False
 _start_lock = threading.Lock()
 
 
+_on, _on_at = True, 0.0
+
+
+def _wanted() -> bool:
+    """Settings' switch, read every few seconds: this is called on each frame of a glide."""
+    global _on, _on_at
+    now = time.monotonic()
+    if now - _on_at > 5.0:
+        _on_at = now
+        try:
+            from .desktop_session import _enabled
+            _on = bool(_enabled("cu_pointer"))
+        except Exception:
+            _on = True
+    return _on
+
+
 def _get():
     """The running pointer, started on first use; None when unavailable."""
     global _pointer, _failed
     if _pointer is not None:
         return _pointer if _pointer.ok or not _pointer.ready.is_set() else None
-    if _failed or not (_WIN and _ENABLED):
+    if _failed or not (_WIN and _ENABLED and _wanted()):
         return None
     with _start_lock:
         if _pointer is None:

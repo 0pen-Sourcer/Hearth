@@ -178,7 +178,7 @@ shown = {"n": 0}
 cu_panel._ensure = lambda: shown.__setitem__("n", shown["n"] + 1)     # nothing drawn
 cu_panel.enabled = lambda: True
 ds._WIN = True
-ds._enabled = lambda: True
+ds._enabled = lambda key="cu_glow": True
 ds._foreground = lambda: None
 ds._Glow.show = classmethod(lambda cls: None)
 ds._Glow.hide = classmethod(lambda cls: None)

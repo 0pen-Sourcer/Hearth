@@ -36,7 +36,7 @@ check("the edge breathes between dim and full",
 
 seen = {"glow": [], "front": [], "flash": [], "chime": 0, "done": 0, "hud": []}
 ds._WIN = True
-ds._enabled = lambda: True
+ds._enabled = lambda key="cu_glow": True
 ds._foreground = lambda: 4242
 ds._Glow.show = classmethod(lambda cls: seen["glow"].append("show"))
 ds._Glow.hide = classmethod(lambda cls: seen["glow"].append("hide"))

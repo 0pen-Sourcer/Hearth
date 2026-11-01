@@ -36,10 +36,16 @@ _raised: Set[int] = set()
 _WIN = sys.platform == "win32"
 
 
-def _enabled() -> bool:
+def _enabled(key: str = "cu_glow") -> bool:
+    """Whether one of the desktop's signs is on (cu_glow, cu_panel, cu_pointer). The
+    older switch turned them all off, so it still counts until one is set."""
     try:
-        from .activity_hud import _enabled as hud_on
-        return hud_on()
+        from .activity_hud import desktop_here
+        if not desktop_here():
+            return False
+        from .web import _load_settings
+        s = _load_settings()
+        return s.get(key, s.get("activity_hud", True)) is not False
     except Exception:
         return _WIN
 
@@ -484,7 +490,7 @@ class _Glow:
         from ctypes import wintypes
         u = ctypes.windll.user32
         msg = wintypes.MSG()
-        level, shown, began = 0.0, False, 0.0
+        level, shown, began, under = 0.0, False, 0.0, 0.0
         while True:
             while u.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):      # PM_REMOVE
                 u.TranslateMessage(ctypes.byref(msg))
@@ -497,6 +503,7 @@ class _Glow:
                     cls._set_alpha(0)
                     u.ShowWindow(cls._hwnd, 4)                          # SW_SHOWNOACTIVATE
                     shown, began = True, now
+                    under = 0.0
                 level = min(1.0, level + 1.0 / (FADE_S * 30))
             else:
                 level = max(0.0, level - 1.0 / (FADE_S * 30))
@@ -504,10 +511,26 @@ class _Glow:
                     u.ShowWindow(cls._hwnd, 0)                          # SW_HIDE
                     shown = False
             if shown:
+                if now - under > 0.5:
+                    under = now
+                    cls._below_panel()
                 cls._set_alpha(int(255 * level * breath(now - began)))
                 time.sleep(1 / 30)
             else:
                 time.sleep(0.1)
+
+    @classmethod
+    def _below_panel(cls) -> None:
+        """The panel sits inside the glow's band: keep the glow under it."""
+        try:
+            import ctypes
+            from . import cu_panel
+            h = cu_panel.window()
+            if h:
+                # NOSIZE | NOMOVE | NOACTIVATE
+                ctypes.windll.user32.SetWindowPos(cls._hwnd, h, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+        except Exception:
+            pass
 
     @classmethod
     def _set_alpha(cls, a: int) -> None:

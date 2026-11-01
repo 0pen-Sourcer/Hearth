@@ -64,7 +64,7 @@ def enabled() -> bool:
         return False
     try:
         from .desktop_session import _enabled
-        return bool(_enabled())
+        return bool(_enabled("cu_panel"))
     except Exception:
         return True
 
@@ -223,6 +223,15 @@ def state() -> Dict[str, Any]:
         return {"request": _S["request"], "steps": [dict(s) for s in _S["steps"]],
                 "ask": dict(_S["ask"]) if _S["ask"] else None, "phase": _S["phase"],
                 "want": _S["want"], "stop": _S["stop"], "collapsed": _S["collapsed"]}
+
+
+def window() -> int:
+    """The panel's window while it's showing, else 0."""
+    p = _panel
+    try:
+        return int(p.surface.hwnd) if p is not None and p.surface.shown else 0
+    except Exception:
+        return 0
 
 
 def make_way(x: int, y: int) -> None:

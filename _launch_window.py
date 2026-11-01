@@ -14,6 +14,14 @@ import os
 import sys
 import multiprocessing
 
+# A spawned child of a windowed build has no streams either, and it never reaches
+# the redirect further down: a library printing from the speech worker would kill it.
+if "--multiprocessing-fork" in sys.argv:
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 # PyInstaller + multiprocessing safety (see _launch_tray): intercept a spawned
 # child re-launch before anything else. No-op for a normal launch.
 multiprocessing.freeze_support()
