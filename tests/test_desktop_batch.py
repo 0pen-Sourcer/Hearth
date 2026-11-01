@@ -89,11 +89,14 @@ r.restore()
 
 # ------------------------------------------------------- a stale idx is refused
 r = _Recorder().install("desktop_click")
+_snap, _kept = A.snapshot, A._last
+A.snapshot, A._last = (lambda *a, **k: {}), []
 out = T._execute_actions({"actions": [
     {"tool": "desktop_click", "name": "File"},
     {"tool": "desktop_click", "idx": 4},
 ]})
-check("an idx after a click is refused, not clicked", len(r.calls) == 1)
+A.snapshot, A._last = _snap, _kept
+check("an idx the model never saw is refused after a click, not clicked", len(r.calls) == 1)
 check("and it says why", "old" in out and "name" in out)
 r.restore()
 

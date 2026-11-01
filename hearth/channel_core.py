@@ -395,23 +395,22 @@ class Hub:
         with self._lock:
             run["question"], run["answer"] = ev, None
             run["tap"] = needs_a_tap(name, args)
-        # The step itself, as a question: "Run `npm test`?", "Send this to your phone: "..."?"
-        what = _what(name, args)
-        question = what[:1].upper() + what[1:] + "?"
+        # The step as every surface says it (approval.py): "Delete a file?", the paths apart.
         try:
             from .auto_review import why
             because = why(name, args)            # the reviewer's or the floor's reason, as the window says it
         except Exception:
             because = ""
-        if because:
-            question += " " + because
+        from . import approval
+        card = approval.card(name, args or {}, why=because)
+        question = approval.question(card)
+        whole = question + ("\n" + card["detail"] if card["detail"] else "")
         if callable(getattr(self.a, "ask", None)) and getattr(self.a, "takes_detail", False):
-            cmd = ((args or {}).get("command") or (args or {}).get("cmd")) if name in ("run_command", "start_job") else ""
-            self.a.ask(chat, question, detail={"cmd": str(cmd or "")})   # the whole command, apart from the words
+            self.a.ask(chat, question, detail={"cmd": card["detail"]})   # the specifics, apart from the words
         elif callable(getattr(self.a, "ask", None)):
-            self.a.ask(chat, question)                 # shown with Allow / Deny where the app can
+            self.a.ask(chat, whole)                    # shown with Allow / Deny where the app can
         else:
-            self.a.send(chat, question + " Reply yes to let me, anything else to stop.")
+            self.a.send(chat, whole + "\nReply yes to let me, anything else to stop.")
         try:
             from .call_me import ask_wait
             wait_s = ask_wait(ASK_TIMEOUT_S)     # long enough to be called about it and answer in the call
@@ -514,8 +513,13 @@ class Hub:
             if kind == "permission_request" and kw.get("aloud"):
                 ask_voice = getattr(self.a, "ask_voice", None)
                 if callable(ask_voice):
-                    question = _what(str(kw.get("name") or ""), kw.get("args") or {})
-                    ask_voice(chat, question[:1].upper() + question[1:] + "?", kw["id"], bool(kw.get("tap")))
+                    from .approval import card, question
+                    c = card(str(kw.get("name") or ""), kw.get("args") or {}, why=" ")
+                    if getattr(self.a, "takes_detail", False):
+                        ask_voice(chat, question(dict(c, why="")), kw["id"], bool(kw.get("tap")),
+                                  detail={"cmd": c["detail"]})
+                    else:
+                        ask_voice(chat, question(dict(c, why="")), kw["id"], bool(kw.get("tap")))
             if kind == "done":
                 stats.update(kw.get("stats") or {})
                 if kw.get("duration_ms") is not None:
@@ -973,58 +977,9 @@ def question_for(who: str, name: str, args: Dict[str, Any]) -> str:
 
 
 def _what(name: str, args: Dict[str, Any]) -> str:
-    """A risky step in a few plain words, for the question: never the tool's own name."""
-    a = args or {}
-
-    def cut(v: Any, n: int = 120) -> str:
-        t = " ".join(str(v or "").split())
-        return t if len(t) <= n else t[:n].rstrip() + "..."
-
-    def base(p: Any) -> str:
-        return os.path.basename(str(p or "").rstrip("\\/")) or str(p or "") or "that"
-
-    if name in ("run_command", "start_job"):
-        return ("start " if name == "start_job" else "run ") + f"`{cut(a.get('command') or a.get('cmd'), 160)}`"
-    if name in ("write_file", "append_file"):
-        return f"write {base(a.get('path'))}"
-    if name == "edit_file":
-        return f"change {base(a.get('path'))}"
-    if name == "create_directory":
-        return f"make the folder {base(a.get('path'))}"
-    if name in ("delete_file", "delete_path"):
-        return f"delete {a.get('path') or 'a file'}"
-    if name == "move_path":
-        return f"move {base(a.get('source') or a.get('path'))} to {a.get('destination') or 'another folder'}"
-    if name == "send_email":
-        return f"send an email to {a.get('to') or 'someone'}" + (f" (\"{cut(a.get('subject'), 60)}\")" if a.get("subject") else "")
-    if name == "send_to_phone":
-        what = a.get("path") or a.get("file")
-        return (f"send {base(what)} to your phone" if what else
-                f"send this to your phone: \"{cut(a.get('message') or a.get('text'))}\"")
-    if name in ("open_url", "open_in_browser"):
-        return f"open {cut(a.get('url'), 100)}"
-    if name == "open_app":
-        return f"open {a.get('name') or a.get('app') or 'an app'}"
-    if name == "install_skill":
-        return f"install the skill {a.get('name') or a.get('source') or ''}".rstrip()
-    if name in ("delegate", "launch_team"):
-        who = a.get("agent") or a.get("runtime") or "another agent"
-        return f"hand this to {who}" + (f": \"{cut(a.get('task') or a.get('prompt'), 80)}\"" if a.get("task") or a.get("prompt") else "")
-    if name in ("generate_image", "generate_video"):
-        return f"make {'a video' if 'video' in name else 'an image'}" + (f" of \"{cut(a.get('prompt'), 80)}\"" if a.get("prompt") else "")
-    if name == "load_model":
-        return f"load {a.get('model') or a.get('name') or 'another model'}"
-    if name == "set_up":
-        return f"install {a.get('name') or a.get('what') or 'what is missing'} on your PC"
-    if name == "undo":
-        return "take back a change to your files"
-    if name.startswith(("computer_", "desktop_", "browse_")) or name in ("execute_actions", "smart_click"):
-        return "use the mouse and keyboard on your PC"
-    if name == "read_inbox":
-        return "read your email"
-    words = name.replace("_", " ")
-    shown = ", ".join(cut(v, 40) for v in list(a.values())[:2] if isinstance(v, (str, int, float)) and str(v).strip())
-    return f"{words}" + (f": {shown}" if shown else "")
+    """A risky step in a few plain words, for a question: never the tool's own name."""
+    from .approval import line
+    return line(name, args)
 
 
 def _transcribe(path: str) -> str:

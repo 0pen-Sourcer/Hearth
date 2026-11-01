@@ -222,6 +222,15 @@ def _walk_win(root, max_elements: int) -> list:
     return out
 
 
+def _overlay(ctrl) -> bool:
+    """One of Inglen's own overlays (overlays.py), never read as a window."""
+    try:
+        from .overlays import is_overlay
+        return is_overlay(ctrl.NativeWindowHandle)
+    except Exception:
+        return False
+
+
 def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
     global _native_a11y_enabled
     try:
@@ -239,7 +248,7 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
         # pulled to the foreground.
         try:
             w = auto.WindowControl(searchDepth=1, SubName=window_name)
-            if w.Exists(1.0):
+            if w.Exists(1.0) and not _overlay(w):
                 root = w
         except Exception:
             root = None
@@ -247,7 +256,7 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
             try:
                 wl = window_name.lower()
                 for w in auto.GetRootControl().GetChildren():
-                    if wl in (w.Name or "").lower():
+                    if wl in (w.Name or "").lower() and not _overlay(w):
                         root = w
                         break
             except Exception:
@@ -258,6 +267,8 @@ def _snapshot_win(max_elements: int, window_name: str = "") -> dict:
     if root is None:
         try:
             root = auto.GetForegroundControl()
+            if _overlay(root):
+                root = None
         except Exception:
             root = None
     if root is None:
@@ -546,6 +557,26 @@ def _find(idx=None, name=None):
     return None
 
 
+def same_control(idx, was: dict) -> Optional[int]:
+    """Where a control from an earlier snapshot is in the latest one: same kind and
+    same name, and the only one like it. None when it's gone or can't be told apart."""
+    if not was or not (was.get("name") or "").strip():
+        return None
+    hits = [i for i, e in enumerate(_last) if e.get("name") == was["name"] and e.get("type") == was.get("type")]
+    return hits[0] if len(hits) == 1 else None
+
+
+def element(idx) -> Optional[dict]:
+    """The cached element at idx, as {type, name}."""
+    try:
+        i = int(idx)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= i < len(_last):
+        return {"type": _last[i].get("type"), "name": _last[i].get("name")}
+    return None
+
+
 def _raise_owner(ctrl) -> None:
     """A UIA click is a real mouse click at the control's position, so it lands on
     whatever window is on top there. Its own window comes to the front first."""
@@ -562,31 +593,30 @@ def _raise_owner(ctrl) -> None:
 
 
 def click(idx=None, name=None, double=False, button="left"):
-    """Click a cached element by idx or name. Returns its (x,y) or None.
-
-    Windows uses the native UIA invoke (works even if the control is scrolled
-    partly off-screen); other backends click the cached screen center via the
-    cross-platform `computer` module (real cursor)."""
+    """Click a cached element by idx or name. Returns its (x,y) or None. Every
+    backend clicks through `computer`, so the agent's pointer shows the click."""
     target = _find(idx, name)
     if not target:
         return None
+    x, y = target["x"], target["y"]
     if target.get("backend") == "uia":
         ctrl = target["ctrl"]
         _raise_owner(ctrl)
         try:
-            if double:
-                ctrl.DoubleClick(simulateMove=True)
-            elif button == "right":
-                ctrl.RightClick(simulateMove=True)
-            else:
-                ctrl.Click(simulateMove=True)
-            return (target["x"], target["y"])
+            r = ctrl.BoundingRectangle                  # it may have moved since the snapshot
+            if r.width() > 0 and r.height() > 0:
+                x, y = r.xcenter(), r.ycenter()
         except Exception:
-            pass  # fall through to coordinate click
+            pass
+        try:
+            from .overlays import make_way
+            make_way(x, y)
+        except Exception:
+            pass
     try:
         from . import computer
-        computer.click(target["x"], target["y"], button=button, double=double)
-        return (target["x"], target["y"])
+        computer.click(x, y, button=button, double=double)
+        return (x, y)
     except Exception:
         return None
 

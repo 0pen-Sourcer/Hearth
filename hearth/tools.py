@@ -1304,7 +1304,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "open_app",
         "description": (
             "Open an app by name, a file with its default program, a folder in "
-            "Explorer, or a URL."
+            "Explorer, or a URL. Each call opens a new window: to get back to an app "
+            "that's already open, use focus_window."
         ),
         "parameters": {
             "type": "object",
@@ -1358,9 +1359,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "name": "screenshot",
         "description": (
             "Capture the whole screen and return the saved path; follow with view_image"
-            " to see it. Inglen's own windows are left out, so you see what is behind "
-            "them. For one app, capture_active_window is tighter. When the question is "
-            "about Inglen itself, pass include_hearth: true."
+            " to see it. Inglen's window is in it like any other; its overlays (the "
+            "steps panel, the status pill, the edge glow, the pointer) are left out. "
+            "For one app, capture_active_window is tighter."
         ),
         "parameters": {
             "type": "object",
@@ -1369,10 +1370,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "Seconds to wait before capturing (0-10). Use 3-5 "
                     "when the user wants a different app captured so "
                     "they can switch to it. Default 0 (immediate)."},
-                "include_hearth": {"type": "boolean", "description":
-                    "Keep Inglen's own windows in the image. Default false. "
-                    "Set true to inspect Inglen itself, which is the only way "
-                    "to answer a question about its own interface."},
+                "include_overlays": {"type": "boolean", "description":
+                    "Keep Inglen's overlays in the image. Default false. Set true "
+                    "only when the question is about one of them, such as what "
+                    "the steps panel says."},
             },
         },
     },
@@ -1395,6 +1396,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "delay_s": {"type": "number", "description":
                     "Seconds to wait before capturing (0-10), so the user can "
                     "focus the target window first. Default 0."},
+                "include_overlays": {"type": "boolean", "description":
+                    "Keep Inglen's own overlays (steps panel, status pill, pointer) in the image. "
+                    "Default false."},
             },
         },
     },
@@ -5291,6 +5295,12 @@ def _prune_shots(keep: int = 40) -> None:
         pass
 
 
+def _wants_overlays(p: Dict) -> bool:
+    """A look that is about Inglen's own overlays (the panel, the pill, the
+    pointer). include_hearth is the older name for it."""
+    return bool(p.get("include_overlays") or p.get("include_hearth"))
+
+
 def _screenshot(p: Dict) -> str:
     # Optional delay so the user can switch to the window they want
     # captured before the shutter fires. Without this, the screenshot
@@ -5311,14 +5321,6 @@ def _screenshot(p: Dict) -> str:
         capture_overlay.flash(cue)
     except Exception:
         pass
-    # Fade the activity pill out too, so JARVIS's own status HUD isn't sitting in
-    # the screenshot it's about to read (it would see "Reading the screen" text
-    # floating over the app and get confused). It comes back on the next action.
-    try:
-        from . import activity_hud
-        activity_hud.hide()
-    except Exception:
-        pass
     _t.sleep(cue)         # wait out the delay (or the brief cue when delay==0)
     # The cue fades to fully transparent by the end of `cue`; this extra settle
     # guarantees it's off-screen + destroyed before we grab, so it's never in
@@ -5333,12 +5335,9 @@ def _screenshot(p: Dict) -> str:
     img = None
     try:
         from PIL import ImageGrab  # type: ignore
-        # A shot taken while Hearth is in front contains Hearth, and the model
-        # then describes its own chat or clicks a control belonging to the
-        # assistant. Excluded only for the moment of the grab, so a screen
-        # recorder still sees the window.
-        from .win_capture import own_windows_hidden as _own_hidden
-        with _own_hidden(enabled=not bool(p.get("include_hearth"))):
+        # Inglen's overlays are never in a capture (overlays.py); its window is.
+        from .overlays import visible_to_model
+        with visible_to_model(_wants_overlays(p)):
             img = ImageGrab.grab()
         img.save(out)
     except Exception as e:
@@ -5425,21 +5424,14 @@ def _capture_active_window(p: Dict) -> str:
         except Exception:
             pass
         _t.sleep(delay + 0.35)
-    # Fade the activity pill so it isn't sitting in the captured window (a prior
-    # action may still have it up). When there's no delay, give it a beat to fade.
-    try:
-        from . import activity_hud
-        activity_hud.hide()
-    except Exception:
-        pass
-    if delay <= 0:
-        _t.sleep(0.3)
+    from .overlays import is_overlay, visible_to_model
     # Resolve target: explicit title substring, else the foreground window.
     hwnd = None
     if title:
         matches: List[int] = []
         def _en(h, _):
-            if win32gui.IsWindowVisible(h) and title.lower() in (win32gui.GetWindowText(h) or "").lower():
+            if win32gui.IsWindowVisible(h) and title.lower() in (win32gui.GetWindowText(h) or "").lower() \
+                    and not is_overlay(h):
                 matches.append(h)
         win32gui.EnumWindows(_en, None)
         hwnd = matches[0] if matches else None
@@ -5467,10 +5459,7 @@ def _capture_active_window(p: Dict) -> str:
         # all_screens=True makes the bbox virtual-screen relative, matching
         # GetWindowRect — so a window on a left/secondary monitor (negative
         # coords) still grabs correctly.
-        # Hide our own windows unless one of them IS the target, which happens
-        # when the user asked about Hearth itself.
-        from .win_capture import own_window_handles as _own, own_windows_hidden as _own_hidden
-        with _own_hidden(enabled=hwnd not in set(_own())):
+        with visible_to_model(_wants_overlays(p)):
             img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
         # Downscale to <=1280 long-edge; record the scale for smart_click.
         _le = max(img.size)
@@ -7173,9 +7162,10 @@ def _list_windows(p: Dict) -> str:
         return "list_windows needs pywin32 (pip install pywin32)."
     fg = win32gui.GetForegroundWindow()
     rows: List = []
+    from .overlays import is_overlay
 
     def _cb(hwnd, _):
-        if not win32gui.IsWindowVisible(hwnd):
+        if not win32gui.IsWindowVisible(hwnd) or is_overlay(hwnd):
             return
         title = win32gui.GetWindowText(hwnd)
         if not title:
@@ -7742,8 +7732,8 @@ def _foreground_guard():
         title = win32gui.GetWindowText(fg) or ""
     except Exception:
         return None   # can't tell — don't block a legitimate action
-    tl = title.lower()
-    if "hearth" in tl or "127.0.0.1:8765" in tl or "localhost:8765" in tl:
+    tl = title.strip().lower()
+    if tl in ("inglen", "hearth") or "127.0.0.1:8765" in tl or "localhost:8765" in tl:
         return ("Refused: the foreground is Inglen's OWN window, so keystrokes "
                 "would go into the chat, not the target app. Focus the target "
                 "first: focus_window(name='<part of its title>'), then type.")
@@ -7754,6 +7744,10 @@ def _foreground_guard():
     return None
 
 
+_KEYS_BLOCKED = ("Error: Windows blocked the keystrokes, so nothing was typed. The window in "
+                 "front is probably running as administrator, which Inglen isn't.")
+
+
 def _computer_type(p: Dict) -> str:
     _c, err = _computer_check()
     if err:
@@ -7762,7 +7756,10 @@ def _computer_type(p: Dict) -> str:
     if guard:
         return guard
     text = p.get("text", "")
-    _c.type_text(text)
+    try:
+        _c.type_text(text)
+    except _c.InputBlocked:
+        return _KEYS_BLOCKED
     return (f"typed {len(text)} character(s) into the focused window. Focus was "
             f"verified before typing, but confirm the text landed where you wanted "
             f"(capture_active_window + view_image) before moving on.")
@@ -7787,10 +7784,13 @@ def _computer_key(p: Dict) -> str:
     guard = _foreground_guard()
     if guard:
         return guard
-    if "+" in key:
-        _c.hotkey(key)
-    else:
-        _c.press_key(key)
+    try:
+        if "+" in key:
+            _c.hotkey(key)
+        else:
+            _c.press_key(key)
+    except _c.InputBlocked:
+        return _KEYS_BLOCKED
     return f"pressed {key}"
 
 
@@ -7912,6 +7912,7 @@ def _desktop_click(p: Dict) -> str:
                  double=bool(p.get("double")), button=(p.get("button") or "left"))
     if r is None:
         return "Error: no matching element — call desktop_snapshot first, then click by its idx."
+    _record_focus_target()   # the click focused its window — type verifies against it
     return f"clicked the element at ({r[0]},{r[1]})"
 
 
@@ -8043,16 +8044,23 @@ def _execute_actions(p: Dict) -> str:
                     f"runs. Allowed: {', '.join(sorted(_BATCHABLE))}.")
 
     from . import desktop_a11y as _a
+    # An idx means the control the model saw in its snapshot. A step can redraw the
+    # window and renumber it, so what each idx was is noted before anything runs.
+    seen = {s["idx"]: _a.element(s["idx"]) for s in steps if s.get("idx") is not None}
     out, acted = [], False
     for i, s in enumerate(steps, 1):
         name = s["tool"]
         args = {k: v for k, v in s.items() if k != "tool"}
         if name in ("desktop_click", "desktop_type"):
             if args.get("idx") is not None and acted:
-                out.append(f"{i}. {name}: skipped. An earlier step changed the "
-                           f"window, so idx {args['idx']} points at the old "
-                           f"snapshot. Target it by name inside a batch.")
-                break
+                _a.snapshot(60, window=(args.get("window") or ""))
+                now = _a.same_control(args["idx"], seen.get(args["idx"]))
+                if now is None:
+                    out.append(f"{i}. {name}: skipped. An earlier step changed the "
+                               f"window and idx {args['idx']} from the old snapshot "
+                               f"isn't there now. Look again, or target it by name.")
+                    break
+                args["idx"] = now
             if args.get("idx") is None and args.get("name"):
                 # Resolve the name against the window as it is now, not as it
                 # was when the model last looked at it.

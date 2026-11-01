@@ -42,8 +42,14 @@ if _WIN:
                     ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
                     ("dwExtraInfo", _PUL)]
 
+    # MOUSEINPUT is the union's largest member: without it the struct is too short
+    # on 64-bit and SendInput refuses every event.
+    class _MOUSE(ctypes.Structure):
+        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
+                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD), ("dwExtraInfo", _PUL)]
+
     class _UN(ctypes.Union):
-        _fields_ = [("ki", _KBD)]
+        _fields_ = [("mi", _MOUSE), ("ki", _KBD)]
 
     class _INPUT(ctypes.Structure):
         _fields_ = [("type", wintypes.DWORD), ("u", _UN)]
@@ -88,8 +94,8 @@ _agc_timer = None
 
 
 def _agc_arm_hide(x, y):
-    """Show the marker at (x, y) and (re)schedule it to fade ~1.8s after the last
-    move, so consecutive actions keep it lit and it clears once Hearth is idle."""
+    """Show the marker at (x, y) and (re)schedule it to fade a few seconds after the
+    last move, long enough to stay lit while the model works out its next step."""
     global _agc_timer
     if _agc is None or _threading is None:
         return
@@ -97,7 +103,7 @@ def _agc_arm_hide(x, y):
         _agc.show(x, y)
         if _agc_timer:
             _agc_timer.cancel()
-        _agc_timer = _threading.Timer(1.8, _agc.hide)
+        _agc_timer = _threading.Timer(6.0, _agc.hide)
         _agc_timer.daemon = True
         _agc_timer.start()
     except Exception:
@@ -134,6 +140,12 @@ def move(x: int, y: int, duration: float = 0.35):
     if not (_WIN or _PYN):
         return (0, 0)
     x, y = int(x), int(y)
+    if _WIN:
+        try:
+            from . import overlays
+            overlays.make_way(x, y)            # an overlay over the target lets the action through
+        except Exception:
+            pass
     try:
         sx, sy = _pos()
     except Exception:
@@ -218,11 +230,19 @@ def scroll(amount: int):
         _pyn_m.scroll(0, int(amount))
 
 
+class InputBlocked(OSError):
+    """Windows didn't take a key: the window in front runs with higher rights."""
+
+
+def _send_key(inp) -> None:
+    if _u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT)) != 1:
+        raise InputBlocked("Windows blocked the keystroke")
+
+
 def _send_unicode(ch: str):
     code = ord(ch)
     for flags in (_UNICODE, _UNICODE | _KEYUP):
-        inp = _INPUT(type=1, u=_UN(ki=_KBD(0, code, flags, 0, None)))
-        _u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+        _send_key(_INPUT(type=1, u=_UN(ki=_KBD(0, code, flags, 0, None))))
 
 
 def _scan_for_vk(vk: int) -> int:
@@ -239,8 +259,7 @@ def _send_scan(scan: int, up: bool, ext: bool = False):
     input at the scan-code layer and drop virtual-key events (keybd_event), so
     this is what makes a key actually register in a game."""
     flags = _SCANCODE | (_KEYUP if up else 0) | (_EXTENDEDKEY if ext else 0)
-    inp = _INPUT(type=1, u=_UN(ki=_KBD(0, scan, flags, 0, None)))
-    _u.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+    _send_key(_INPUT(type=1, u=_UN(ki=_KBD(0, scan, flags, 0, None))))
 
 
 def type_text(text: str):

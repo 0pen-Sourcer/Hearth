@@ -18,6 +18,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from hearth import activity_hud, claude_brain, desktop_session as ds, headless, tools  # noqa: E402
+from hearth import cu_panel  # noqa: E402
+
+cu_panel._ensure = lambda: None                    # the steps panel is never drawn here
 
 FAILS: list = []
 
@@ -42,13 +45,15 @@ ds._stop_flash = lambda h: seen["flash"].append(h)
 ds._chime = lambda: seen.__setitem__("chime", seen["chime"] + 1)
 activity_hud.done = lambda *a, **k: seen.__setitem__("done", seen["done"] + 1)
 activity_hud.for_tool = lambda n, a: seen["hud"].append(n)
+activity_hud.activity = lambda t: seen["hud"].append(t)
 
 ds.begin("read_file", {})
 check("reading a file doesn't start a session", not ds.is_active() and not seen["glow"])
 ds.begin("desktop_click", {"name": "Save"})
 ds.begin("desktop_type", {"text": "hi"})
 check("the first desktop action starts one glow", ds.is_active() and seen["glow"] == ["show"])
-check("the pill says what it's doing", seen["hud"] == ["desktop_click", "desktop_type"])
+check("the pill says the computer is in use, then what it's doing",
+      seen["hud"][0].endswith("is using your computer") and seen["hud"][1:] == ["desktop_type"])
 ds.raised(777)
 check("the end reports a session ran", ds.end() is True)
 check("the glow goes", seen["glow"][-1] == "hide")
@@ -89,8 +94,9 @@ class _Ctrl:
     def GetTopLevelControl(self):
         return _Top()
 
-    def Click(self, **k):
-        order.append("click")
+
+from hearth import computer  # noqa: E402
+computer.click = lambda *a, **k: order.append("click")
 
 
 ds.bring_to_front = lambda h: order.append(("front", h)) or True

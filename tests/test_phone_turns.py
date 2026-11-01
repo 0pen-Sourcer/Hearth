@@ -109,7 +109,7 @@ check(f"and sends the file into this same conversation ({seen.get('sent')!r})",
 check("with its message", any(o["kind"] == "text" and o["text"] == "Here it is." for o in app.out))
 q = [o["text"] for o in app.out if o["kind"] == "ask"]
 check(f"the question says the step in words, not the tool's name {q}",
-      q and q[0].startswith("Move shot.png to D:/x?") and "move_path" not in q[0])
+      q and q[0].startswith("Move a file?") and "move_path" not in q[0])
 from hearth import chat_sync  # noqa: E402
 saved = (chat_sync.load(cc.chat_id_for(app.name, "me")) or {}).get("messages") or []
 ev = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "tool"] if saved else []
@@ -118,11 +118,11 @@ check(f"the window gets each step with what came back, how long and where it was
       and ev[0]["ms"] >= 40 and ev[0]["pos"] == len("Taking one now. ") and not any(k.startswith("_") for k in ev[0]))
 asked = [e for e in (saved[-1].get("events") or []) if e.get("kind") == "ask"] if saved else []
 check(f"a question the turn asked is kept with its steps, with its answer ({asked})",
-      len(asked) == 1 and asked[0]["text"].startswith("Move shot.png") and asked[0]["answer"] is False)
+      len(asked) == 1 and asked[0]["text"].startswith("Move a file") and asked[0]["answer"] is False)
 opened = RB.answer({"what": "open", "chat": cc.chat_id_for(app.name, "me")})["messages"]
 folds = [m for m in opened if m.get("ask")]
 check(f"and a chat opened again on the phone shows it answered, where it was asked ({folds})",
-      len(folds) == 1 and folds[0]["answer"] is False and "Move shot.png" in folds[0]["text"]
+      len(folds) == 1 and folds[0]["answer"] is False and "Move a file" in folds[0]["text"]
       and opened.index(folds[0]) == len(opened) - 2)
 # A file sent from the phone: their message is what they wrote, with the file as an attachment.
 seen.clear()
@@ -143,7 +143,7 @@ got = RB.answer({"what": "open", "chat": cc.chat_id_for(app.name, "me")})["messa
 mine = [m for m in got if m.get("role") == "user"][-1]
 check(f"the phone shows the words and the file card, not the note ({mine.get('text')!r})",
       mine.get("text") == "See" and [c["name"] for c in mine.get("files") or []] == ["shot.png"])
-check("send_to_phone in plain words", cc._what("send_to_phone", {"message": "Relay test"}) == 'send this to your phone: "Relay test"')
+check("send_to_phone in plain words", cc._what("send_to_phone", {"message": "Relay test"}) == "send a message to your phone: Relay test")
 
 check("from the window (no app turn), it still asks", tools.mode_allows("send_to_phone", {"message": "x"}) is False)
 check("and with no app connected it says so",

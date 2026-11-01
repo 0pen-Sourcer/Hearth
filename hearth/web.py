@@ -708,7 +708,10 @@ def _make_permission_check(emit_fn):
                 _why = _ar.why(name, args)        # the reviewer's or the floor's reason, '' for none
             except Exception:
                 _why = ""
-            emit_fn("permission_request", id=req_id, name=name, args=args, **({"why": _why} if _why else {}))
+            from .approval import card as _card
+            _c = _card(name, args, why=_why)                      # said as every surface says it
+            emit_fn("permission_request", id=req_id, name=name, args=args, head=_c["head"], what=_c["what"],
+                    detail=_c["detail"], **({"why": _c["why"]} if _c["why"] else {}))
             try:
                 decision = _permission_queues[req_id].get(timeout=180.0)
             except _queue.Empty:
@@ -747,10 +750,11 @@ def _make_permission_check(emit_fn):
         req_id = f"perm_{int(time.time()*1000)}_extend"
         _permission_queues[req_id] = _queue.Queue()
         try:
-            emit_fn("permission_request", id=req_id,
-                    name="__extend_workspace__",
-                    args={"path": path,
-                          "parent": os.path.dirname(path) or path})
+            _a = {"path": path, "parent": os.path.dirname(path) or path}
+            from .approval import card as _card
+            _c = _card("__extend_workspace__", _a)
+            emit_fn("permission_request", id=req_id, name="__extend_workspace__", args=_a,
+                    head=_c["head"], what=_c["what"], detail=_c["detail"])
             try:
                 decision = _permission_queues[req_id].get(timeout=180.0)
             except _queue.Empty:

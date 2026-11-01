@@ -75,7 +75,7 @@ check("the voice addition is small and only present in voice mode",
 # -------------------------------------------------------- nothing it names is false
 names = {t["name"] for t in T.TOOL_DEFINITIONS} | {"load_tools"}
 mentioned = set(re.findall(r"\b([a-z]+(?:_[a-z]+)+)\b", BASE))
-not_tools = {"include_hearth", "workout_schedule"}      # a parameter and an example
+not_tools = {"include_overlays", "workout_schedule"}    # a parameter and an example
 phantom = sorted(m for m in mentioned - not_tools if m not in names)
 check("every tool it mentions exists" + (f": {phantom}" if phantom else ""), not phantom)
 
@@ -100,7 +100,8 @@ for must, why in (
         ("Never ask them for a path", "never ask for a path"),
         ("load_tools", "how to reach a held-back tool"),
         ("desktop_snapshot", "how to drive a named control"),
-        ("include_hearth", "how to look at its own window"),
+        ("include_overlays", "how to look at its own overlays"),
+        ("look before you answer", "how to look at its own window"),
         ("search_chats", "how to recall an earlier conversation"),
         ("end_session", "how to end on a goodbye"),
         ("masked", "never print a secret"),

@@ -1,21 +1,15 @@
-"""Activity HUD — a small always-on-top pill that shows what JARVIS is doing on
-the real desktop during computer-use.
+"""The activity pill: a small always-on-top label at the top of the screen that
+says what Inglen is doing while it works the desktop ("Clicking Sign in",
+"Typing", "Reading the screen", "Thinking...").
 
-When the agent drives the mouse/keyboard, the app it's controlling is focused,
-not Hearth, so the chat window can't tell the user "I'm clicking Login" — they'd
-just see the cursor move on its own. This floats a compact pill top-center with a
-pulsing dot and a one-line status ("Clicking Sign in", "Typing…", "Reading the
-screen", "Thinking…"). It never takes focus and is click-through, so it can't
-intercept the very clicks JARVIS is making underneath it.
-
-Raw win32 (pywin32), the SAME plumbing as voice_overlay / capture_overlay —
-NOT tkinter, which is excluded from the packaged build and would silently no-op
-in the shipped app. Windows-only, best-effort throughout: any failure disables
-the HUD and is swallowed. show()/done()/hide() are safe to call from any thread.
+The app being driven has the focus, so the chat can't say it; this does. It never
+takes focus, clicks pass through it, and it is left out of every capture
+(overlays.register), so the model never reads its own label. Pure ctypes on a
+per-pixel-alpha layered window, the same plumbing as the steps panel. Windows
+only and best-effort: any failure disables it silently. Safe from any thread.
 """
 from __future__ import annotations
 
-import os
 from . import env as _env
 import sys
 import threading
@@ -46,6 +40,7 @@ DESKTOP_TOOLS = {
     "desktop_click", "desktop_type", "desktop_snapshot",
     "execute_actions", "wait_for_element",
     "smart_click", "focus_window", "screenshot", "view_image",
+    "open_app", "open_url", "open_in_browser", "manage_window", "arrange_windows",
 }
 
 _VERB = {
@@ -59,39 +54,35 @@ _VERB = {
     "computer_drag": "Dragging",
     "computer_move": "Moving to",
     "focus_window": "Switching to",
+    "open_app": "Opening",
+    "open_url": "Opening",
+    "open_in_browser": "Opening",
     "computer_screen": "Looking at the screen",
     "screenshot": "Looking at the screen",
     "desktop_snapshot": "Reading the screen",
     "view_image": "Looking",
 }
 
-# Colors are win32 COLORREF (0x00BBGGRR).
-_BG_KEY = 0x00010101      # near-black, painted transparent via color-key
-_PILL = 0x00181114        # dark pill background (#141118)
-_FG = 0x00ECECEC          # near-white text
-_ACCENT = 0x006AA8C9      # gold dot (#c9a86a in BGR), when the look can't be read
+_ACCENT = 0x006AA8C9      # COLORREF, when the look can't be read
 
 
 def _accent() -> int:
-    """The pulsing dot in the accent of the look in use."""
+    """The pulsing dot in the accent of the look in use, as a COLORREF."""
     try:
         from .voice_overlay import accent_colorref
         return accent_colorref()
     except Exception:
         return _ACCENT
-_DONE = 0x008FD87B        # green dot (#7bd88f in BGR)
 
 
 def _enabled() -> bool:
-    """HUD is on unless disabled, and only where a real desktop exists. Off for
-    the phone/chat bridges and one-shot headless runs (HEARTH_NO_GUI=1)."""
+    """On unless turned off. A turn from the phone or a chat app acts on this same
+    screen, so it shows for those too."""
     if sys.platform != "win32":
         return False
     v = _env.get("ACTIVITY_HUD")
     if v is not None:
         return v.strip().lower() not in ("0", "false", "no", "off")
-    if _env.get("NO_GUI") == "1":
-        return False
     try:
         from .web import _load_settings
         s = _load_settings()
@@ -179,8 +170,22 @@ def hide() -> None:
 
 
 # ---------------------------------------------------------------------------
-# win32 render thread
+# render thread
 # ---------------------------------------------------------------------------
+# Steady by construction: the window never moves or resizes while it is up. It is
+# as wide as the longest label and centred once; the pill inside it changes width
+# on a spring, holds its width a moment before shrinking (so "Thinking…" between
+# two clicks doesn't make it breathe), and new words fade in where they stand.
+PILL_BG = (0x14, 0x11, 0x18)
+PILL_BORDER = (0x2A, 0x25, 0x30)
+PILL_FG = (0xEC, 0xEC, 0xEC)
+DONE_RGB = (0x6F, 0xBF, 0x8E)
+MAX_W, MIN_W, HEIGHT, TOP = 520, 120, 32, 14       # px at 100%
+PAD_L, DOT_D, GAP, PAD_R = 12, 7, 8, 15
+SHRINK_AFTER_S = 1.2
+FADE_IN_S = 0.18
+
+
 def _ensure_started() -> None:
     global _thread
     if _disabled:
@@ -191,261 +196,176 @@ def _ensure_started() -> None:
         if _thread is not None and _thread.is_alive():
             return
         try:
-            _thread = threading.Thread(target=_run, name="hearth-activity-hud",
-                                       daemon=True)
+            _thread = threading.Thread(target=_run, name="hearth-activity-hud", daemon=True)
             _thread.start()
         except Exception:
             pass
 
 
+def _session_on() -> bool:
+    try:
+        from .desktop_session import is_active
+        return bool(is_active())
+    except Exception:
+        return False
+
+
+class _Pill:
+    def __init__(self):
+        import numpy as np
+        from . import overlays as ov
+        self.np, self.ov = np, ov
+        ov.per_monitor_thread()
+        # LAYERED | TRANSPARENT (click-through) | TOPMOST | NOACTIVATE | TOOLWINDOW
+        ex = 0x00080000 | 0x00000020 | 0x00000008 | 0x08000000 | 0x00000080
+        self.s = ov.Surface("HearthActivityHUD", ex)
+        ov.register(self.s.hwnd)
+        self.width = ov.Spring(MIN_W, 16.0)
+        self.alpha = ov.Spring(0.0, 18.0)
+        self.drop = ov.Spring(1.0, 18.0)            # 1 = tucked 6 px up, 0 = in place
+        self.scale = 0.0
+        self.area = None
+        self.raw = None
+        self.text = ""
+        self.text_at = 0.0
+        self.shorter_since = 0.0
+        self.pulse0 = time.monotonic()
+        self.dot_at = -10.0
+        self.dot_rgb = (0xCF, 0x70, 0x89)
+        self._layout()
+
+    def _layout(self):
+        ov = self.ov
+        self.area = ov.primary_work_area()
+        sc = self.area[4]
+        if sc != self.scale:
+            self.scale = sc
+            self.font = self.s.font(round(13 * sc))
+            self.s.canvas(self._px(MAX_W), self._px(HEIGHT + 8))
+
+    def _px(self, v):
+        return int(round(v * self.scale))
+
+    def _text_w(self, t):
+        return self.s.measure(t, self.font, 4000, 0x20 | 0x800)[0]
+
+    def fit(self, t):
+        """The label, cut with an ellipsis to the widest pill."""
+        room = self._px(MAX_W - PAD_L - DOT_D - GAP - PAD_R)
+        if self._text_w(t) <= room:
+            return t
+        lo, hi = 0, len(t)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if self._text_w(t[:mid].rstrip() + "…") <= room:
+                lo = mid
+            else:
+                hi = mid - 1
+        return t[:lo].rstrip() + "…"
+
+    def frame(self, want, raw, kind, now, dt):
+        if raw != self.raw:
+            self.raw, self.text, self.text_at = raw, self.fit(raw), now
+        natural = self._px(PAD_L + DOT_D + GAP + PAD_R) + self._text_w(self.text)
+        natural = max(self._px(MIN_W), min(self._px(MAX_W), natural))
+        if natural >= self.width.target or not self.alpha.x > 0.02:
+            self.width.target, self.shorter_since = natural, 0.0
+        elif not self.shorter_since:
+            self.shorter_since = now
+        elif now - self.shorter_since > SHRINK_AFTER_S:
+            self.width.target, self.shorter_since = natural, 0.0
+        if self.alpha.x < 0.02 and want:
+            self.width.snap(natural)                     # appears at its size, not growing from nothing
+        self.alpha.target = 1.0 if want else 0.0
+        self.drop.target = 0.0 if want else 1.0
+        for sp in (self.width, self.alpha, self.drop):
+            sp.step(dt)
+        if not want and self.alpha.x < 0.01:
+            self.s.hide()
+            return False
+        self.paint(kind, now)
+        return True
+
+    def paint(self, kind, now):
+        np, ov, s = self.np, self.ov, self.s
+        Wc, Hc = s.size
+        h = self._px(HEIGHT)
+        w = self.width.x
+        x0 = (Wc - w) / 2
+        y0 = self._px(1)
+        img = np.zeros((Hc, Wc, 3), dtype=np.float32)
+        img[...] = PILL_BG
+        outer = ov.rrect_cov(np, Hc, Wc, x0, y0, x0 + w, y0 + h, h / 2)
+        inner = ov.rrect_cov(np, Hc, Wc, x0 + 1, y0 + 1, x0 + w - 1, y0 + h - 1, h / 2 - 1)
+        ov.paint(np, img, np.clip(outer - inner, 0, 1), PILL_BORDER)
+        cx, cy = x0 + self._px(PAD_L) + self._px(DOT_D) / 2, y0 + h / 2
+        if kind == "done":
+            dot, k = DONE_RGB, 1.0
+        else:
+            import math
+            t = (now - self.pulse0) % 1.4 / 1.4
+            k = 1.0 - 0.65 * (0.5 - 0.5 * math.cos(2 * math.pi * t))
+            if now - self.dot_at > 1.0:                  # settings read once a second, not per frame
+                c = _accent()
+                self.dot_rgb, self.dot_at = (c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF), now
+            dot = self.dot_rgb
+        ov.fill_circle(np, img, cx, cy, self._px(DOT_D) / 2, dot, k)
+        arr = s.array(np)
+        arr[..., :3] = np.clip(img[..., ::-1] + 0.5, 0, 255).astype(np.uint8)
+        fade = min(1.0, (now - self.text_at) / FADE_IN_S)
+        fade = fade * fade * (3 - 2 * fade)
+        col = ov.mix(PILL_BG, PILL_FG, fade)
+        tx = x0 + self._px(PAD_L + DOT_D + GAP)
+        # Not clipped to the pill: the shape's alpha cuts it, so the words never re-ellipsize mid-spring.
+        s.text(self.text, (tx, y0, tx + 4000, y0 + h), self.font, col, 0x20 | 0x4 | 0x800 | 0x100)
+        a = outer
+        arr[..., :3] = np.clip(arr[..., :3].astype(np.float32) * a[..., None] + 0.5, 0, 255).astype(np.uint8)
+        arr[..., 3] = np.clip(a * 255 + 0.5, 0, 255).astype(np.uint8)
+        left, top, right, bottom, _ = self.area
+        x = left + ((right - left) - Wc) // 2
+        y = top + self._px(TOP) - int(round(self._px(6) * self.drop.x))
+        s.present(x, y, self.alpha.x)
+
+
 def _run() -> None:
     global _disabled
     try:
-        import ctypes
-        import math
-        from ctypes import wintypes
-        import win32api
-        import win32con
-        import win32gui
+        pill = _Pill()
     except Exception:
+        if _env.get("OVERLAY_DEBUG"):
+            import traceback; traceback.print_exc()
         _disabled = True
         return
-
-    def _scale_color(cref: int, k: float) -> int:
-        """Scale a COLORREF (0x00BBGGRR) brightness by k (0..1)."""
-        k = max(0.0, min(1.0, k))
-        b = (cref >> 16) & 0xFF
-        g = (cref >> 8) & 0xFF
-        r = cref & 0xFF
-        return (int(b * k) << 16) | (int(g * k) << 8) | int(r * k)
-
-    try:
-        # DPI scale (physical px per logical) so the pill isn't tiny on a scaled
-        # display. LOGPIXELSX = 88; a DPI-aware host reports the real DPI here.
+    last = time.monotonic()
+    area_at = last
+    top_at = 0.0
+    while True:
         try:
-            _dc0 = ctypes.windll.user32.GetDC(0)
-            dpi = ctypes.windll.gdi32.GetDeviceCaps(_dc0, 88) or 96
-            ctypes.windll.user32.ReleaseDC(0, _dc0)
-            sc = max(1.0, dpi / 96.0)
-        except Exception:
-            sc = 1.0
-
-        def _px(n):
-            return max(1, int(round(n * sc)))
-
-        PAD_L, GAP, PAD_R = _px(15), _px(9), _px(17)
-        HEIGHT = _px(38)
-        DOT_BOX = _px(18)
-        TXT_H = _px(15)
-        Y = _px(24)
-
-        hinst = win32api.GetModuleHandle(None)
-        cls = "HearthActivityHUD"
-
-        # Two fonts: text (Segoe UI) + dot glyph (Segoe UI Symbol).
-        def _mkfont(h, face):
-            try:
-                lf = win32gui.LOGFONT()
-                lf.lfHeight = h
-                lf.lfFaceName = face
-                lf.lfQuality = 5  # CLEARTYPE
-                return win32gui.CreateFontIndirect(lf)
-            except Exception:
-                return None
-
-        txt_font = _mkfont(-TXT_H, "Segoe UI")
-        dot_font = _mkfont(_px(16), "Segoe UI Symbol")
-
-        # A cached screen DC to measure text width (GetTextExtentPoint32W).
-        class _SIZE(ctypes.Structure):
-            _fields_ = [("cx", wintypes.LONG), ("cy", wintypes.LONG)]
-
-        _measure_dc = ctypes.windll.user32.GetDC(0)
-
-        def _text_w(s: str) -> int:
-            if not s:
-                return 0
-            try:
-                old = ctypes.windll.gdi32.SelectObject(_measure_dc, txt_font)
-                sz = _SIZE()
-                ctypes.windll.gdi32.GetTextExtentPoint32W(
-                    _measure_dc, s, len(s), ctypes.byref(sz))
-                ctypes.windll.gdi32.SelectObject(_measure_dc, old)
-                return int(sz.cx)
-            except Exception:
-                return int(len(s) * TXT_H * 0.6)
-
-        # Render-frame snapshot, refreshed from _state each tick.
-        frame = {"text": "", "kind": "work", "pulse": 0.0}
-
-        def _wnd_proc(hwnd, msg, wparam, lparam):
-            if msg == win32con.WM_ERASEBKGND:
-                return 1
-            if msg == win32con.WM_PAINT:
-                hdc, ps = win32gui.BeginPaint(hwnd)
-                rect = win32gui.GetClientRect(hwnd)
-                w, h = rect[2], rect[3]
-                mem = win32gui.CreateCompatibleDC(hdc)
-                bmp = win32gui.CreateCompatibleBitmap(hdc, w, h)
-                old_bmp = win32gui.SelectObject(mem, bmp)
-                # transparent key everywhere, then the pill body over it
-                key = win32gui.CreateSolidBrush(_BG_KEY)
-                win32gui.FillRect(mem, (0, 0, w, h), key)
-                win32gui.DeleteObject(key)
-                pill = win32gui.CreateSolidBrush(_PILL)
-                win32gui.FillRect(mem, (0, 0, w, h), pill)
-                win32gui.DeleteObject(pill)
-                win32gui.SetBkMode(mem, win32con.TRANSPARENT)
-                # pulsing dot
-                if dot_font:
-                    of = win32gui.SelectObject(mem, dot_font)
-                    is_done = frame["kind"] == "done"
-                    if is_done:
-                        dot_col = _DONE
-                    else:
-                        k = 0.55 + 0.45 * math.sin(frame["pulse"])
-                        dot_col = _scale_color(_accent(), k)
-                    win32gui.SetTextColor(mem, dot_col)
-                    win32gui.DrawText(mem, "●", -1,
-                                      (PAD_L, 0, PAD_L + DOT_BOX, h),
-                                      win32con.DT_CENTER | win32con.DT_VCENTER
-                                      | win32con.DT_SINGLELINE)
-                    win32gui.SelectObject(mem, of)
-                # text
-                if txt_font:
-                    of = win32gui.SelectObject(mem, txt_font)
-                    win32gui.SetTextColor(mem, _FG)
-                    tx = PAD_L + DOT_BOX + GAP
-                    win32gui.DrawText(mem, frame["text"], -1,
-                                      (tx, 0, w - PAD_R, h),
-                                      win32con.DT_LEFT | win32con.DT_VCENTER
-                                      | win32con.DT_SINGLELINE
-                                      | win32con.DT_END_ELLIPSIS)
-                    win32gui.SelectObject(mem, of)
-                win32gui.BitBlt(hdc, 0, 0, w, h, mem, 0, 0, win32con.SRCCOPY)
-                win32gui.SelectObject(mem, old_bmp)
-                win32gui.DeleteObject(bmp)
-                win32gui.DeleteDC(mem)
-                win32gui.EndPaint(hwnd, ps)
-                return 0
-            if msg == win32con.WM_NCHITTEST:
-                return win32con.HTTRANSPARENT   # click-through
-            if msg == win32con.WM_DESTROY:
-                win32gui.PostQuitMessage(0)
-                return 0
-            return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
-
-        wc = win32gui.WNDCLASS()
-        wc.lpszClassName = cls
-        wc.hInstance = hinst
-        wc.lpfnWndProc = _wnd_proc
-        try:
-            win32gui.RegisterClass(wc)
-        except Exception:
-            pass
-
-        sw = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
-        ex = (win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST
-              | win32con.WS_EX_TOOLWINDOW | win32con.WS_EX_NOACTIVATE)
-        hwnd = win32gui.CreateWindowEx(ex, cls, None, win32con.WS_POPUP,
-                                       0, Y, 10, HEIGHT, 0, 0, hinst, None)
-        win32gui.SetLayeredWindowAttributes(
-            hwnd, _BG_KEY, 0, win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
-
-        MAX_A = 235
-        alpha = 0.0
-        cur_w = 0
-        shown_win = False
-        last_topmost = 0.0
-
-        while True:
+            pill.s.pump()
+            now = time.monotonic()
+            dt, last = min(0.05, now - last), now
             with _lock:
-                want = _state["want"]
-                text = _state["text"]
-                kind = _state["kind"]
-                last = _state["last"]
-                done_until = _state["done_until"]
-
-            now = time.time()
-            # Auto-hide: short hold after a Done tick, else the idle timeout.
+                want, text, kind = _state["want"], _state["text"], _state["kind"]
+                last_act, done_until = _state["last"], _state["done_until"]
+            wall = time.time()
             if want:
                 if kind == "done":
-                    if now > done_until:
+                    if wall > done_until:
                         want = False
-                        with _lock:
-                            _state["want"] = False
-                elif (now - last) > _IDLE_HIDE_S:
+                elif wall - last_act > _IDLE_HIDE_S and not _session_on():
                     want = False
+                if not want:
                     with _lock:
                         _state["want"] = False
-
-            frame["text"] = text
-            frame["kind"] = kind
-
-            # Resize + recenter when the text (width) changes.
-            desired = PAD_L + DOT_BOX + GAP + _text_w(text) + PAD_R
-            desired = max(_px(120), min(_px(560), desired))
-            if want and desired != cur_w:
-                cur_w = desired
-                x = int((sw - cur_w) / 2)
-                try:
-                    win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, x, Y,
-                                          cur_w, HEIGHT,
-                                          win32con.SWP_NOACTIVATE)
-                except Exception:
-                    pass
-
-            # Ease alpha toward target.
-            target = MAX_A if want else 0.0
-            alpha += (target - alpha) * 0.30
-            if want and not shown_win:
-                try:
-                    win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
-                except Exception:
-                    pass
-                shown_win = True
-            try:
-                win32gui.SetLayeredWindowAttributes(
-                    hwnd, _BG_KEY, int(max(0, min(MAX_A, alpha))),
-                    win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
-            except Exception:
-                pass
-            if not want and alpha < 2 and shown_win:
-                try:
-                    win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
-                except Exception:
-                    pass
-                shown_win = False
-                cur_w = 0  # force a resize+recenter on next show
-
-            # Advance the dot pulse (frozen on Done).
-            if want and kind != "done":
-                frame["pulse"] += 0.16
-
-            try:
-                if shown_win:
-                    win32gui.InvalidateRect(hwnd, None, False)
-                if now - last_topmost > 1.0:
-                    last_topmost = now
-                    if shown_win:
-                        win32gui.SetWindowPos(
-                            hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
-                            win32con.SWP_NOSIZE | win32con.SWP_NOMOVE
-                            | win32con.SWP_NOACTIVATE)
-                win32gui.PumpWaitingMessages()
-            except Exception:
-                break
-            time.sleep(0.033)   # ~30fps
-    except Exception:
-        _disabled = True
-    finally:
-        try:
-            ctypes.windll.user32.ReleaseDC(0, _measure_dc)
+            if now - area_at > 2.0:
+                area_at = now
+                pill._layout()
+            shown = pill.frame(want, text, kind, now, dt)
+            if shown and now - top_at > 1.0:
+                top_at = now
+                pill.s.keep_on_top()
+            time.sleep(1 / 60 if shown else 0.1)
         except Exception:
-            pass
-        for _f in (locals().get("txt_font"), locals().get("dot_font")):
-            try:
-                if _f:
-                    win32gui.DeleteObject(_f)
-            except Exception:
-                pass
+            if _env.get("OVERLAY_DEBUG"):
+                import traceback; traceback.print_exc()
+            time.sleep(0.2)

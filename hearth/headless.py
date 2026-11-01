@@ -2735,6 +2735,12 @@ async def run_once(prompt: str, **kw) -> int:
                                supervised=kw.get("supervised", True))
     except Exception:
         pass
+    _watch = None
+    try:
+        from . import desktop_session
+        kw, _watch = desktop_session.watch(prompt, kw)      # the steps panel follows this turn
+    except Exception:
+        pass
     try:
         return await _run_once(prompt, **kw)
     finally:
@@ -2746,7 +2752,7 @@ async def run_once(prompt: str, **kw) -> int:
         _TURN_ACTIVE.clear()
         try:
             from . import desktop_session
-            desktop_session.end()      # the screen goes back to them, however the turn ended
+            desktop_session.turn_over(_watch)      # the screen goes back to them, however the turn ended
         except Exception:
             pass
 

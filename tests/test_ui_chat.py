@@ -1261,7 +1261,7 @@ with sync_playwright() as pw:
         obState.approval = mode; obStep = 7; $('onboard').classList.add('open');
         const strip = document.querySelector('#ob-demo .obd-strip');
         const asked = [];
-        const mo = new MutationObserver(() => { const t = strip.querySelector('.perm-tool'); if (t && !asked.includes(t.textContent)) asked.push(t.textContent); });
+        const mo = new MutationObserver(() => { const t = strip.querySelector('.perm-tool'); const w = t && t.textContent.split(' wants to ')[1]; if (w && !asked.includes(w)) asked.push(w); });
         mo.observe(strip, { childList: true, subtree: true });
         document.querySelector('#onboard .ob-card').classList.add('ob-wide');
         const p = obDemoStart();
@@ -1275,8 +1275,8 @@ with sync_playwright() as pw:
       return { seen, cards: feed.querySelectorAll('.tool').length, mode: document.querySelector('#ob-demo .obd-mode').textContent };
     }""")
     check(f"setup plays each approval mode out: what asks first and what just runs {demo}",
-          demo["seen"] == {"ask": ["edit_file", "run_command", "delete_path"], "edits": ["run_command", "delete_path"],
-                           "auto": ["delete_path"]} and demo["cards"] == 3 and demo["mode"] == "Auto")
+          demo["seen"] == {"ask": ["change a file", "run a command", "delete a file"],
+                           "edits": ["run a command", "delete a file"], "auto": ["delete a file"]} and demo["cards"] == 3 and demo["mode"] == "Auto")
     # The card widens on that step, and the picked option's highlight stayed
     # where the narrow card had put it, half over the next option.
     fit = pg.evaluate("""async () => {
@@ -1342,7 +1342,7 @@ with sync_playwright() as pw:
       for (let i = 0; i < 200 && !document.querySelector('#ob-demo .obd-strip .perm-strip'); i++) await sleep(10);
       const said = [document.querySelector('#ob-demo .obd-ph').textContent,
                     (document.querySelector('#ob-demo .msg.assistant .role-name') || {}).textContent,
-                    (document.querySelector('#ob-demo .obd-strip [data-agent-name]') || {}).textContent];
+                    ((document.querySelector('#ob-demo .obd-strip .perm-tool') || {}).textContent || '').split(' wants to ')[0]];
       obDemoStop(); await p;
       document.querySelector('#ob-roomlook [data-roomlook="him"]').click();
       for (let i = 0; i < 200 && !document.querySelector('#ob-demo .obd-guy').style.backgroundImage; i++) await sleep(10);

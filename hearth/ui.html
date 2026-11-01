@@ -1796,8 +1796,15 @@
   @keyframes perm-in { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
   .perm-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .perm-label { color: var(--fg-faint); font-size: 12px; }
-  .perm-tool { background: var(--bg-0); color: var(--accent-2); padding: 2px 8px; border-radius: 5px; font-size: 12px; }
-  .perm-args { color: var(--fg-faint); font-size: 11px; font-family: var(--mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .perm-head { font: 600 13.5px/1.4 var(--sans); color: var(--fg); flex: 1; min-width: 0; }
+  .perm-args { margin: 7px 0 2px; padding: 7px 10px; border-radius: 7px; background: var(--bg-0); color: var(--fg-dim);
+    font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; max-height: 7.6em; overflow: hidden; }
+  .perm-args[data-expanded="1"] { max-height: 38vh; overflow-y: auto; }
+  .perm-key.yes { background: var(--accent); color: var(--on-accent, #16110e); }
+  .perm-key.yes b { color: inherit; opacity: .7; }
+  .perm-key.yes:hover { background: var(--accent-2); color: var(--on-accent, #16110e); }
+  .perm-declined { display: flex; align-items: center; gap: 7px; margin: 4px 0 8px; font: 12.5px/1.45 var(--sans); color: var(--fg-faint); }
+  .perm-declined svg { width: 13px; height: 13px; flex-shrink: 0; }
   .perm-close { margin-left: auto; color: var(--fg-faint); cursor: pointer; padding: 0 6px; font-size: 16px; line-height: 1; }
   .perm-close:hover { color: var(--err); }
   .perm-keys { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--fg-faint); }
@@ -4326,18 +4333,17 @@
            instead" field. No center modal, no mouse required. -->
       <div class="perm-strip" id="perm-strip" hidden>
         <div class="perm-line">
-          <span class="perm-label">Allow <span data-agent-name>Inglen</span> to run</span>
-          <code class="perm-tool" id="perm-tool"></code>
-          <span class="perm-args" id="perm-args"></span>
+          <span class="perm-head perm-tool" id="perm-tool"></span>
           <span class="perm-close" id="perm-close" title="Cancel">×</span>
         </div>
+        <pre class="perm-args" id="perm-args" hidden></pre>
         <div class="perm-why" id="perm-why" hidden></div>
         <div class="perm-keys">
-          <span class="perm-key" data-decision="allow"><b>1</b> Yes (once)</span>
-          <span class="perm-key" data-decision="deny"><b>2</b> No</span>
+          <span class="perm-key yes" data-decision="allow"><b>1</b> Allow</span>
+          <span class="perm-key" data-decision="deny"><b>2</b> Deny</span>
           <span class="perm-key" data-decision="always"><b>3</b> Always</span>
           <span class="perm-key" data-decision="never"><b>4</b> Never</span>
-          <span class="perm-hint">or just type what to do instead ↓</span>
+          <span class="perm-hint">or type what to do instead</span>
         </div>
       </div>
 
@@ -5215,7 +5221,7 @@
         <div class="field">
           <div class="label">
             <div class="name">Activity overlay</div>
-            <div class="hint">While Inglen works the desktop, a small label at the top of the screen says what it is doing. It never takes focus or blocks a click.</div>
+            <div class="hint">While Inglen works the desktop, a small label at the top of the screen and a panel at the right edge show what it is doing, with Stop. Neither takes focus or blocks a click.</div>
           </div>
           <div class="switch" data-key="activity_hud"></div>
         </div>
@@ -6879,6 +6885,9 @@ let pendingPermArgs = null;
 // a tap answers by sending the yes or the no as the next thing said.
 let pendingPermAloud = false;
 let pendingPermTap = false;
+let pendingPermWhat = '';
+// Set by the turn that asked: leaves the quiet "Declined" line in its reply.
+let pendingPermDeclined = null;
 // One approval strip, above whichever message box is on screen: the chat's,
 // or the Team room's.
 function placePermStrip() {
@@ -6891,7 +6900,21 @@ function placePermStrip() {
 }
 let pendingFollowup = null;  // text the user typed during a perm prompt; sent after current turn ends
 
-function showInlinePermission(reqId, toolName, args, why, aloud, tap) {
+// The card is said the same on every surface (hearth/approval.py): who wants to do
+// what, the specifics apart in a small box, why it asks. Older events carry only the
+// tool and its arguments.
+function _permCard(toolName, args, card) {
+  if (card && card.head) return card;
+  const a = args || {};
+  const detail = toolName === '__extend_workspace__' ? (a.parent || a.path || '')
+    : (a.command || a.path || a.url || '');
+  const what = toolName === '__extend_workspace__' ? 'write outside its folder'
+    : 'use ' + String(toolName || 'a tool').replace(/_/g, ' ');
+  return { what, detail, head: `${_agentName()} wants to ${what}` };
+}
+
+function showInlinePermission(reqId, toolName, args, why, aloud, tap, card) {
+  const c = _permCard(toolName, args, card);
   const whyEl = $('perm-why');
   if (whyEl) { whyEl.textContent = why || ''; whyEl.hidden = !why; }
   pendingPermId = reqId;
@@ -6899,53 +6922,23 @@ function showInlinePermission(reqId, toolName, args, why, aloud, tap) {
   pendingPermTap = !!tap;
   pendingPermTool = toolName;
   pendingPermArgs = args;
+  pendingPermWhat = c.what;
   placePermStrip();
   _playSound('permission');  // gentle double-knock so you notice it needs your OK (settings-gated)
-  // Special case: extend-workspace request from tools._resolve_write.
-  // Show the actual path being requested instead of dumping {"path":...} JSON.
-  if (toolName === '__extend_workspace__') {
-    const p = (args && (args.parent || args.path)) || '(unknown path)';
-    $('perm-tool').textContent = 'write outside workspace';
-    $('perm-args').textContent = p;
-    $('perm-args').title = (args && args.path) || p;
-  } else {
-    $('perm-tool').textContent = toolName;
-    // Show the FULL request on demand. The strip stays one line so it doesn't
-    // shove the input around, but you must be able to read exactly what will run
-    // before approving it, so hover carries the whole thing and clicking expands
-    // it in place (the old code truncated to 160 chars AND set the tooltip to
-    // that same truncated string, so the rest was simply unreachable).
-    let argsFull = '';
-    try {
-      argsFull = (args && typeof args === 'object' && Object.keys(args).length === 1)
-        ? String(Object.values(args)[0])            // single arg (a command) reads cleaner raw
-        : JSON.stringify(args, null, 2);
-    } catch { argsFull = String(args); }
-    const argsOneLine = argsFull.replace(/\s+/g, ' ').trim();
-    const el = $('perm-args');
-    const short = argsOneLine.length > 160 ? argsOneLine.slice(0, 160) + '…' : argsOneLine;
-    el.textContent = short;
-    el.title = argsFull;   // hover shows the WHOLE request, untruncated
-    el.style.cursor = argsOneLine.length > 160 ? 'zoom-in' : '';
-    el.dataset.expanded = '';
-    if (!el._expandWired) {
-      el._expandWired = true;
-      el.addEventListener('click', () => {
-        const isOpen = el.dataset.expanded === '1';
-        el.dataset.expanded = isOpen ? '' : '1';
-        el.textContent = isOpen ? (el._short || '') : (el._full || '');
-        el.style.whiteSpace = isOpen ? 'nowrap' : 'pre-wrap';
-        el.style.maxHeight = isOpen ? '' : '38vh';
-        el.style.overflowY = isOpen ? '' : 'auto';
-        el.style.cursor = isOpen ? 'zoom-in' : 'zoom-out';
-      });
-    }
-    el._short = short;
-    el._full = argsFull;
+  $('perm-tool').textContent = c.head;
+  const el = $('perm-args');
+  el.textContent = c.detail || '';
+  el.hidden = !c.detail;
+  el.dataset.expanded = '';
+  // Long specifics fold to a few lines; a click shows them whole before answering.
+  el.title = c.detail && c.detail.split('\n').length > 3 ? 'Click to see all of it' : '';
+  if (!el._expandWired) {
+    el._expandWired = true;
+    el.addEventListener('click', () => { el.dataset.expanded = el.dataset.expanded === '1' ? '' : '1'; });
   }
   $('perm-strip').hidden = false;
   document.getElementById('input').placeholder =
-    'or type what to do instead… (1=Yes · 2=No · 3=Always · 4=Never · Esc=deny)';
+    'or type what to do instead… (1 Allow · 2 Deny · 3 Always · 4 Never · Esc denies)';
   // Voice mode: the inline strip is hidden behind the overlay, so surface the
   // ask as clean text in the overlay itself. No box, on purpose — it stays in
   // the minimal grid+text aesthetic, and a spoken yes/no answers it.
@@ -6958,7 +6951,7 @@ function showInlinePermission(reqId, toolName, args, why, aloud, tap) {
     $('voice-ask').hidden = !tap;
     if (!pendingPermAloud) {
       setVoiceStatus('needs permission');
-      setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?' + (tap ? '  This one needs a click on Allow.' : ''));
+      setVoiceTranscript($('perm-tool').textContent + '.' + (tap ? '  This one needs a click on Allow.' : ''));
     }
   }
   setTimeout(() => document.getElementById('input').focus(), 0);
@@ -6997,11 +6990,17 @@ function hideInlinePermission() {
   document.getElementById('input').placeholder = `Message ${_agentName()}…`;
 }
 
+function _permAnswered(decision) {
+  if ((decision === 'deny' || decision === 'never') && pendingPermDeclined) pendingPermDeclined(pendingPermWhat);
+  pendingPermDeclined = null;
+}
+
 async function sendPermDecision(decision, reason) {
   if (!pendingPermId) return;
   const id = pendingPermId;
   const tool = pendingPermTool;
   const aloud = pendingPermAloud;
+  _permAnswered(decision);
   hideInlinePermission();
   if (aloud) {
     // The agent asked in words and nothing is waiting: the tap lets that step run,
@@ -7108,7 +7107,7 @@ function maybeAnswerPermByVoice(text) {
   const said = spokenAnswer(text);
   if (!said) return false;
   if (said !== 'deny' && pendingPermTap) {
-    setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  This one needs a click on Allow.');
+    setVoiceTranscript($('perm-tool').textContent + '.  This one needs a click on Allow.');
     return true;
   }
   sendPermDecision(said);
@@ -7976,6 +7975,8 @@ function replayAssistant(msgDiv, m, body) {
       appendPart(makeSteerNote(ev.text || '', false), msgDiv);
     } else if (ev.kind === 'auto_review') {
       appendPart(makeReviewNote(ev.words, ev.verdict), msgDiv);
+    } else if (ev.kind === 'declined') {
+      appendPart(makeDeclinedNote(ev.what), msgDiv);
     } else if (ev.kind === 'error') {
       const m = makeMeta(ev.text || 'error', 'err');
       if (ev.switch && ev.switch.provider) m.appendChild(planSwitchButton(ev.switch));
@@ -10805,6 +10806,14 @@ let _steerChips = [];
 // Auto's reviewer said go (or ask) for a step: the same words the phone, the
 // terminal and the chat apps show (hearth/auto_review.words).
 const _REVIEW_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
+function makeDeclinedNote(what) {
+  const d = document.createElement('div');
+  d.className = 'perm-declined';
+  d.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  const t = document.createElement('span'); t.textContent = 'Declined: ' + (what || 'that step');
+  d.appendChild(t);
+  return d;
+}
 function makeReviewNote(words, verdict) {
   const d = document.createElement('div');
   d.className = 'review-note' + (verdict === 'ask' ? ' ask' : '');
@@ -12243,7 +12252,18 @@ async function send(forced = null, displayAs = null, opts = {}) {
 
     if (ev.type === 'permission_request') {
       // Inline strip above the input - keyboard-driven, no center modal.
-      showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '', !!ev.aloud, !!ev.tap);
+      showInlinePermission(ev.id, ev.name, ev.args || {}, ev.why || '', !!ev.aloud, !!ev.tap,
+                           ev.head ? { head: ev.head, what: ev.what || '', detail: ev.detail || '' } : null);
+      pendingPermDeclined = (what) => {
+        assistantMsg.events.push({ kind: 'declined', what, pos: assistantMsg.content.length });
+        appendPart(makeDeclinedNote(what), live);
+      };
+      return;
+    }
+
+    if (ev.type === 'permission_settled') {
+      // Answered on the desktop panel: the strip here has nothing left to ask.
+      if (pendingPermId && pendingPermId === ev.id) { _permAnswered(ev.decision); hideInlinePermission(); }
       return;
     }
 
@@ -17964,7 +17984,7 @@ function winCallFrame(c, m) {
       return;
     }
     if (m.state === 'asking' && m.tap && pendingPermId) {
-      setVoiceTranscript('Allow ' + $('perm-tool').textContent + '?  This one needs a click on Allow.');
+      setVoiceTranscript($('perm-tool').textContent + '.  This one needs a click on Allow.');
       $('voice-ask').hidden = false;
     }
     return;
@@ -21557,9 +21577,9 @@ async function _obdRoom(run, live, wait) {
 // chat parts, under whichever approval mode and view is picked, then again.
 const OBD_TASK = 'Tidy my notes and commit them';
 const OBD_STEPS = [
-  { name: 'edit_file', args: { path: 'notes.md', old_text: '- call mum\n- buy milk', new_text: '## Today\n- Call mum\n- Buy milk' }, result: 'Edited notes.md' },
-  { name: 'run_command', args: { command: 'git commit -am "tidy notes"' }, result: '[main 4f2a1c9] tidy notes\n 1 file changed, 2 insertions(+), 1 deletion(-)' },
-  { name: 'delete_path', args: { path: 'notes_old.md' }, result: 'Deleted notes_old.md' },
+  { name: 'edit_file', what: 'change a file', args: { path: 'notes.md', old_text: '- call mum\n- buy milk', new_text: '## Today\n- Call mum\n- Buy milk' }, result: 'Edited notes.md' },
+  { name: 'run_command', what: 'run a command', args: { command: 'git commit -am "tidy notes"' }, result: '[main 4f2a1c9] tidy notes\n 1 file changed, 2 insertions(+), 1 deletion(-)' },
+  { name: 'delete_path', what: 'delete a file', args: { path: 'notes_old.md' }, result: 'Deleted notes_old.md' },
 ];
 const OBD_ASKS = {
   ask: () => true,
@@ -21599,9 +21619,9 @@ async function obDemoStart(what) {
         const ps = $('perm-strip').cloneNode(true);
         ps.removeAttribute('id'); ps.hidden = false;
         ps.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
-        ps.querySelector('.perm-tool').textContent = st.name;
-        ps.querySelectorAll('[data-agent-name]').forEach(e => { e.textContent = _obName(); });
+        ps.querySelector('.perm-tool').textContent = `${_obName()} wants to ${st.what}`;
         ps.querySelector('.perm-args').textContent = st.args.path || st.args.command;
+        ps.querySelector('.perm-args').hidden = false;
         strip.appendChild(ps); follow();
         await wait(1300); if (!live()) return;
         ps.querySelector('[data-decision="allow"]').classList.add('obd-press');
