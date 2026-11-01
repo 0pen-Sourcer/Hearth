@@ -599,7 +599,7 @@ class _Panel(threading.Thread):
             if a["detail"]:
                 lh = s.measure("Ag", f["mono"], iw, 0)[1]
                 _, hm = s.measure(a["detail"], f["mono"], iw - px(16), 0x10 | 0x800 | 0x2000)
-                hm = min(hm, 4 * lh)
+                hm = min(hm, 6 * lh)                   # four paths, "and N more", "to ..."
                 parts.append(("detail", a["detail"], yy, hm + px(12)))
                 yy += hm + px(12) + px(6)
             if a["why"]:
@@ -852,7 +852,7 @@ class _Panel(threading.Thread):
                 if kind == "head":
                     T(t, (ix0, oy + yy, ix1, oy + yy + hh), f["title"], FG, WB | NP | EC | ELL)
                 elif kind == "detail":
-                    T(t, (ix0 + px(8), oy + yy + px(6), ix1 - px(8), oy + yy + hh - px(6)), f["mono"], FG_DIM,
+                    T(t, (ix0 + px(8), oy + yy + px(6), ix1 - px(8), oy + yy + hh), f["mono"], FG_DIM,
                       WB | NP | EC)                  # wraps as it was measured
                 elif kind == "why":
                     T(t, (ix0, oy + yy, ix1, oy + yy + hh), f["small"], FG_DIM, WB | NP | EC | ELL)

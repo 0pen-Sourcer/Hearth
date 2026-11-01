@@ -326,6 +326,15 @@ check("a command is the specifics, apart from the words",
       c2["head"] == "Codex wants to run a command" and c2["detail"] == "npm run build")
 check("never a tool's raw name, even for a tool with no words of its own",
       "_" not in approval.card("frob_widget", {"x": 1})["head"])
+many = approval.card("delete_file", {"paths": [f"C:/Bills/{i}.pdf" for i in range(6)]}, who="Inglen")
+check(f"every path is in the box, one per line, the rest counted ({many['detail']!r})",
+      many["head"] == "Inglen wants to delete 6 files"
+      and many["detail"].splitlines() == ["C:/Bills/0.pdf", "C:/Bills/1.pdf", "C:/Bills/2.pdf", "C:/Bills/3.pdf",
+                                          "and 2 more"])
+check("the terminal lists them the same", [l.strip() for l in approval.terminal(many)[1:]] == many["detail"].splitlines())
+from hearth.relay_bridge import ask_parts  # noqa: E402
+check("the phone's box gets the same lines", ask_parts("Inglen", approval.question(many), many["detail"])["cmd"]
+      == many["detail"])
 lines = approval.terminal(c)
 check(f"the terminal says the same: the who-and-what line, the path indented ({lines})",
       lines[0].strip() == c["head"] and lines[1] == "      C:/Bills/old.pdf")

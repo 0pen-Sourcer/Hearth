@@ -25,6 +25,17 @@ def _paths(v: Any) -> List[str]:
     return [str(v)] if str(v or "").strip() else []
 
 
+SHOWN = 4      # paths listed in the box; the rest are counted
+
+
+def listing(paths: List[str]) -> str:
+    """Every path, one per line, up to SHOWN, then how many more."""
+    out = list(paths[:SHOWN])
+    if len(paths) > SHOWN:
+        out.append(f"and {len(paths) - SHOWN} more")
+    return "\n".join(out)
+
+
 def _files(paths: List[str], one: str = "a file", many: str = "files") -> str:
     if len(paths) <= 1:
         return one
@@ -47,11 +58,11 @@ def parts(name: str, args: Dict[str, Any]) -> Tuple[str, str]:
     if name in ("delete_file", "delete_path"):
         ps = _paths(a.get("paths") or a.get("path"))
         folder = name == "delete_path" and len(ps) == 1 and not os.path.splitext(ps[0])[1]
-        return "delete " + ("a folder" if folder else _files(ps)), "\n".join(ps)
+        return "delete " + ("a folder" if folder else _files(ps)), listing(ps)
     if name in ("move_path", "move_file"):
-        src = a.get("source") or a.get("src") or a.get("path")
+        src = a.get("sources") or a.get("source") or a.get("src") or a.get("path")
         dst = a.get("destination") or a.get("dst") or a.get("dest")
-        return "move " + _files(_paths(src)), "\n".join(_paths(src)) + (f"\nto {dst}" if dst else "")
+        return "move " + _files(_paths(src)), listing(_paths(src)) + (f"\nto {dst}" if dst else "")
     if name == "send_email":
         return f"send an email to {a.get('to') or 'someone'}", _cut(a.get("subject"), 200)
     if name == "send_to_phone":
