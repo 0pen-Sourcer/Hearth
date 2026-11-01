@@ -159,7 +159,7 @@ Ask for a picture or a short video in plain words. **Models, My Models** lists i
 
 ## Watching it use your desktop
 
-When Inglen clicks and types in your apps, a soft edge in your accent colour breathes round the screen and a small pill says what it's doing. Move the mouse or type and it stops to let you have the screen. When it's done the edge fades, a short chime plays, and the window you were in comes back to the front.
+When Inglen clicks and types in your apps, a soft edge in your accent colour breathes round the screen and a small pill says what it's doing. Stop in the chat ends it at any time. When it's done the edge fades, a short chime plays, and the window you were in comes back to the front.
 
 ---
 
