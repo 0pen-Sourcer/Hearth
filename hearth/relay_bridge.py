@@ -344,6 +344,28 @@ class Joiner:
 
 # ---------------------------------------------------------------- what the phone asks for
 
+def in_order(text: str, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A reply's words and steps in the order they came, as the window draws a saved turn: each step
+    keeps how much of the text was written when it ran (`_pos`); one without it goes where the last left off."""
+    parts: List[Dict[str, Any]] = []
+    cursor = 0
+    for st in steps:
+        pos = st.get("_pos")
+        pos = cursor if not isinstance(pos, int) else max(cursor, min(pos, len(text)))
+        seg = text[cursor:pos]
+        if seg.strip():
+            parts.append({"text": seg.strip()})
+        cursor = pos
+        clean = {k: v for k, v in st.items() if k != "_pos"}
+        if parts and "steps" in parts[-1]:
+            parts[-1]["steps"].append(clean)
+        else:
+            parts.append({"steps": [clean]})
+    if text[cursor:].strip():
+        parts.append({"text": text[cursor:].strip()})
+    return parts
+
+
 def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
     """A picture a step looked at (Codex's view_image, Claude Code reading a .png) as a
     card the phone shows and opens; the path alone showed only "Looked at an image"."""
@@ -442,7 +464,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
         from . import agent_sessions
         if agent_sessions.parse_chat(cid):
-            return _pictures(agent_sessions.transcript(cid, int(m.get("last") or 60)))
+            from .redact import clean_session
+            return _pictures(clean_session(agent_sessions.transcript(cid, int(m.get("last") or 60))))
         d = chat_sync.load(cid) or {}
         msgs = []
         for x in d.get("messages") or []:
@@ -472,6 +495,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                     step["out"] = cc.out_of(e.get("result"))
                 if e.get("name") == "web_search":
                     step["sites"] = cc.sites_in(str(e.get("result") or ""))
+                step["_pos"] = e.get("pos")
                 steps.append(step)
             # The window keeps a turn's stats on its done event and its reasoning as think chunks.
             done = next((e for e in reversed(events) if e.get("kind") == "done"), {})
@@ -497,10 +521,14 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             if failed and not text.strip():
                 msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
                 continue
+            parts = in_order(text, steps) if role == "assistant" and steps else None
+            for st in steps:
+                st.pop("_pos", None)
             if text or steps or files:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps, "files": files,
                              "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
-                             "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)]})
+                             "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)],
+                             **({"parts": parts} if parts else {})})
         keep = int(m.get("last") or 60)
         return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
                 "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
@@ -832,6 +860,7 @@ def voice_view(m: Dict[str, Any]) -> Dict[str, Any]:
         r = _window("POST", "/api/settings", {"voice_name": pick})
         if r.get("ok") is False:
             return r
+        _voice.set_default_voice(pick)            # this process too: calls and Read aloud speak from here
     settings = _window("GET", "/api/settings")
     return {"voice": str(settings.get("voice_name") or _voice.current_voice()), "voices": voices()}
 
@@ -1504,7 +1533,8 @@ class Room:
             from .call_me import agent_name
             # The turns running now: the phone drops any other it still draws as
             # working (one whose end it missed while it was closed).
-            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running()})
+            # acks: this PC answers each message with "got", so the phone knows what reached it.
+            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running(), "acks": True})
             warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "box" and self.phone:          # Allow or Deny tapped on a notification
@@ -1564,9 +1594,18 @@ class Room:
 
         speaker = _voice.Speaker(sink=Sink(), first_chunk=40)
         self.saying = speaker
+        # The voice picked now (on the phone or in the window), read at the time: this bridge
+        # runs in a process of its own, started with whatever voice was set then.
+        from .call_me import _settings as saved
+        s = saved()
+        voice = str(s.get("voice_name") or "").strip() or None
+        try:
+            speed = float(s.get("voice_speed")) if s.get("voice_speed") else None
+        except (TypeError, ValueError):
+            speed = None
 
         def run():
-            said = speaker.speak(str(m["text"]), blocking=True)
+            said = speaker.speak(str(m["text"]), blocking=True, voice=voice, speed=speed)
             if said == "no_voice":
                 _log("read aloud: voice isn't set up on this PC")
                 send({"type": "say.error", "detail": "Voice isn't set up on your PC"})
@@ -1702,6 +1741,7 @@ class Bridge:
         self._said: Dict[str, List[str]] = {}
         self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
         self.phone_sessions: Dict[str, float] = {}          # session chat -> when the phone last sent into it
+        self._got: List[str] = []                           # the phone's messages taken, by their id
         from . import call_me
         self.rings = call_me.Rings()                        # the agent calling the phone by itself
         self._ring_timer: Optional[threading.Timer] = None
@@ -1751,23 +1791,25 @@ class Bridge:
             return
         if m.get("type") != "user":
             return
-        from . import agent_sessions
-        if agent_sessions.parse_chat(str(m.get("chat") or "")):
-            # Pictures and files sent into a coding agent's session go with the message, saved where it can open them.
-            paths = []
-            for f in m.get("files") or []:
-                try:
-                    paths.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
-                except Exception:
-                    continue
-            self.agent_say(room, dict(m, paths=paths))
+        mid = str(m.get("mid") or "")[:40]
+        if mid and mid in self._got:
+            self._ack(room, mid)                  # sent again because the first answer was lost: taken once
             return
-        files = []
+        from . import agent_sessions
+        saved = []
         for f in m.get("files") or []:
             try:
-                files.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
+                saved.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
             except Exception:
                 continue
+        if mid:
+            self._got = (self._got + [mid])[-500:]
+            self._ack(room, mid)                  # here, with its files saved: the phone stops holding it
+        if agent_sessions.parse_chat(str(m.get("chat") or "")):
+            # Pictures and files sent into a coding agent's session go with the message, saved where it can open them.
+            self.agent_say(room, dict(m, paths=saved))
+            return
+        files = saved
         voice = ""
         if m.get("voice"):
             ext = str(m.get("voice_ext") or "webm").strip(".").lower()
@@ -1785,6 +1827,15 @@ class Bridge:
             drop_from(cid, str(edit.get("text") or ""), int(edit.get("back") or 0))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
                          cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
+
+    def _ack(self, room: Room, mid: str) -> None:
+        """Tell the phone its message is here. Until it hears this it keeps the message and sends it again."""
+        fut = asyncio.run_coroutine_threadsafe(room.deliver({"type": "got", "mid": mid, "id": secrets.token_hex(6)}),
+                                               self.loop)
+        try:
+            fut.result(15)
+        except Exception:
+            pass
 
     def on_answer(self, room: Room, m: Dict[str, Any]) -> None:
         """Allow or Deny from a notification. It answers only the question it was
@@ -2203,6 +2254,13 @@ class Bridge:
             threading.Thread(target=self.to_phone, args=(ev,), daemon=True, name="relay-to-phone").start()
             return
         out: Optional[Dict[str, Any]] = None
+        if kind == "settings" and "voice_name" in (ev.get("keys") or []):
+            # The voice picked in the window: calls and Read aloud on the phone speak in it from now.
+            from .call_me import _settings as saved
+            from . import voice as _voice
+            v = str(saved().get("voice_name") or "").strip()
+            if v:
+                _voice.set_default_voice(v)
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
             _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh
             out = {"type": "changed", "what": "brain"}

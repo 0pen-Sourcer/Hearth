@@ -161,7 +161,7 @@ def _saved_values() -> List[str]:
         return []
 
 
-def mask_known(text: str, values=None) -> Tuple[str, List[Dict[str, str]]]:
+def mask_known(text: str, values=None, placeholder: str = "<REDACTED_KEY>") -> Tuple[str, List[Dict[str, str]]]:
     """Mask the person's own saved secrets (provider keys, bot tokens, the licence
     key, the mail password), matched exactly, whatever shape they have."""
     if not text or not isinstance(text, str):
@@ -170,8 +170,29 @@ def mask_known(text: str, values=None) -> Tuple[str, List[Dict[str, str]]]:
     for v in (values if values is not None else _saved_values()):
         if v and v in text:
             n += text.count(v)
-            text = text.replace(v, "<REDACTED_KEY>")
+            text = text.replace(v, placeholder)
     return text, ([{"type": "saved key", "count": str(n)}] if n else [])
+
+
+# What a person reads in place of a key in an agent's steps and replies.
+HIDDEN = "[key hidden]"
+# A sample written by hand (in a test, in docs): a run of the alphabet or digits, a word, one
+# character over and over. A real key, being random, never holds one of these.
+_MADE_UP = re.compile(r"abcdefgh|bcdefghi|ABCDEFGH|BCDEFGHI|0123456|1234567|EXAMPLE|[Ee]xample|"
+                      r"FAKE|[Ff]ake|xxxxxxxx|XXXXXXXX|(.)\1{7}")
+
+
+def for_display(text: str) -> str:
+    """An agent's work as the person reads it (a step's command and output, its words): the
+    saved secrets and real key shapes read as [key hidden]; a sample made up by hand stays."""
+    if not text or not isinstance(text, str):
+        return text
+    out, _ = mask_known(text.replace("<REDACTED_KEY>", HIDDEN), placeholder=HIDDEN)
+    for label, pat in _KEY_PATTERNS:
+        if label in _NOT_FOR_MODEL:
+            continue
+        out = pat.sub(lambda m: m.group(0) if _MADE_UP.search(m.group(0)) else HIDDEN, out)
+    return out
 
 
 _EMIT_TEXT = ("text", "content", "out", "words", "cmd", "message", "reply", "result", "detail", "preview")
@@ -186,13 +207,29 @@ def clean_emit(emit):
     def wrapped(kind, **fields):
         for k in _EMIT_TEXT:
             if isinstance(fields.get(k), str):
-                fields[k] = redact_for_model(fields[k])[0]
+                fields[k] = for_display(fields[k])
         a = fields.get("args")
         if isinstance(a, dict):
-            fields["args"] = {k: redact_for_model(v)[0] if isinstance(v, str) else v for k, v in a.items()}
+            fields["args"] = {k: for_display(v) if isinstance(v, str) else v for k, v in a.items()}
         return emit(kind, **fields)
     wrapped._cleaned = True
     return wrapped
+
+
+def clean_session(got: Dict) -> Dict:
+    """A session read back for the phone or the window, cleaned as its live steps are."""
+    for m in got.get("messages") or []:
+        if isinstance(m.get("text"), str):
+            m["text"] = for_display(m["text"])
+        for st in list(m.get("steps") or []) + [x for p in m.get("parts") or [] for x in p.get("steps") or []]:
+            if isinstance(st, dict):
+                for k in ("w", "cmd", "out"):
+                    if isinstance(st.get(k), str):
+                        st[k] = for_display(st[k])
+        for p in m.get("parts") or []:
+            if isinstance(p.get("text"), str):
+                p["text"] = for_display(p["text"])
+    return got
 
 
 # Generic enough to be ordinary data (ids) in what a tool returns to a model.
