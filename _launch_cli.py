@@ -12,6 +12,20 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# A spawned child started without a console has no streams: a library printing
+# from the speech worker would kill it. Its output goes to logs/speech_worker.log.
+if "--multiprocessing-fork" in sys.argv and (sys.stdout is None or sys.stderr is None):
+    _h = os.path.expanduser("~")
+    _w = (os.environ.get("HEARTH_WORKSPACE") or os.environ.get("JARVIS_WORKSPACE")
+          or os.path.join(_h, "Jarvis" if os.path.isdir(os.path.join(_h, "Jarvis")) else "Inglen"))
+    try:
+        os.makedirs(os.path.join(_w, "logs"), exist_ok=True)
+        _f = open(os.path.join(_w, "logs", "speech_worker.log"), "a", encoding="utf-8", errors="replace", buffering=1)
+    except OSError:
+        _f = open(os.devnull, "w", encoding="utf-8")
+    sys.stdout = sys.stdout or _f
+    sys.stderr = sys.stderr or _f
+
 # PyInstaller + multiprocessing: RealtimeSTT spawns its STT recorder as a child
 # process that re-launches this exe with --multiprocessing-fork. Without
 # freeze_support() the child crashes and voice hangs on "warming up mic". Must

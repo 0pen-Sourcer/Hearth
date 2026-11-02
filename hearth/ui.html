@@ -15478,7 +15478,10 @@ async function refreshSettings() {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ text: await sampleLine(voiceSel ? voiceSel.value : '') }),
           });
-          if (!r.ok) toast('Voice test', "Couldn't play it. Make sure speaking is turned on above.", 'warn', 5000);
+          if (r.status === 500) {
+            let why = ''; try { why = (await r.json()).error || ''; } catch {}
+            toast('Voice test', why || "Couldn't play it.", 'err', 9000);
+          } else if (!r.ok) toast('Voice test', "Couldn't play it. Make sure speaking is turned on above.", 'warn', 5000);
           else {
             // Speaking happens behind a queue, so the request answers before
             // anything has been synthesized and a failure after that point used

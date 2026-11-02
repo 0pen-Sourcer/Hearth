@@ -712,28 +712,69 @@ def _build_recorder(sess: Optional[_Session] = None):
         # Honor the user's mic pick (same setting as the CLI loop). None lets
         # RealtimeSTT/PortAudio use the OS default.
         kwargs["input_device_index"] = _mic_index()
-    if device != "cuda":
-        return AudioToTextRecorder(**kwargs)
-    # On the graphics card a failure inside the recorder's worker process never
-    # reaches here; the constructor just waits. Give it a bounded time (the
-    # model is already downloaded) and fall back to the processor.
+    # The worker process loads the model from disk, so nothing there goes online.
+    kwargs["model"] = _fetch_model(model)
+    if device == "cuda":
+        try:
+            return _start_recorder(AudioToTextRecorder, kwargs, GPU_START_S, model)
+        except Exception as e:
+            print(f"[hearth.realtime_voice] GPU speech model failed ({e}); using the processor", flush=True)
+            kwargs.update(device="cpu", compute_type="int8")
+    return _start_recorder(AudioToTextRecorder, kwargs, CPU_START_S, model)
+
+
+# How long the recorder may take to start once its model is on disk (measured: 7-8 s).
+GPU_START_S = 45.0
+CPU_START_S = 90.0
+
+
+def _fetch_model(name: str) -> str:
+    """The speech model's folder on disk, downloaded here first if need be.
+
+    The recorder loads it in a worker process that never imports hearth, so
+    truststore is never set up there: behind HTTPS inspection (an antivirus's
+    web shield, a company proxy) its own download fails, the worker dies and the
+    recorder waits for it forever."""
+    if os.path.isdir(name):
+        return name
+    from faster_whisper.utils import download_model  # type: ignore
+    try:
+        return download_model(name)
+    except Exception as e:
+        raise RuntimeError(f"couldn't download the speech model {name} ({type(e).__name__}: {e})") from e
+
+
+def _start_recorder(cls, kwargs: dict, limit: float, name: str = ""):
+    """Build the recorder within `limit` seconds. A failure inside its worker
+    process never reaches the constructor, which just waits; a recorder that
+    turns up after the limit is shut down."""
     box: dict = {}
+    late = threading.Event()
 
     def _build():
         try:
-            box["rec"] = AudioToTextRecorder(**kwargs)
+            rec = cls(**kwargs)
         except Exception as e:
             box["err"] = e
+            return
+        if late.is_set():
+            try:
+                rec.shutdown()
+            except Exception:
+                pass
+        else:
+            box["rec"] = rec
 
-    t = threading.Thread(target=_build, daemon=True, name="hearth-stt-gpu")
+    t = threading.Thread(target=_build, daemon=True, name="hearth-stt-start")
     t.start()
-    t.join(None if not model_downloaded() else 45.0)
+    t.join(limit)
     if "rec" in box:
         return box["rec"]
-    why = box.get("err") or "it did not start in time"
-    print(f"[hearth.realtime_voice] GPU speech model failed ({why}); using the processor", flush=True)
-    kwargs.update(device="cpu", compute_type="int8")
-    return AudioToTextRecorder(**kwargs)
+    late.set()
+    if "err" in box:
+        raise box["err"]
+    raise TimeoutError(f"the speech model didn't start within {int(limit)} s "
+                       f"({name or kwargs.get('model')} on the {'graphics card' if kwargs.get('device') == 'cuda' else 'processor'})")
 
 
 _mic_warning = ""  # surfaced to the UI when a picked mic couldn't be opened

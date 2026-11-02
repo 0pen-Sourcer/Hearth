@@ -4226,7 +4226,8 @@ class JarvisCLI:
                     self.voice_on = True
                     print(f"{C_OK}voice: ON ({voice.status()['engine']}){C_RESET}")
                 else:
-                    print(f"{C_ERR}no voice engine ready. /voice for status.{C_RESET}")
+                    why = voice.status().get("last_load_error") if voice.cant_speak() else ""
+                    print(f"{C_ERR}{why or 'no voice engine ready. /voice for status.'}{C_RESET}")
             elif parts[1].lower() in ("off", "0", "false"):
                 self.voice_on = False
                 print(f"{C_OK}voice: off{C_RESET}")

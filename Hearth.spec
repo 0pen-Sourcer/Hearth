@@ -93,6 +93,8 @@ DATAS = [
     # top-level package has importable modules; hearth/skills/*/scripts are data
     # and are collected separately below.
     *[(p, "hearth") for p in glob.glob(os.path.join(REPO_ROOT, "hearth", "*.py"))],
+    # Data the modules read beside themselves (the Auto reviewer's labelled set).
+    *[(p, "hearth") for p in glob.glob(os.path.join(REPO_ROOT, "hearth", "*.json"))],
     (os.path.join(REPO_ROOT, "README.md"), "."),
     # CLI script needs to be importable by _launch_cli.py at runtime
     (os.path.join(REPO_ROOT, "hearth_cli.py"), "."),

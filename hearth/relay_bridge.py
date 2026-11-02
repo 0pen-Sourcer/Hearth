@@ -1554,6 +1554,9 @@ class Room:
             if said == "no_voice":
                 _log("read aloud: voice isn't set up on this PC")
                 send({"type": "say.error", "detail": "Voice isn't set up on your PC"})
+            elif said == "error":
+                _log(f"read aloud failed: {_voice.status().get('last_load_error') or _voice.last_speak_error()['error']}")
+                send({"type": "say.error", "detail": "The voice on your PC couldn't speak. Its log says why."})
             send({"type": "say.end"})
             if self.saying is speaker:
                 self.saying = None
