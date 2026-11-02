@@ -456,12 +456,20 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
         if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
             continue
         if o["type"] == "user":
-            for b in content if isinstance(content, list) else []:
-                if isinstance(b, dict) and b.get("type") == "tool_result":
-                    _give_out(by_id, b.get("tool_use_id"), b.get("content"))
+            results = [b for b in (content if isinstance(content, list) else [])
+                       if isinstance(b, dict) and b.get("type") == "tool_result"]
             text = _text_of(content)
+            if results:
+                # A tool's turn: what its harness wrote beside the result (an agent launched in the
+                # background, where its output goes) is part of that step's detail, never the person's words.
+                for n, b in enumerate(results):
+                    out = _result_text(b.get("content"))
+                    if text.strip() and n == len(results) - 1:
+                        out = (out + "\n\n" + text).strip()
+                    _give_out(by_id, b.get("tool_use_id"), out)
+                continue
             if not _typed(text):
-                continue                        # tool results and the program's own notes
+                continue                        # the program's own notes
             title = title or _title(text)
             if head and title and cwd:
                 break

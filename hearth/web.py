@@ -2077,56 +2077,113 @@ _IDEAS_FILE = os.path.join(LOGS_DIR, "reminder_ideas.json")
 _IDEAS_LOCK = threading.Lock()
 
 
+def _ideas_kept() -> Dict[str, Any]:
+    try:
+        with open(_IDEAS_FILE, encoding="utf-8") as f:
+            kept = json.load(f)
+        return kept if isinstance(kept, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _not_wanted(kept: Dict[str, Any]) -> set:
+    return {str(x).strip().lower() for x in kept.get("not_useful") or []}
+
+
 def reminder_ideas(fresh: bool = False) -> List[Dict[str, str]]:
-    """Reminders this person would likely want, made from what JARVIS remembers
-    about them and what they talk about. Remade when either has moved on (at most
-    hourly) or after half a day. None when there is nothing to go on."""
+    """What an empty new chat suggests, on the PC and the phone: things to ask (kind "idea") and
+    reminders to set (kind "reminder"), made from what this person has been doing across their chats
+    (memory's note on each chat) and what memory keeps about them. Each says the chat it came from.
+    Remade when either has moved on (at most hourly) or after half a day. None with nothing to go on;
+    one they called not useful never comes back."""
     with _IDEAS_LOCK:
-        from . import memory, reminders as _r
+        from . import memory, memory_cards, reminders as _r
         listed = _list_convos()[:20]          # kept per file by mtime, unlike a full read of every chat
         basis = [round(memory.changed_at()), max([int(c.get("updated") or 0) for c in listed] or [0])]
-        try:
-            with open(_IDEAS_FILE, encoding="utf-8") as f:
-                kept = json.load(f)
-            age = time.time() - float(kept.get("at") or 0)
-            if not fresh and (age < 3600 or (kept.get("basis") == basis and age < 12 * 3600)):
-                return kept.get("ideas") or []
-        except (OSError, ValueError):
-            pass
+        kept = _ideas_kept()
+        nope = _not_wanted(kept)
+        age = time.time() - float(kept.get("at") or 0)
+        soon = 3600 if kept.get("ideas") else 600          # nothing came last time (no brain ready): try again sooner
+        if kept.get("ideas") is not None and not fresh and (age < soon or (kept.get("basis") == basis and age < 12 * 3600)):
+            return [i for i in kept.get("ideas") or [] if str(i.get("ask") or "").strip().lower() not in nope]
         try:
             mem = (memory.about_the_person() + "\n" + memory.index_for_prompt(25)).strip()
         except Exception:
             mem = ""
-        chats = [c.get("title") for c in listed if c.get("title") and c.get("source") != "reminder"]
-        if not mem.strip() and not chats:
+        # The note memory keeps on each chat (its goal, where it stands): the summary ideas read from.
+        try:
+            cards = [c for c in memory_cards.everything() if c.get("chat")][:15]
+        except Exception:
+            cards = []
+        titles = {c.get("id"): c.get("title") for c in listed}
+        notes = [f"[{c['chat']}] {titles.get(c['chat']) or c.get('title') or ''}: {memory_cards.card_text(c)}"[:400]
+                 for c in cards]
+        chats = [f"[{c.get('id')}] {c.get('title')}" for c in listed if c.get("title") and c.get("source") != "reminder"]
+        if not mem.strip() and not chats and not notes:
             return []
         have = [r.get("what") for r in _r.list_reminders() if r.get("what")]
         prompt = (
-            "Suggest 3 reminders or scheduled tasks this person would likely want, from what they "
-            "keep in memory and talk about. Each is something an assistant on their PC could remind "
-            "them of or do for them at a time or on repeat. Skip what they already have. Something "
-            "coming up in what they remember (an exam, a deadline, a trip, a bill) comes first, as a "
-            "reminder set ahead of it.\n\n"
+            "Suggest 3 things this person would likely want to do next with their assistant, from what they "
+            "have been doing across their chats and what it remembers about them. Two kinds: \"idea\", a "
+            "new request they could send now (a next step, a check, something to make), and \"reminder\", "
+            "a reminder or scheduled task to set (something coming up, an exam, a deadline, a trip, a bill, "
+            "comes first as a reminder set ahead of it). Never a suggestion to reopen or continue an old chat; "
+            "each is a fresh message. Skip reminders they already have and anything listed as not useful.\n\n"
             f"Today is {time.strftime('%A %d %B %Y')}.\n\n"
-            f"Memory:\n{mem[:2500]}\n\nRecent chats:\n" + "\n".join(f"- {t}" for t in chats[:20])
+            f"Memory:\n{mem[:2500]}\n\n"
+            + ("Notes on their chats:\n" + "\n".join(f"- {n}" for n in notes) + "\n\n" if notes else "")
+            + "Recent chats:\n" + "\n".join(f"- {t}" for t in chats[:20])
             + ("\n\nAlready set:\n" + "\n".join(f"- {w}" for w in have[:15]) if have else "")
-            + '\n\nAnswer with JSON only: [{"title": "2-4 words", '
-              '"ask": "the request as they would type it, with when"}]')
-        raw = one_shot(prompt, max_tokens=700, timeout=45)
+            + ("\n\nNot useful to them:\n" + "\n".join(f"- {w}" for w in list(nope)[:20]) if nope else "")
+            + '\n\nAnswer with JSON only: [{"kind": "idea" or "reminder", "title": "2-4 words", '
+              '"ask": "the request as they would type it (a reminder with when)", '
+              '"from": "the [id] of the chat it comes from, or empty"}]')
+        raw = one_shot(prompt, max_tokens=800, timeout=45)
         ideas: List[Dict[str, str]] = []
+        known = {c.get("id") for c in listed} | {c.get("chat") for c in cards}
         try:
             got = json.loads(raw[raw.index("["): raw.rindex("]") + 1])
             for x in got if isinstance(got, list) else []:
                 if isinstance(x, dict) and x.get("title") and x.get("ask"):
                     ask = str(x["ask"])[:200]
+                    if ask.strip().lower() in nope:
+                        continue
+                    src = str(x.get("from") or "").strip("[] ")
+                    src = src if src in known else ""
                     ideas.append({"title": str(x["title"])[:60], "ask": ask,
-                                  "repeats": bool(re.search(r"\b(every|daily|weekly|each)\b", ask, re.I))})
+                                  "kind": "reminder" if str(x.get("kind")) == "reminder" else "idea",
+                                  "repeats": bool(re.search(r"\b(every|daily|weekly|each)\b", ask, re.I)),
+                                  **({"chat": src, "chat_title": str(titles.get(src) or "")} if src else {})})
         except ValueError:
             pass
-        if ideas:
-            os.makedirs(LOGS_DIR, exist_ok=True)
-            _atomic_write_json(_IDEAS_FILE, {"at": time.time(), "basis": basis, "ideas": ideas[:3]})
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        _atomic_write_json(_IDEAS_FILE, dict(kept, at=time.time(), basis=basis if ideas else None, ideas=ideas[:3]))
         return ideas[:3]
+
+
+def _quiet(fn):
+    try:
+        fn()
+    except Exception:
+        pass
+
+
+def dismiss_idea(ask: str) -> Dict[str, Any]:
+    """"Not useful" on a suggestion: it goes now and is never suggested again."""
+    want = str(ask or "").strip()
+    if not want:
+        return {"ok": False, "error": "which idea?"}
+    with _IDEAS_LOCK:
+        kept = _ideas_kept()
+        nope = list(kept.get("not_useful") or [])
+        if want.lower() not in {str(x).lower() for x in nope}:
+            nope = (nope + [want])[-200:]
+        kept["not_useful"] = nope
+        kept["ideas"] = [i for i in kept.get("ideas") or [] if str(i.get("ask") or "").strip().lower() != want.lower()]
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        _atomic_write_json(_IDEAS_FILE, kept)
+    live_bus.publish({"kind": "ideas"})
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- voice mode in the window
@@ -2784,6 +2841,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, {"crashed": _cl.pending() is not None})
         if path == "/api/new-chat/offers":
             from . import offers as _offers
+            # Made again in the background when what they've been doing moved on (cheap when it hasn't).
+            threading.Thread(target=lambda: _quiet(reminder_ideas), daemon=True, name="ideas").start()
             return self._send_json(200, {"rows": _offers.rows()})
         if path == "/api/reminders/ideas":
             try:
@@ -3541,6 +3600,8 @@ class HearthHandler(BaseHTTPRequestHandler):
             if r.get("ok"):
                 _models_cache["ts"] = 0  # force a rescan against the new folder
             return self._send_json(200, r)
+        if path == "/api/ideas/dismiss":
+            return self._send_json(200, dismiss_idea(str(self._read_json().get("ask") or "")))
         if path == "/api/lockdown":
             from . import tools as _t
             b = self._read_json()

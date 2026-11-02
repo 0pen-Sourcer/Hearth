@@ -145,6 +145,8 @@ def redact_secrets_only(text: str) -> Tuple[str, List[Dict[str, str]]]:
     findings: List[Dict[str, str]] = []
     out = text
     for label, pat in _KEY_PATTERNS:
+        if label in _NOT_FOR_MODEL:
+            continue        # a UUID is far more often an id (a session folder in a path); a saved one is masked below
         hits = pat.findall(out)
         if hits:
             findings.append({"type": label, "count": str(len(hits))})

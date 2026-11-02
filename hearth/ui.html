@@ -3728,6 +3728,7 @@
     animation: modalIn 0.14s var(--ease);
   }
   .think-menu.open { display: block; }
+  .idea-menu { position: fixed; bottom: auto; min-width: 200px; }
   .think-menu-item {
     display: flex; align-items: baseline; gap: 8px;
     width: 100%; padding: 7px 10px;
@@ -7463,6 +7464,11 @@ function onLiveEvent(ev) {
     if ((ev.keys || []).includes('clock_style')) refreshSettings();   // the clock picked on the phone
     return;
   }
+  if (ev.kind === 'ideas') {
+    _offerAt = 0;                       // an idea set aside on the phone goes here too
+    try { const w = document.querySelector('.empty'); if (w) drawOffers(w); } catch {}
+    return;
+  }
   if (ev.kind === 'setup') {
     // Something the agent is setting up: a row in Downloads like any other.
     dlUpsert('setup:' + ev.id, { name: ev.name, kind: 'setup', job: ev.id, status: ev.status, pct: ev.pct,
@@ -8110,13 +8116,32 @@ function emptyState() {
   return wrap;
 }
 
-// Under the empty chat, by the box: at most three rows, one line each, the chats
-// still going on first and then the reminder ideas (hearth/offers.py). Only
-// once something can think; nothing while it gets ready.
+// Under the empty chat, by the box: at most three ideas, one line each (hearth/offers.py),
+// each a fresh message that fills the box: something to ask, or a reminder to set (the bell).
+// A right click offers the chat it came from and Not useful. Only once something can think.
 const _OFFER_ICO = {
-  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
-  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>',
+  reminder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
 };
+// The small menu a right click on an idea opens.
+function _ideaMenu(r, x, y, gone) {
+  let m = document.getElementById('idea-menu');
+  if (!m) { m = document.createElement('div'); m.id = 'idea-menu'; m.className = 'think-menu idea-menu'; document.body.appendChild(m); }
+  m.innerHTML = (r.chat ? `<button type="button" class="think-menu-item" data-act="from">From: ${esc(r.chat_title || 'a chat')}</button>` : '')
+    + '<button type="button" class="think-menu-item" data-act="nope">Not useful</button>';
+  m.classList.add('open');
+  m.style.left = Math.min(x, innerWidth - m.offsetWidth - 8) + 'px';
+  m.style.top = Math.min(y, innerHeight - m.offsetHeight - 8) + 'px';
+  const close = () => { m.classList.remove('open'); document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+  m.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+    close();
+    if (b.dataset.act === 'from') { _openChatById(r.chat); return; }
+    gone();
+    try { await api('/api/ideas/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ask: r.ask }) }); } catch {}
+  });
+}
 // A change to the empty screen (its line, the rows under it) moves the mark in
 // the middle; it glides there with one spring instead of jumping in a frame.
 function _emptyKeepPlace(wrap, change) {
@@ -8148,13 +8173,23 @@ async function drawOffers(wrap) {
       `<button type="button" class="empty-offer" data-i="${i}"><span class="eo-ico">${_OFFER_ICO[r.kind] || _OFFER_ICO.idea}</span>`
       + `<span class="eo-text">${esc(r.text || '')}</span></button>`).join('');
   });
-  box.querySelectorAll('.empty-offer').forEach(b => b.onclick = () => {
-    const r = _offerRows[+b.dataset.i];
-    if (!r) return;
-    if (r.kind === 'chat' && r.chat) { _openChatById(r.chat); return; }
-    input.value = r.ask || r.text || '';
-    input.dispatchEvent(new Event('input'));
-    input.focus();
+  box.querySelectorAll('.empty-offer').forEach(b => {
+    b.onclick = () => {
+      const r = _offerRows[+b.dataset.i];
+      if (!r) return;
+      input.value = r.ask || r.text || '';
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    };
+    b.oncontextmenu = (e) => {
+      const r = _offerRows[+b.dataset.i];
+      if (!r) return;
+      e.preventDefault();
+      _ideaMenu(r, e.clientX, e.clientY, () => {          // gone at once, and not suggested again
+        _offerRows = _offerRows.filter(x => x !== r);
+        drawOffers(wrap);
+      });
+    };
   });
 }
 

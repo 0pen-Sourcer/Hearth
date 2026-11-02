@@ -78,6 +78,12 @@ def phone_id(phone_public: bytes) -> str:
     return hashlib.sha256(phone_public).hexdigest()[:12]
 
 
+def phone_name(room) -> str:
+    """The name a paired phone was given ("Pixel 9"), for "Answered on Pixel 9"."""
+    key = getattr(room, "room", "")
+    return next((str(p.get("name") or "") for p in _read().get("phones", []) if p.get("room") == key), "") or "another phone"
+
+
 def start_pairing(name: str = "") -> Dict[str, Any]:
     """A new pairing: what the QR code holds, as a link that opens the phone app."""
     url = relay_url()
@@ -545,7 +551,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "story":
         return story(str(m.get("id") or ""))
     if what == "ideas":
-        return ideas()
+        return ideas(m)
     if what == "memory_item":
         # "wrong / forget" or "done with this" on what a reply had in mind.
         from . import memory_cards
@@ -817,10 +823,15 @@ def context_item(t: Dict[str, Any]) -> Dict[str, Any]:
             "chat": t.get("chat") or "", "chat_title": t.get("chat_title") or ""}
 
 
-def ideas() -> Dict[str, Any]:
-    """What a new chat on the phone offers: the chats still going on and the
-    reminder ideas, as kept (hearth/offers.py; the phone picks its rows from them)."""
+def ideas(m: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """What a new chat on the phone offers: the ideas as kept (hearth/offers.py), the same the
+    window shows. {"dismiss": ask} is "Not useful" on one, saved through the window as there."""
     from . import offers
+    m = m or {}
+    if m.get("dismiss"):
+        r = _window("POST", "/api/ideas/dismiss", {"ask": str(m["dismiss"])[:300]})
+        if r.get("ok") is False:
+            return r
     return offers.sources()
 
 
@@ -1542,7 +1553,7 @@ class Room:
             if m and m.get("type") == "answer":
                 await asyncio.to_thread(self.bridge.on_answer, self, m)
             elif m and m.get("type") == "call.decline":
-                await asyncio.to_thread(self.bridge.decline, str(m.get("ring") or ""))
+                await asyncio.to_thread(self.bridge.decline, str(m.get("ring") or ""), self)
             return
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
@@ -1633,7 +1644,7 @@ class Room:
                 asyncio.ensure_future(self.deliver({"type": "call.ended", "gone": True, "id": secrets.token_hex(6)}))
             return
         if kind == "call.decline":
-            threading.Thread(target=self.bridge.decline, args=(str(m.get("ring") or ""),), daemon=True).start()
+            threading.Thread(target=self.bridge.decline, args=(str(m.get("ring") or ""), self), daemon=True).start()
             return
         if kind == "call.start":
             if call is not None and not call.ended:
@@ -1641,7 +1652,7 @@ class Room:
             from .call import Call
             adapter, chat = self.bridge.adapter, self.chat
             cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
-            ring = self.bridge.answered(str(m.get("ring") or "")) if m.get("ring") else None
+            ring = self.bridge.answered(str(m.get("ring") or ""), self) if m.get("ring") else None
 
             def send(obj):
                 # Only to a phone that is there: call frames never wait in the mailbox.
@@ -2094,17 +2105,23 @@ class Bridge:
         _log(f"calling the phone: {got['reason']}")
         return rid
 
-    def _stopped(self, ring: Dict[str, Any], missed: bool) -> None:
+    def _stopped(self, ring: Dict[str, Any], missed: bool, by: Optional["Room"] = None, how: str = "") -> None:
+        """The ring is over on every phone: unanswered (missed), or answered or declined on one (`by`),
+        when the others stop ringing at once, as a call picked up on one device does."""
         from . import call_me
         name = call_me.agent_name()
+        where = phone_name(by) if by is not None else ""
         prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
         try:
             for r in self._phones():
+                if r is by:
+                    continue
                 if r.peer_up and r.chan is not None:
                     self.adapter._push(r.chat, {"type": "call.unring", "ring": ring["id"], "missed": missed})
-                if missed:
-                    # Takes the ringing notification's place: a plain one that opens the chat.
-                    self.adapter.notify(r.chat, {"kind": "missed", "title": f"Missed call from {name}",
+                if missed or how:
+                    # Takes the ringing notification's place, quietly: a phone in a pocket stops ringing too.
+                    title = f"Missed call from {name}" if missed else f"{how} on {where}" if where else f"Call {how.lower()}"
+                    self.adapter.notify(r.chat, {"kind": "missed", "title": title,
                                                  "body": ring.get("why") or "", "c": ring.get("c") or "",
                                                  "ring": ring["id"]})
         finally:
@@ -2115,18 +2132,23 @@ class Bridge:
         if ring is not None:
             self._stopped(ring, missed=True)
 
-    def decline(self, rid: str) -> None:
+    def decline(self, rid: str, by: Optional["Room"] = None) -> None:
         ring = self.rings.drop(rid)
         if ring is not None:
             if self._ring_timer is not None:
                 self._ring_timer.cancel()
-            self._stopped(ring, missed=False)
+            self._stopped(ring, missed=False, by=by, how="Declined" if by is not None else "")
 
-    def answered(self, rid: str) -> Optional[Dict[str, Any]]:
-        """The ring a call from the phone answers (also one that just went unanswered), for what it says first."""
+    def answered(self, rid: str, by: Optional["Room"] = None) -> Optional[Dict[str, Any]]:
+        """The ring a call from the phone answers (also one that just went unanswered), for what it says first.
+        The other phones stop ringing at once."""
         ring = self.rings.take(rid)
         if ring is not None and self._ring_timer is not None:
             self._ring_timer.cancel()
+        if ring is not None:
+            # On a thread: this runs on the connection's loop, and telling the phones waits on it.
+            threading.Thread(target=self._stopped, args=(ring, False), kwargs={"by": by, "how": "Answered"},
+                             daemon=True, name="relay-unring").start()
         return ring or self._rang.get(rid)
 
     def watch_questions(self) -> None:
@@ -2264,6 +2286,8 @@ class Bridge:
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
             _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh
             out = {"type": "changed", "what": "brain"}
+        elif kind == "ideas":
+            out = {"type": "changed", "what": "ideas"}
         elif kind == "chat" and ev.get("chat"):
             out = {"type": "changed", "what": "chat", "c": ev["chat"], **({"gone": True} if ev.get("gone") else {})}
         elif kind == "turn" and ev.get("from") not in (None, "", self.adapter.name) and ev.get("chat"):
