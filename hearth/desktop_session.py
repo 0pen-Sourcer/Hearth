@@ -458,6 +458,7 @@ class _Glow:
     _ready = threading.Event()
     _painted: Optional[tuple] = None
     _accent: Optional[tuple] = None
+    _u = None
 
     @classmethod
     def show(cls) -> None:
@@ -488,7 +489,7 @@ class _Glow:
             return
         import ctypes
         from ctypes import wintypes
-        u = ctypes.windll.user32
+        u = cls._u
         msg = wintypes.MSG()
         level, shown, began, under = 0.0, False, 0.0, 0.0
         while True:
@@ -528,14 +529,14 @@ class _Glow:
             h = cu_panel.window()
             if h:
                 # NOSIZE | NOMOVE | NOACTIVATE
-                ctypes.windll.user32.SetWindowPos(cls._hwnd, h, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+                cls._u.SetWindowPos(cls._hwnd, h, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
         except Exception:
             pass
 
     @classmethod
     def _set_alpha(cls, a: int) -> None:
         import ctypes
-        ctypes.windll.user32.UpdateLayeredWindow(cls._hwnd, None, None, None, None, None, 0,
+        cls._u.UpdateLayeredWindow(cls._hwnd, None, None, None, None, None, 0,
                                                  ctypes.byref(_BLEND(0, 0, max(0, min(255, a)), 1)), 2)
 
     @classmethod
@@ -546,7 +547,8 @@ class _Glow:
         import numpy as np
         x0, y0, w, h = cls._geom
         r_, g_, b_ = rgb
-        depth = 30 * max(1.0, ctypes.windll.user32.GetDpiForSystem() / 96.0)
+        u = cls._u
+        depth = 30 * max(1.0, u.GetDpiForSystem() / 96.0)
         ys = np.minimum(np.arange(h), np.arange(h)[::-1])[:, None]
         xs = np.minimum(np.arange(w), np.arange(w)[::-1])[None, :]
         d = np.minimum(ys, xs).astype(np.float32)
@@ -557,7 +559,6 @@ class _Glow:
         img[..., 2] = (r_ * a // 255).astype(np.uint8)
         img[..., 3] = a.astype(np.uint8)
         ctypes.memmove(cls._bits, img.ctypes.data, w * h * 4)
-        u = ctypes.windll.user32
         sdc = u.GetDC(None)
         u.UpdateLayeredWindow(cls._hwnd, sdc, ctypes.byref(_PT(x0, y0)), ctypes.byref(_SZ(w, h)), cls._mdc,
                               ctypes.byref(_PT(0, 0)), 0, ctypes.byref(_BLEND(0, 0, 0, 1)), 2)
@@ -568,12 +569,25 @@ class _Glow:
     def _build(cls) -> Optional[int]:
         import ctypes
         from ctypes import wintypes
-        u, g = ctypes.windll.user32, ctypes.windll.gdi32
+        # Own handles: argtypes set on the shared ctypes.windll leak into every other caller,
+        # and theirs into these. Without a restype the module handle comes back cut to 32
+        # bits, and Windows faults on it inside RegisterClassW and CreateWindowExW.
+        HWND, HDC, DWORD, INT, UINT = wintypes.HWND, wintypes.HDC, wintypes.DWORD, ctypes.c_int, wintypes.UINT
+        u, g, k = ctypes.WinDLL("user32"), ctypes.WinDLL("gdi32"), ctypes.WinDLL("kernel32")
+        k.GetModuleHandleW.restype = wintypes.HMODULE
+        k.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+        u.RegisterClassW.restype = wintypes.ATOM
+        u.RegisterClassW.argtypes = [ctypes.c_void_p]
+        u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, INT, INT, INT, INT, UINT]
+        u.PeekMessageW.argtypes = [ctypes.c_void_p, wintypes.HWND, UINT, UINT, UINT]
+        u.TranslateMessage.argtypes = [ctypes.c_void_p]
+        u.DispatchMessageW.argtypes = [ctypes.c_void_p]
+        u.DispatchMessageW.restype = ctypes.c_ssize_t
+        cls._u = u
         x0, y0 = u.GetSystemMetrics(76), u.GetSystemMetrics(77)          # virtual screen
         w, h = u.GetSystemMetrics(78), u.GetSystemMetrics(79)
         if w <= 0 or h <= 0:
             return None
-        HWND, HDC, DWORD, INT, UINT = wintypes.HWND, wintypes.HDC, wintypes.DWORD, ctypes.c_int, wintypes.UINT
         u.CreateWindowExW.restype = HWND
         u.CreateWindowExW.argtypes = [DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, DWORD, INT, INT, INT, INT,
                                       HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
@@ -599,7 +613,7 @@ class _Glow:
                         ("hbrBackground", wintypes.HBRUSH), ("lpszMenuName", wintypes.LPCWSTR),
                         ("lpszClassName", wintypes.LPCWSTR)]
         cls._proc = ctypes.cast(u.DefWindowProcW, WNDPROC)
-        hinst = ctypes.windll.kernel32.GetModuleHandleW(None)
+        hinst = k.GetModuleHandleW(None)
         wc = WNDCLASS()
         wc.lpfnWndProc = cls._proc
         wc.hInstance = hinst

@@ -283,8 +283,6 @@ def _open_workspace():
 
 
 def main(argv: Optional[list] = None) -> int:
-    from .crashlog import enable as _crashlog
-    _crashlog("tray")                 # the window's server runs in this process
     parser = argparse.ArgumentParser(
         prog="python -m hearth.tray",
         description="Inglen system tray app.",
@@ -357,6 +355,10 @@ def main(argv: Optional[list] = None) -> int:
                     break
             except OSError:
                 continue
+
+    # Only the instance that stays: a second one would take over the first's record.
+    from .crashlog import enable as _crashlog
+    _crashlog("tray")                 # the window's server runs in this process
 
     try:
         from . import keystore
