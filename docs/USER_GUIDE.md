@@ -6,7 +6,7 @@ For when you've just installed Inglen and want to know what it does and where th
 
 ## Getting started
 
-1. **Install.** Download [Inglen for Windows](https://github.com/0pen-sourcer/Hearth/releases/latest). Full (about 1 GB) brings its own model engine; Lite (about 500 MB) is for when you already run LM Studio, Ollama or a cloud key. Both install to your user folder without admin rights. Windows Defender may flag the unsigned installer; it's a false positive, and you can restore the file from Windows Security, Protection history.
+1. **Install.** Download [Inglen for Windows](https://github.com/0pen-Sourcer/Hearth/releases/latest). Full (1.7 GB) brings its own model engine; Lite (646 MB) is for when you already run LM Studio, Ollama, a cloud key or an agent like Claude Code. Both install to your user folder without admin rights. The installer isn't code-signed yet, so SmartScreen shows a blue box (choose More info, then Run anyway), and Windows Defender may flag it; that's a false positive, and you can restore the file from Windows Security, Protection history.
 2. **Pick a brain.** Setup finds what you already have: an agent like Claude Code or Codex, a model file on your disk, or a running LM Studio or Ollama. Pick one, or download a model from the Models tab later, or paste a cloud key.
 3. **Talk to it.** Type, or press the mic and speak.
 
@@ -79,7 +79,7 @@ A switch beside the send box decides what runs without asking:
 
 In Auto, a reviewer reads your own messages in the chat and lets a step through without asking when you clearly asked for exactly that step ("delete the old log"). It never reads the brain's words or what a tool brought back. A model is used as the reviewer only once it has passed a check, which runs on its own the first time Auto meets it; Settings, Behavior, Auto's reviewer shows the result and turns it off. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask.
 
-**Undo.** Before a file is written, edited, deleted or moved, Inglen keeps a copy of what was there. Type `/undo` in the window for a list of recent changes to put back; in the terminal `/undo` lists them and `/undo <n>` puts one back. Because of that, Auto deletes or moves things Inglen made itself in the past week without asking.
+**Undo.** Before one of Inglen's own tools writes, edits, deletes or moves a file, it keeps a copy of what was there for a week. Type `/undo` in the window for a list of recent changes to put back; in the terminal `/undo` lists them and `/undo <n>` puts one back. Because of that, Auto deletes or moves things Inglen made itself in the past week without asking. Undo doesn't reach what a shell command changes, an agent program's own edits (those wait in its panel when it works in a git repository), or anything over 200 MB.
 
 When something needs your OK, a strip above the chat box asks: **Yes (once)**, **No**, **Always** or **Never** for that tool, or type what to do instead. Writes stay inside the workspace (`~/Inglen`, or `~/Jarvis` on an older install) unless you allow another folder. In the terminal, `/mode` sets the switch and `/perms` shows saved answers (`/perms forget <tool>`, `/perms reset`).
 
@@ -123,7 +123,7 @@ Message Inglen from Telegram, Discord or (experimentally) WhatsApp, and it runs 
 
 ### Inglen Plus
 
-Plus is a paid add-on with a phone app of its own, no bot needed. In **Settings, Plus**, paste the licence key from your receipt, press **Pair a phone**, scan the code with the phone's camera, and check that both screens show the same six numbers. The phone then reaches this PC from anywhere through an end-to-end encrypted relay.
+Plus is a paid add-on with a phone app of its own, no bot needed. Get it at [inglen.app](https://inglen.app/#plus). The app runs in the phone's browser at [app.inglen.app](https://app.inglen.app), or as an [Android app](https://app.inglen.app/android/inglen.apk) installed directly. In **Settings, Plus**, paste the licence key from your receipt, press **Pair a phone**, scan the code with the phone's camera or from the app, and check that both screens show the same six numbers. The phone then reaches this PC from anywhere through an end-to-end encrypted relay.
 
 - **On the phone.** Your chats, the window's included, with each reply's steps as they happen; Allow and Deny for risky steps; the brain and the approval mode; files and pictures from the PC; the Team room; recent file changes with Undo; and the sessions of Claude Code, Codex and other coding agents on the PC, which you can read and carry on. Changes on the phone show in the window at once, and the other way round.
 - **Notifications.** A question waiting (with Allow and Deny right on it), a finished reply, and a coding agent finishing on the PC.
@@ -171,7 +171,7 @@ A skill is a folder that teaches Inglen a workflow, like making a PDF or a slide
 
 ## The terminal
 
-The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the window does, with slash commands and voice. `@path` attaches a file. The prompt stays open while Inglen replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
+The **Inglen CLI** shortcut, or `inglen.bat` from source, has the same brains, tools, memory and helpers as the window, with slash commands and voice. `@path` attaches a file. The prompt stays open while Inglen replies: type to steer it, Esc to stop it, Ctrl+T to show its thinking. Commands that choose something (`/brain`, `/model`, `/mode`, `/think`, `/chats`) open a list you move through with the arrow keys.
 
 ```
 /help            every command
@@ -197,6 +197,7 @@ The **Inglen CLI** shortcut, or `inglen.bat` from source, does everything the wi
 /team            helpers working for me
 /agents          agent programs on this PC
 /agent           run a helper and wait
+/bg              send a running command to the background
 /learn           look at this PC again
 /migrate         bring memory over from another agent
 /import-memory   bring memory over from ChatGPT or Claude
@@ -271,10 +272,12 @@ Reads default to your whole disk; writes, deletes and moves stay in the workspac
 - **Voice talks over itself on speakers**: in the window it cancels its own echo; if it still hears itself, headphones fix it. In the terminal's `/listen`, turn on Speakers mode in Settings, Voice.
 - **Something broken**: Settings, About, Repair puts Inglen's own files back without touching your chats or memory.
 - The Logs tab shows every tool call and its result, which usually explains what happened.
+- **Still stuck**: [open a bug report](https://github.com/0pen-Sourcer/Hearth/issues/new/choose) or write to [hello@inglen.app](mailto:hello@inglen.app). Settings, About shows your version.
 
 ---
 
 ## More
 
 - Every tool: [TOOLS.md](TOOLS.md)
-- Issues and source: [github.com/0pen-sourcer/Hearth](https://github.com/0pen-sourcer/Hearth)
+- Getting help: [SUPPORT.md](SUPPORT.md), or write to [hello@inglen.app](mailto:hello@inglen.app)
+- Issues and source: [github.com/0pen-Sourcer/Hearth](https://github.com/0pen-Sourcer/Hearth)

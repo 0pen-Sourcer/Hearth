@@ -9,8 +9,8 @@ equivalent or are skipped; nothing crashes when they're unavailable.
 > Status: the CLI, web UI, tools, skills, the model engine and the image engine
 > are verified running on Linux (Mint 22 / Ubuntu 24.04), and the whole test suite
 > passes there. macOS runs the same code and the tests on every change, but hasn't
-> been tried on a real Mac yet. If something breaks, please open an issue with the
-> error and your OS/distro.
+> been tried on a real Mac yet. If something breaks, open an
+> [issue](https://github.com/0pen-Sourcer/Hearth/issues/new/choose) with the error and your OS or distro.
 
 ## Requirements
 
@@ -22,8 +22,8 @@ equivalent or are skipped; nothing crashes when they're unavailable.
 ## Install
 
 ```bash
-git clone https://github.com/0pen-sourcer/hearth.git
-cd hearth
+git clone https://github.com/0pen-Sourcer/Hearth.git
+cd Hearth
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

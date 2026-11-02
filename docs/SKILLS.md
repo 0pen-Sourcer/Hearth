@@ -10,7 +10,7 @@ Skills are different from tools and plugins:
 
 | | What it is | Best for |
 |---|---|---|
-| **Tool** | A built-in callable (`read_file`, `run_command`, …) | The hundred-odd things Inglen can already do |
+| **Tool** | A built-in callable (`read_file`, `run_command`, …) | The hundred or so things Inglen can already do |
 | **Plugin** | A Python file that adds a *new* tool | "I need a brand-new callable right now" |
 | **Skill** | Prose + scripts that orchestrate existing tools | "I know the 8 steps to do X, here they are" |
 
@@ -96,7 +96,7 @@ A skill is a folder, so sharing is just publishing that folder.
    it. A specific branch or tag: `yourname/your-repo@v2`.
 
 3. Add it to the community index so others find it:
-   **[awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills)**.
+   **[awesome-hearth-skills](https://github.com/0pen-Sourcer/awesome-hearth-skills)**.
    Open a PR with a one-line entry.
 
 ---

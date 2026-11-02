@@ -17,7 +17,6 @@ The long version, with how each part works, is in [docs/RELEASE_NOTES_v0.7.6.md]
 - Anthropic's API is spoken natively, with effort levels and streamed thinking. Each turn on a provider shows what it cost; on a plan it shows as plan usage.
 - An agent that goes quiet for a minute and a half is reported on every surface with Stop to end it, and a usage limit says when it resets.
 - `delegate` hands one task to an installed coding agent and brings back its answer, with adapters for twenty-three of them. Inglen can also read the Claude Code and Codex sessions on the PC and send one a message.
-
 - Ask the assistant what it can do and it checks this PC: engines, models, keys, phone, chat apps, helpers. What's missing it installs itself once you say yes, the image engine and a model that fits your card, a chat model, voice, an agent program, with the progress in Downloads. It can also take back a change it made to your files.
 
 ### Helpers and the Team room
@@ -62,7 +61,7 @@ The long version, with how each part works, is in [docs/RELEASE_NOTES_v0.7.6.md]
 - Saved keys are sealed with Windows' own encryption instead of kept as plain text, and never reach a model or the phone. Reading a place that holds keys, such as `.env` files or `~/.ssh`, asks in every mode.
 - Once a chat has read a web page, an email or a downloaded file, a request to an address nobody gave asks first in every mode. Fetching from this PC or the local network needs the host named.
 - Update patches and installers must carry Inglen's release signature, or they are refused. Engine and voice downloads are checked against published hashes.
-- Every file Inglen's tools write, edit, delete or move is copied first, and `/undo` puts it back.
+- Every file Inglen's own tools write, edit, delete or move is copied first, up to 200 MB a change, and `/undo` puts it back for a week.
 - Auto asks before destructive git commands, emptying the Recycle Bin, and hidden or encoded commands.
 - The local server refuses requests from other sites, and dialogs show text as text.
 - An install count is opt-in, off by default, and setup shows exactly what it would send.
@@ -85,7 +84,7 @@ The long version, with how each part works, is in [docs/RELEASE_NOTES_v0.7.6.md]
 
 ## v0.7.1 to v0.7.5
 
-See [v0.7.3](docs/RELEASE_NOTES_v0.7.3.md), [v0.7.4](docs/RELEASE_NOTES_v0.7.4.md) and [v0.7.5](docs/RELEASE_NOTES_v0.7.5.md).
+Called Hearth at the time. See [v0.7.3](docs/RELEASE_NOTES_v0.7.3.md), [v0.7.4](docs/RELEASE_NOTES_v0.7.4.md) and [v0.7.5](docs/RELEASE_NOTES_v0.7.5.md).
 
 ## v0.7-preview
 
