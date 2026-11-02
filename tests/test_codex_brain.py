@@ -146,8 +146,10 @@ check("on Auto, Codex works in the workspace with the network on, and its own sh
 from hearth import codex_brain as _cx  # noqa: E402
 tools.approval_mode = lambda: "edits"
 edits = _cx._sandbox()
-check("on Auto-edit its edits stay in the workspace and commands still need a yes",
-      'sandbox_mode="workspace-write"' in edits and "features.shell_tool=false" in edits)
+# exec asks nobody about its own edits, so on Auto-edit they go through Inglen's tools,
+# which ask about Inglen's own control files (test_agent_control_edits).
+check("on Auto-edit exec edits through Inglen's tools and commands still need a yes",
+      'sandbox_mode="read-only"' in edits and "features.shell_tool=false" in edits)
 tools.approval_mode = lambda: "auto"
 
 ev = turn("FAIL please", [])

@@ -9292,6 +9292,19 @@ _WRITE_TOOLS = {"write_file": ("path",), "edit_file": ("path",), "create_directo
                 "extract_archive_file": ("output_name",)}
 
 
+def control_places() -> List[Tuple[str, bool]]:
+    """(path, is a folder) for each control file and folder in the workspace, as an
+    agent program's own permission rules name them."""
+    out: List[Tuple[str, bool]] = []
+    # The long form: a rule naming C:\Users\ABC~1\... matches nothing an agent writes.
+    ws = os.path.realpath(WORKSPACE)
+    for n in sorted(_CONTROL_FILES):
+        out.append((os.path.join(ws, n), False))
+    for n in sorted(_CONTROL_DIRS):
+        out.append((os.path.join(ws, n), True))
+    return out
+
+
 def changes_controls(name: str, args=None) -> str:
     """Why this file edit asks in every mode: it would change one of Inglen's own
     control files in the workspace; '' when it wouldn't."""

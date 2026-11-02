@@ -577,6 +577,9 @@ def hearth_view(tool: str, inp: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         return "edit_file", {"path": inp.get("file_path", ""),
                              "edits": [{"old_text": e.get("old_string", ""), "new_text": e.get("new_string", "")}
                                        for e in inp.get("edits") or []]}
+    if tool == "NotebookEdit":
+        return "edit_file", {"path": inp.get("notebook_path", ""),
+                             "edits": [{"old_text": "", "new_text": inp.get("new_source", "")}]}
     if tool == "Glob":
         return "find_file", {"name": inp.get("pattern", ""), "path": inp.get("path", "")}
     if tool == "Grep":
@@ -872,12 +875,23 @@ def agent_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
 
 def claude_settings(fast: bool = False) -> Dict[str, Any]:
     """Settings for Claude Code's --settings: a read of a place that holds keys
-    asks, so it comes to Inglen's check; Fast when picked."""
+    asks, and so does an edit of one of Inglen's control files (Auto-edit lets
+    Claude Code's own edits through unasked otherwise), so both come to Inglen's
+    check; Fast when picked."""
     try:
         from .secret_places import claude_rules
         rules = claude_rules()
     except Exception:
         rules = []
+    try:
+        from .tools import control_places
+        for path, folder in control_places():
+            g = path.replace("\\", "/")
+            if re.match(r"^[A-Za-z]:/", g):
+                g = "//" + g[0].lower() + g[2:]            # Claude Code's spelling of an absolute path
+            rules.append(f"Edit({g}/**)" if folder else f"Edit({g})")
+    except Exception:
+        pass
     out: Dict[str, Any] = {"permissions": {"ask": rules}}
     if fast:
         out["fastMode"] = True
