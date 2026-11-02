@@ -486,6 +486,24 @@ def _try_piper():
         return None
 
 
+# The model files whose trial sentence failed, and why: not loaded again until they change.
+_cant_speak: list = [None, None]
+
+
+def _model_key():
+    path = _find("kokoro")
+    try:
+        st = os.stat(path) if path else None
+    except OSError:
+        st = None
+    return (path, st.st_size, st.st_mtime) if st else None
+
+
+def cant_speak() -> bool:
+    """True when the voice files load but fail to say anything."""
+    return bool(_cant_speak[0]) and _cant_speak[0] == _model_key()
+
+
 def _load_engine(allow_download: bool = False) -> Optional[Tuple[str, object]]:
     global _engine, _last_load_error, _last_load_warning
     if _engine is not None:
@@ -496,8 +514,21 @@ def _load_engine(allow_download: bool = False) -> Optional[Tuple[str, object]]:
     # only clear it on a successful engine load WITHOUT a warning being set.
     pre_warning = _last_load_warning
     _last_load_warning = None
+    files = _model_key()
+    if files and _cant_speak[0] == files:
+        _last_load_error = _cant_speak[1]
+        return None
     k = _try_kokoro(allow_download=allow_download)
     if k is not None:
+        # A model can load and still fail on every sentence: say one word before calling it ready.
+        try:
+            with _synth_engine_lock:
+                _kokoro_say(k, "Hi.", current_voice(), 1.0)
+        except Exception as e:
+            _last_load_error = f"The voice model loaded but can't speak: {type(e).__name__}: {e}"
+            _cant_speak[:] = [_model_key(), _last_load_error]
+            note_speak_error("synthesis", e)
+            return None
         _engine = ("kokoro", k)
         _last_load_error = None
         return _engine
@@ -517,6 +548,7 @@ def reload() -> None:
     global _engine, _last_load_error
     _engine = None
     _last_load_error = None
+    _cant_speak[:] = [None, None]
 
 
 # The voice and speed are read when speaking, not when this module is first
@@ -1116,12 +1148,15 @@ class Speaker:
     # ---- speaking
     def speak(self, text: str, blocking: bool = False, voice: Optional[str] = None,
               speed: Optional[float] = None) -> str:
-        """'ok' | 'no_voice' | 'empty'."""
+        """'ok' | 'no_voice' | 'error' | 'empty'. 'error': the voice is there and
+        fails to speak (status()['last_load_error'] or last_speak_error() says why);
+        a blocking call also returns it when a sentence failed on the way."""
         text = _clean_for_tts(text or "")
         if not text:
             return "empty"
         if _load_engine(allow_download=True) is None:
-            return "no_voice"
+            return "error" if cant_speak() else "no_voice"
+        started = time.time()
         speed = speed if speed is not None else current_speed()
         self.note_spoken(text)
         if not _TTS_GAPLESS and self.sink is None:
@@ -1139,6 +1174,8 @@ class Speaker:
             while not self.abort.is_set() and idle < 3:
                 idle = 0 if self.busy() else idle + 1
                 time.sleep(0.05)
+            if _last_speak_error and _last_speak_error_at >= started:
+                return "error"
         return "ok"
 
     def stop(self) -> None:
@@ -1331,7 +1368,7 @@ _abort = DEFAULT.abort
 def speak(text: str, blocking: bool = False,
           voice: Optional[str] = None,
           speed: Optional[float] = None) -> str:
-    """Return: 'ok' | 'no_voice' | 'empty'. blocking=False runs in a daemon
+    """Return: 'ok' | 'no_voice' | 'error' | 'empty'. blocking=False runs in a daemon
     thread so the chat keeps flowing. Plays on this PC's speakers."""
     return DEFAULT.speak(text, blocking=blocking, voice=voice, speed=speed)
 
@@ -1371,8 +1408,9 @@ def _speak_legacy(text, blocking, voice, speed) -> str:
             _mark_speaking_end()
 
     if blocking:
+        started = time.time()
         _run()
-        return "ok"
+        return "error" if _last_speak_error and _last_speak_error_at >= started else "ok"
     threading.Thread(target=_run, daemon=True).start()
     return "ok"
 

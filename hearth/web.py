@@ -6061,6 +6061,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             if r == "no_voice":
                 reason = _voice.status() if _voice else {"reason": "voice module missing"}
                 return self._send_json(503, {"error": "TTS not available", "detail": reason})
+            if r == "error":
+                st = _voice.status()
+                return self._send_json(500, {"error": st.get("last_load_error") or st.get("last_speak_error")
+                                             or "The voice couldn't speak.", "detail": st})
             if r == "empty":
                 return self._send_json(400, {"error": "empty text after filtering"})
             return self._send_json(200, {"ok": True, "result": r})
