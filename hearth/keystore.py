@@ -173,12 +173,49 @@ def fields_for(path: str) -> Tuple[str, ...]:
 
 
 # ---------------------------------------------------------------- a file's fields
+# Fields that hold one key per provider. Every reader calls .get on them.
+_MAPS = ("provider_keys",)
+
+
+def _note(msg: str) -> None:
+    try:
+        print(f"[hearth.keystore] {msg}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def _as_map(field: str, v: Any) -> Dict[str, Any]:
+    """A per-provider field as a dict, whatever the file held: a dict saved as
+    JSON text is read back, anything else (a value still sealed, a stray
+    string) counts as no keys, with a line in the log. Never the values."""
+    if isinstance(v, dict):
+        return v
+    if _empty(v):
+        return {}
+    if isinstance(v, str) and not is_sealed(v):
+        try:
+            j = json.loads(v)
+        except ValueError:
+            j = None
+        if isinstance(j, dict):
+            return j
+    what = "a sealed value that could not be opened" if is_sealed(v) else f"a {type(v).__name__}"
+    _note(f"{field} holds {what}, not a set of keys; read as none")
+    return {}
+
+
 def reveal(d: Dict[str, Any], fields: Iterable[str]) -> Dict[str, Any]:
     out = dict(d or {})
     for k in fields:
-        if k in out and is_sealed(out[k]):
+        if k not in out:
+            continue
+        if is_sealed(out[k]):
             v = unseal(out[k])
-            out[k] = v if v is not None else ({} if k == "provider_keys" else "")
+            if v is None and k not in _MAPS:
+                _note(f"{k} is sealed and could not be opened on this account; read as empty")
+            out[k] = v if v is not None else ("" if k not in _MAPS else out[k])
+        if k in _MAPS:
+            out[k] = _as_map(k, out[k])
     return out
 
 

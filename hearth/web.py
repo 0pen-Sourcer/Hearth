@@ -996,7 +996,8 @@ def _provider_key(provider: str) -> str:
     s = _load_settings()
     if (s.get("llm_provider") or "").strip().lower() == provider and (s.get("llm_key") or "").strip():
         return s["llm_key"].strip()
-    banked = (s.get("provider_keys") or {}).get(provider)
+    vault = s.get("provider_keys")
+    banked = vault.get(provider) if isinstance(vault, dict) else ""
     if banked:
         return str(banked).strip()
     from . import keystore
@@ -4862,7 +4863,8 @@ class HearthHandler(BaseHTTPRequestHandler):
                 # llm_key with "" and the user's Grok/OpenAI key was gone — they
                 # had to re-paste it every time they came back. Now each
                 # provider's key is remembered under provider_keys[<provider>].
-                _vault = dict(_saved.get("provider_keys") or {})
+                _vault = _saved.get("provider_keys")
+                _vault = dict(_vault) if isinstance(_vault, dict) else {}
                 _old_provider = (_saved.get("llm_provider") or "").strip().lower()
                 _old_key = (_saved.get("llm_key") or "").strip()
                 # Only a provider's own key is filed under its name: a local
