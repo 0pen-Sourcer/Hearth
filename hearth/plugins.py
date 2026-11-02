@@ -230,6 +230,34 @@ def delete_plugin(name: str, workspace: str, tool_defs: list, handlers: dict) ->
     return f"Plugin '{name}' deleted ({path}) — {freed}."
 
 
+def sync(workspace: str, tool_defs: list, handlers: dict) -> Dict[str, List[str]]:
+    """Catch up with the plugins folder: register files another process wrote (the window, a chat
+    app's bridge, the terminal and an agent brain's tool server are separate processes) and drop
+    plugins whose file was deleted there. {"added": [...], "removed": [...]}."""
+    have = {t["name"] for t in tool_defs if t.get("_plugin")}
+    on_disk = _plugin_names(workspace)
+    removed = sorted(have - on_disk)
+    if removed:
+        tool_defs[:] = [t for t in tool_defs if not (t.get("_plugin") and t["name"] in removed)]
+        for n in removed:
+            handlers.pop(n, None)
+    added: List[str] = []
+    new = on_disk - have
+    if new:
+        reserved = {t["name"] for t in tool_defs} | set(handlers)
+        pdir = plugins_dir(workspace)
+        for name in sorted(new):
+            try:
+                with open(os.path.join(pdir, f"{name}.py"), "r", encoding="utf-8") as f:
+                    tool, run, err = validate_plugin_source(f.read())
+                if err or tool["name"] != name or _register(tool, run, tool_defs, handlers, reserved):
+                    continue
+                added.append(name)
+            except Exception:
+                continue
+    return {"added": added, "removed": removed}
+
+
 def _warn(msg: str) -> None:
     # A skipped/malformed plugin is NOT an error — but printing this on every
     # launch reads like a crash to users (it did, for them). Stay quiet on the
