@@ -1052,9 +1052,10 @@ def start_watcher(notify: Callable[[str, str], None]) -> None:
         try:
             from .tools import is_risky as _is_risky
         except Exception:
-            _is_risky = lambda _n: True   # fail closed
+            _is_risky = lambda _n, _a=None: True   # fail closed
+        # With its arguments: a read of a place that holds keys asks whatever the tool.
         needs_confirm = bool(action_tool) and (
-            action_tool in _CONFIRM_ON_FIRE or _is_risky(action_tool))
+            action_tool in _CONFIRM_ON_FIRE or _is_risky(action_tool, action_args))
         full_result = ""
         if action_tool and not needs_confirm:
             full_result = _run_action(action_tool, action_args)

@@ -112,6 +112,18 @@ def _plain_brain_keys(path: str) -> bool:
         return False
 
 
+def _mcp_tokens(path: str) -> bool:
+    """Whether the MCP servers' config holds a sign-in header or an environment value
+    (where a server's token goes)."""
+    try:
+        import json
+        with open(path, encoding="utf-8") as f:
+            servers = (json.load(f) or {}).get("mcpServers") or {}
+        return any(isinstance(s, dict) and (s.get("headers") or s.get("env")) for s in servers.values())
+    except Exception:
+        return False
+
+
 def _places() -> List[tuple]:
     """(folder or file, what it is, is_folder) for the fixed places."""
     h = _home()
@@ -127,7 +139,14 @@ def _places() -> List[tuple]:
         (os.path.join(h, ".git-credentials"), "Git's saved logins", False),
         (os.path.join(h, ".npmrc"), "npm's saved token", False),
         (os.path.join(h, ".pypirc"), "PyPI's saved token", False),
+        # The agent programs Inglen can use as a brain keep their sign-in here.
+        (os.path.join(h, ".codex", "auth.json"), "Codex's sign-in tokens", False),
+        (os.path.join(h, ".claude", ".credentials.json"), "Claude Code's sign-in token", False),
+        (os.path.join(h, ".config", "gh", "hosts.yml"), "GitHub CLI's saved token", False),
+        (os.path.join(h, ".kube", "config"), "Kubernetes credentials", False),
     ]
+    if os.environ.get("APPDATA"):
+        out.append((os.path.join(os.environ["APPDATA"], "GitHub CLI", "hosts.yml"), "GitHub CLI's saved token", False))
     for base in (os.environ.get("APPDATA"), os.environ.get("LOCALAPPDATA")):
         if base:
             for sub in ("Credentials", "Protect", "Vault"):
@@ -174,7 +193,8 @@ def what_path(path: str, cwd: str = "") -> str:
         return f"{full}: the browser's saved passwords and sign-in cookies"
     ws = _norm(os.path.realpath(_workspace()))
     if n.startswith(ws.rstrip("/") + "/") or n == ws:
-        for name, plain in (("settings.json", _plain_settings), ("brain_keys.json", _plain_brain_keys)):
+        for name, plain in (("settings.json", _plain_settings), ("brain_keys.json", _plain_brain_keys),
+                            ("mcp.json", _mcp_tokens)):
             target = os.path.join(_workspace(), name)
             hit = base == name or (glob and fnmatch.fnmatch(name, base))
             if hit and n.rsplit("/", 1)[0] == ws and plain(target):
