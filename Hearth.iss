@@ -12,7 +12,15 @@
 
 #define MyAppName "Hearth"
 ; What people see. MyAppName stays: it names the folder existing installs live in.
-#define MyAppDisplay "Inglen"
+; StubTest (scripts\test_uninstall_scope.py) builds a throwaway installer with its own
+; AppId and name, so its install and uninstall never touch the real entry or shortcuts.
+#ifdef StubTest
+  #define MyAppDisplay "Inglen Uninstall Test"
+  #define AppIdValue "{{5D0C8E21-7A43-4B6E-9F12-3C8A0B7E6D59}"
+#else
+  #define MyAppDisplay "Inglen"
+  #define AppIdValue "{{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}"
+#endif
 #define MyAppVersion "0.7.6-preview"
 #define MyAppPublisher "Inglen"
 #define MyAppExeName "Hearth.exe"
@@ -33,7 +41,7 @@
 #endif
 
 [Setup]
-AppId={{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}
+AppId={#AppIdValue}
 AppName={#MyAppDisplay}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -78,7 +86,9 @@ Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cre
 ; OPTIONAL: drop Microsoft's tiny (~2 MB) "MicrosoftEdgeWebView2Setup.exe"
 ; (Evergreen Bootstrapper) next to this .iss to bundle the WebView2 installer.
 ; If it's not here, the [Run] step below is simply skipped.
+#if !Defined(StubTest) && FileExists(AddBackslash(SourcePath) + "MicrosoftEdgeWebView2Setup.exe")
 Source: "MicrosoftEdgeWebView2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: WebView2Missing and FileExists(ExpandConstant('{src}\MicrosoftEdgeWebView2Setup.exe'))
+#endif
 
 [Icons]
 Name: "{group}\{#MyAppDisplay}";        Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\_internal\assets\icon_app.ico"
@@ -90,22 +100,30 @@ Name: "{autodesktop}\{#MyAppDisplay}";  Filename: "{app}\{#MyAppExeName}"; IconF
 Name: "{autodesktop}\{#MyAppDisplay} CLI"; Filename: "{app}\Hearth-cli.bat"; \
   IconFilename: "{app}\_internal\assets\icon_app.ico"; Tasks: desktopicon
 
+#ifndef StubTest
 [InstallDelete]
 ; Shortcuts from before the rename to Inglen.
 Type: files; Name: "{autodesktop}\Hearth.lnk"
 Type: files; Name: "{autodesktop}\Hearth CLI.lnk"
 Type: filesandordirs; Name: "{autoprograms}\Hearth"
+#endif
 
 [UninstallDelete]
-; Inno only removes files it put there itself. Hearth writes into its own folder
-; at runtime (downloaded engines, patch backups, logs), so the uninstaller left
-; those behind, then couldn't remove the directory or unins000.exe, and still
-; reported success. Sweep the app folder so uninstalling actually leaves nothing.
+; Inno removes only the files it put down itself. Inglen also writes inside its own
+; folder while it runs: engines, code patches and their backups and markers under
+; _internal, the speech library's log in the working folder, and the copies kept
+; when the code layer is synced. Those go too, and then the folder if nothing is
+; left. Only these: the folder may be one the person picked that already held
+; their own files, and a sweep of the whole folder took those with it.
 ; User data is untouched: chats, memory and models live in the workspace and in
 ; %USERPROFILE%\.hearth, not here.
 Type: filesandordirs; Name: "{app}\_internal"
-Type: filesandordirs; Name: "{app}"
+Type: files; Name: "{app}\realtimesst.log"
+Type: filesandordirs; Name: "{app}\_code_before_sync_*"
+Type: filesandordirs; Name: "{app}\_cryptography_before_fix"
+Type: dirifempty; Name: "{app}"
 
+#ifndef StubTest
 [Run]
 ; Install the WebView2 runtime if missing (needed for the GUI). Silent.
 Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; \
@@ -118,6 +136,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppDisplay}"; \
 ; entry above is skipped and the user would be left with no app open. Relaunch it
 ; explicitly in that case so an update ends with Hearth back on screen.
 Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent
+#endif
 
 [Code]
 { Returns True if the Edge WebView2 Evergreen runtime is NOT installed. Checks

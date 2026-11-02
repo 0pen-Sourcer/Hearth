@@ -117,15 +117,14 @@ _NO_SHELL = ["-c", "features.shell_tool=false", "-c", "features.unified_exec=fal
 
 
 def _sandbox() -> List[str]:
+    """exec's sandbox (the fallback when the app server doesn't come up). exec asks
+    nobody about its own edits, so in Auto-edit they'd land unasked anywhere in the
+    workspace, Inglen's own control files included: there its edits go through
+    Inglen's tools instead, which ask about those."""
     mode = _mode()
-    if mode == "ask":
+    if mode != "auto":
         return ["-c", 'sandbox_mode="read-only"'] + _NO_SHELL
-    out = ["-c", 'sandbox_mode="workspace-write"']
-    if mode == "auto":
-        out += ["-c", "sandbox_workspace_write.network_access=true"]
-    else:
-        out += _NO_SHELL
-    return out
+    return ["-c", 'sandbox_mode="workspace-write"', "-c", "sandbox_workspace_write.network_access=true"]
 
 
 def build_args(exe: List[str], *, session: Optional[str], persona: str, model: str = "",
