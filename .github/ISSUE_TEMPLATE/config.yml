@@ -1,8 +1,9 @@
-?blank_issues_enabled: false
+# Stays true: the app's crash report opens issues/new with the title and stack filled in.
+blank_issues_enabled: true
 contact_links:
-  - name: Question or discussion
-    url: https://github.com/0pen-sourcer/hearth/discussions
-    about: For "how do I do X?" or open-ended ideas, please use Discussions — they're easier to find and don't clutter the issue tracker.
+  - name: Help, billing or Plus
+    url: https://github.com/0pen-Sourcer/Hearth/blob/main/docs/SUPPORT.md
+    about: How to get help, and hello@inglen.app for anything about a purchase.
   - name: Security vulnerability
-    url: https://github.com/0pen-sourcer/hearth/security/advisories/new
-    about: Don't open a public issue for security problems. Use private vulnerability reporting instead.
+    url: https://github.com/0pen-Sourcer/Hearth/blob/main/SECURITY.md
+    about: Please don't open a public issue for a security problem. This page says how to report one privately.

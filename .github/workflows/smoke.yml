@@ -1,4 +1,4 @@
-name: smoke
+name: Tests
 
 on:
   push:
@@ -25,8 +25,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install minimum runtime deps
-        # Just enough that `import hearth` succeeds. Voice/STT deps are
-        # optional and lazy-imported.
         run: |
           python -m pip install --upgrade pip
           pip install openai psutil
@@ -40,17 +38,10 @@ jobs:
           python -c "from hearth.dev_tools import cmd_list; cmd_list()"
 
       - name: Tool call parsing
-        # Every case here cost real work when it broke: a call cut one brace
-        # short, an unclosed tag swallowing the next call, file content that
-        # contains the closing tag.
         run: |
           python tests/test_tool_call_parsing.py
 
       - name: Tool contract
-        # `import hearth` succeeds even when a tool is unusable, so check that
-        # every advertised tool resolves to a handler, that no method has been
-        # orphaned out of its class, and that a missing field is refused rather
-        # than raised.
         run: |
           python tests/test_tool_contract.py
 
@@ -59,68 +50,38 @@ jobs:
           python tests/test_click_snap.py
 
       - name: Batched desktop steps
-        # A batch drives the real mouse and keyboard, so check that it refuses a
-        # tool outside the desktop set and stops at the first failing step
-        # instead of typing the rest of the sequence into whatever is in front.
         run: |
           python tests/test_desktop_batch.py
 
       - name: Engine picker and repair plan
-        # Build tags sort as numbers, not strings, or the picker runs a stale
-        # engine and the pruner deletes the current one. And the repair plan
-        # keeps a separate list from the patch builder, so check they agree.
         run: |
           python tests/test_install_contract.py
 
       - name: Voice settings reach every surface
-        # The voice panes save to settings.json and the voice modules read env
-        # vars, with nothing binding the two, so a setting can be written and
-        # displayed as selected while applying to one surface only.
         run: |
           python tests/test_voice_settings.py
 
       - name: Destructive command guard
-        # PowerShell gives every cmdlet a short alias and a .NET equivalent, so
-        # a guard that matches only long names catches one spelling in nineteen.
-        # The second half matters as much: a guard that refuses ordinary work
-        # gets routed around, and then it guards nothing.
         run: |
           python tests/test_destructive_guard.py
 
       - name: The model cannot approve its own call
-        # Tool arguments are a dict the model fills in, and the tool layer reads
-        # one key out of that same dict as control. A truthiness test let the
-        # model clear the destructive guard by adding one key.
         run: |
           python tests/test_approval_boundary.py
 
       - name: A reply where some calls read and one does not
-        # The branch that ran when anything parsed did not check for LEFTOVER
-        # markup, so a reply with twenty calls and one bracket typo ran the
-        # nineteen and dropped the twentieth without a word.
         run: |
           python tests/test_partial_tool_parse.py
 
       - name: Another website cannot use the local API
-        # A page on any site that fetches 127.0.0.1 sends Host 127.0.0.1, so a
-        # loopback host check alone let it through, and wildcard CORS let it
-        # read stored keys back and call tools.
         run: |
           python tests/test_api_origin.py
 
       - name: Pausing or cancelling a model download
-        # Pause only dropped the browser's side of the request, the server
-        # swallowed the broken pipe and kept downloading, and Resume started a
-        # second writer on the same part file. The model came out 262 KB too
-        # long. This runs the real endpoint against a slow local server.
         run: |
           python tests/test_download_cancel.py
 
       - name: Resuming a download, and reporting a load
-        # A part file at or past the end of the file makes every resume answer
-        # 416, so the download fails the same way forever with no way to clear
-        # it. And the engine prints its metadata before it reads a tensor, so a
-        # bar driven by log position jumps up and then holds still for the wait.
         run: |
           python tests/test_download_progress.py
 
@@ -129,44 +90,28 @@ jobs:
           python tests/test_containment.py
 
       - name: The terminal, run as a real process
-        # It has its own agent loop, so fixes to the shared one do not reach
-        # it. End of input came back as an empty line and the loop spun on it
-        # instead of exiting. The terminal is the Windows product, so it is run
-        # where it ships.
         if: runner.os == 'Windows'
         run: |
           python tests/test_cli.py
 
       - name: The persona the model reads every turn
-        # Held to a size and to the facts. It had grown to about twelve thousand
-        # tokens of accreted rules, repeated tool manuals and claims that had
-        # gone false, and with the schemas used 64% of a 32K window.
         run: |
           python tests/test_persona.py
 
       - name: A real turn through the terminal's agent loop
-        # Runs the terminal against a stand-in model that answers with one tool
-        # call. Nothing else exercised this loop, which let a change strand the
-        # per-turn setup after a return and crash the first tool call.
         if: runner.os == 'Windows'
         run: |
           python tests/test_cli_turn.py
 
       - name: Broadcasts reaching the people they are written for
-        # The feed file was gitignored and never served, and the first-run rule
-        # would have swallowed the first announcement on every machine.
         run: |
           python tests/test_announcements.py
 
       - name: The memory store and its index
-        # A title in a non-Latin script replaced the whole index, and the
-        # index drifted from the files until the model forgot most of them.
         run: |
           python tests/test_memory_store.py
 
       - name: Chat apps share pairing, the conversation and questions before risky steps
-        # Every tool was approved from the phone, history was lost on restart,
-        # photos and voice notes were ignored, and access meant typing ids by hand.
         run: |
           python tests/test_channel_core.py
           python tests/test_telegram_bridge.py
@@ -174,20 +119,14 @@ jobs:
           python tests/test_custom_connector.py
 
       - name: Who the WhatsApp bridge answers
-        # The linked number's messages to anyone ran as instructions, and the
-        # reply landed in that chat. Files the reply named were never sent.
         run: |
           python tests/test_whatsapp_gate.py
 
       - name: A bridge started from the window keeps running
-        # Its output went to a pipe nothing read; once full, the bridge's next
-        # print blocked and it stopped answering while still shown as running.
         run: |
           python tests/test_bridge_spawn.py
 
       - name: The reminders file the window and the terminal share
-        # Both watchers fired every reminder, and one writing back a stale copy
-        # erased a reminder set meanwhile.
         run: |
           python tests/test_reminder_store.py
 
@@ -199,7 +138,7 @@ jobs:
         run: |
           python tests/test_activity_log.py
 
-      - name: An agent brain reaches all of Hearth's tools
+      - name: An agent brain reaches all of Inglen's tools
         run: |
           python tests/test_brain_mcp_tools.py
 
@@ -212,8 +151,6 @@ jobs:
           python tests/test_model_facts.py
 
       - name: A team of agents, as the panes show it
-        # Tool results rendered as empty arrows, failures as done, and members
-        # that never started were not mentioned to the model.
         run: |
           python tests/test_team.py
           python tests/test_helper_loop_guard.py
@@ -228,14 +165,10 @@ jobs:
           python tests/test_cursor_accent.py
 
       - name: Voice sessions end cleanly and stay apart
-        # Every session leaked its mic reader and a Whisper process, and a
-        # stream closing late took the next session's ready and then stopped it.
         run: |
           python tests/test_voice_session.py
 
       - name: Which microphone voice opens
-        # A pick saved as a device number pointed elsewhere after any hardware
-        # change, and the fallback opened a virtual mic that records silence.
         run: |
           python tests/test_mic_choice.py
 
@@ -244,14 +177,10 @@ jobs:
           python tests/test_settings_save.py
 
       - name: The wake word hears whole phrases and yields the mic
-        # It cut quiet sounds and the start of long sentences out of what it
-        # transcribed, and held the mic through voice mode.
         run: |
           python tests/test_wake.py
 
       - name: Commands report their real output and exit status
-        # PowerShell garbled non-English names, crashed Python children that
-        # printed them, hid failures behind exit 0, and bash had no way in.
         run: |
           python tests/test_run_command.py
 
@@ -279,7 +208,6 @@ jobs:
           python tests/test_provider_models.py
 
       - name: A search pattern cannot become a ripgrep option
-        # --pre=PROGRAM runs a program on every file searched.
         run: |
           python tests/test_grep_search.py
 
@@ -313,20 +241,14 @@ jobs:
           python tests/test_gpu_platforms.py
 
       - name: The engine download for each system and card
-        # Only Windows zips were ever picked, so a Linux or Mac install had no
-        # engine at all. Runs the real archive layout: one top folder, links.
         run: |
           python tests/test_engine_platforms.py
 
       - name: Apps, files, links and away time on Linux and macOS
-        # os.startfile exists only on Windows, and Linux apps were found only
-        # by command name, so most desktop apps could not be opened by name.
         run: |
           python tests/test_platform_standins.py
 
       - name: The local image engine loads a model it can run, and the tools use it
-        # One SD-Turbo file once made every recipe naming 'sd' look ready, and
-        # the engine's status (which always carries an error field) read as down.
         run: |
           python tests/test_sdserver.py
 
@@ -386,14 +308,11 @@ jobs:
         run: |
           python tests/test_voice_levels.py
 
-      - name: On headphones, words said right after Hearth speaks are sent
+      - name: On headphones, words said right after Inglen speaks are sent
         run: |
           python tests/test_voice_dropping.py
 
       - name: The window starts without a script error, in the look that was saved
-        # A line near the top of the page script that touched something declared
-        # further down stopped everything after it: no chats, no model list, dead
-        # buttons. Runs where Playwright and Edge are present, skips elsewhere.
         if: runner.os == 'Windows'
         run: |
           python tests/test_ui_boot.py
@@ -403,53 +322,32 @@ jobs:
           python tests/test_ui_connectors.py
 
       - name: The public tool reference matches the code
-        # docs/TOOLS.md is generated; it said 93 tools long after there were more.
         if: matrix.os == 'windows-latest'
         run: |
           python scripts/gen_tools_doc.py
           git diff --exit-code -- docs/TOOLS.md
 
       - name: Masking secrets out of public output
-        # It only knows the shapes it was taught, and several that sit on disk
-        # on a machine running Hearth were not among them, so they went through
-        # in full. The label matters too: it is what says which key to rotate.
         run: |
           python tests/test_redaction.py
 
       - name: Working out when a reminder is for
-        # Most ordinary phrasings parsed as nothing, so the reminder was
-        # refused. And "tonight at 11" was accepted and set for eleven in the
-        # morning without saying anything.
         run: |
           python tests/test_reminder_parsing.py
 
       - name: Finding a tool that isn't loaded by default
-        # The matcher scored a query token against a description with a plain
-        # substring test, so a short word landed inside a longer one and a
-        # query that matched nothing came back with unrelated tools under
-        # "you can call them now".
         run: |
           python tests/test_tool_discovery.py
 
       - name: Saving a conversation
-        # A kill between the write and the rename leaves the temporary behind,
-        # and it ends in .json, so the lister read it as a second copy of the
-        # chat it was about to become.
         run: |
           python tests/test_convo_store.py
 
       - name: An update cut off partway through
-        # The rollback inside the applier only runs for a failure it lives to
-        # see. A power cut or a kill during the extract left two versions mixed
-        # together, with nothing to notice it and no way back.
         run: |
           python tests/test_patch_recovery.py
 
       - name: The window's script
-        # One file, no import to fail: a stray bracket takes the whole
-        # interface down to a blank page and nothing would have caught it.
-        # Also flags a control wired to an id no markup defines, which does
-        # not break, it just silently never works.
         run: |
           python tests/test_ui_script.py
 

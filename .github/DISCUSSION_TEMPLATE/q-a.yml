@@ -1,0 +1,17 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a bug, a [bug report](https://github.com/0pen-Sourcer/Hearth/issues/new?template=bug_report.yml) gets it fixed faster.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup
+      description: Inglen version, and what it thinks with.
+      placeholder: 0.7.6-preview, Claude Code

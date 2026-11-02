@@ -1,0 +1,32 @@
+name: Feature request
+description: An idea for something Inglen should be able to do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The [roadmap](https://github.com/0pen-Sourcer/Hearth/blob/main/ROADMAP.md) shows what's already planned.
+  - type: textarea
+    id: want
+    attributes:
+      label: What you want
+      description: One sentence, then more if it needs it.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What you'd use it for
+      description: A real situation helps more than a general idea.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How you'd see it working
+      description: A sketch is fine. A sentence you'd say to it, a setting, a slash command.
+  - type: textarea
+    id: similar
+    attributes:
+      label: Anything similar elsewhere
+      description: Links to how another app handles it.

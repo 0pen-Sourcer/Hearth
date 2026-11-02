@@ -1,0 +1,8 @@
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you'd want Inglen to do, and what you'd use it for.
+    validations:
+      required: true
