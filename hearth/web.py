@@ -3093,8 +3093,12 @@ class HearthHandler(BaseHTTPRequestHandler):
                 "pending":      list(_permission_queues.keys()),
             })
         if path == "/api/settings":
-            # With the name the agent has until the person picks one, for the window's fallbacks.
-            return self._send_json(200, dict(_load_settings(), agent_name_default=__import__("hearth").default_agent_name()))
+            # With the name the agent has until the person picks one, for the window's fallbacks,
+            # and the clock as it shows (the setting, or Windows' own format when it is automatic).
+            from .clock import twelve_hour
+            s = _load_settings()
+            return self._send_json(200, dict(s, agent_name_default=__import__("hearth").default_agent_name(),
+                                             clock_12h=twelve_hour(s)))
         if path == "/api/auto_review":
             from . import auto_review
             return self._send_json(200, auto_review.status())

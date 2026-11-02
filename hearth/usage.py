@@ -65,8 +65,8 @@ def everything(provider_key) -> List[Dict[str, Any]]:
             refused, when = _logged_refusal(aid)
             if refused:
                 # What the agent itself logged, with when; not a guess at how much is left.
-                entry.update(at=when, refused=refused,
-                             note=f"{label} refused at {time.strftime('%H:%M', time.localtime(when))}: {refused}")
+                from .clock import hm
+                entry.update(at=when, refused=refused, note=f"{label} refused at {hm(when)}: {refused}")
             else:
                 entry["note"] = f"Can't tell: {label} doesn't report how much of its plan is used."
         out.append(entry)

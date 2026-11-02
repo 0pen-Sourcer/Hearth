@@ -359,6 +359,12 @@ def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
             cards = session_files(msg.get("text") or "", got.get("cwd") or "")
             if cards:
                 msg["files"] = cards
+        elif msg.get("role") == "user" and msg.get("files"):
+            # What the phone sent with the message, as cards with it (a file since removed drops out).
+            cards = [relay_media.card(p) for p in msg["files"] if isinstance(p, str)]
+            msg["files"] = [c for c in cards if c is not None]
+            if not msg["files"]:
+                del msg["files"]
     return got
 
 
@@ -564,7 +570,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             s = _load_settings() or {}
         except Exception:
             s = {}
-        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or ""}
+        from .clock import style
+        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or "", "clock": style(s)}
     return {"error": f"unknown request {what!r}"}
 
 
@@ -797,7 +804,8 @@ _SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, 
              "gen_stats": (True, False),
              # The look, as the window's Appearance writes it: either side follows the other.
              "ui_theme": ("classic", "dark", "light", "system"),
-             "ui_accent": ("ember", "sage", "ocean", "rose", "violet", "mono")}
+             "ui_accent": ("ember", "sage", "ocean", "rose", "violet", "mono"),
+             "clock_style": ("auto", "12", "24")}
 
 
 def _front(raw: str) -> tuple:
@@ -1197,6 +1205,14 @@ class Relay(cc.Adapter):
         except Exception:
             return None
         return mid
+
+    def push_now(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
+        """A frame about this moment (an agent at work): only to a phone that is connected. Kept in
+        the mailbox, it would read as current when the phone opens hours later, with the PC off."""
+        room = self.rooms.get(str(chat))
+        if room is None or not room.peer_up or room.chan is None:
+            return None
+        return self._push(chat, obj)
 
     def _call_for(self, chat):
         """The call in progress in this phone's room, when the turn is in its chat."""
@@ -2095,6 +2111,12 @@ class Bridge:
         got = agent_sessions.parse_chat(c)
         return bool(got) and tuple(got) in agent_sessions._RAN_HERE
 
+    def worth_telling(self, n: Dict[str, Any], idle: Optional[float] = None) -> bool:
+        """An agent's finished turn is news for the phone unless they are at the PC, in a session they
+        are working in there themselves. Work handed off from the phone or Inglen is always told."""
+        from . import call_me
+        return self.from_here(str(n.get("c") or "")) or not call_me.at_pc(idle)
+
     def agent_call(self, n: Dict[str, Any], idle: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """The ring an agent's finished turn makes: only for work handed off from the phone or Inglen,
         only when it has news, and one per session per stretch of work."""
@@ -2122,8 +2144,9 @@ class Bridge:
             except Exception:
                 continue
             for n in notes:
-                for chat in list(self.adapter.rooms):     # each paired phone
-                    self.adapter.notify(chat, n)
+                if self.worth_telling(n):
+                    for chat in list(self.adapter.rooms):     # each paired phone
+                        self.adapter.notify(chat, n)
                 try:
                     ev = self.agent_call(n)
                     if ev is not None:
@@ -2143,12 +2166,12 @@ class Bridge:
                 prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
                 try:
                     for chat in list(self.adapter.rooms):
-                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c, "working": busy_now})
+                        self.adapter.push_now(chat, {"type": "changed", "what": "chat", "c": c, "working": busy_now})
                 finally:
                     cc._TURN.ctx = prev
 
     # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
-    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme)")
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme|clock_)")
 
     def follow_window(self) -> None:
         """Pass what changes on the PC (live_bus) to every paired phone as it happens:

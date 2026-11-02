@@ -167,9 +167,8 @@ def card(provider: str, got: Dict[str, Any], now: Optional[float] = None) -> str
     left = until - now
     if left < 90:
         when = f"for {max(1, int(round(left)))} more seconds"
-    elif time.localtime(until)[:3] == time.localtime(now)[:3]:
-        when = "until " + time.strftime("%I:%M %p", time.localtime(until)).lstrip("0")
     else:
-        when = "until " + time.strftime("%a %I:%M %p", time.localtime(until)).replace(" 0", " ")
+        from .clock import hm
+        when = "until " + hm(until, day=time.localtime(until)[:3] != time.localtime(now)[:3])
     what = "is out of usage" if got.get("what") == "quota" else "is limiting requests"
     return f"{provider} {what} {when}. Switch to another brain to carry on now."
