@@ -964,7 +964,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Regex (Python flavor)."},
+                "pattern": {"type": "string", "description": "A regular expression, or plain words."},
                 "path": {"type": "string", "description": "Directory to search. Default = workspace."},
                 "glob": {"type": "string", "description": "File glob filter, e.g. '*.py'."},
                 "case_insensitive": {"type": "boolean"},
@@ -1090,7 +1090,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "cwd":         {"type": "string", "description": "Working dir. Default = workspace."},
                 "shell":       {"type": "string", "enum": _shells.available(),
                                 "description": "Which shell runs it, as for run_command. Default: the first one listed."},
-                "description": {"type": "string", "description": "Short label for the job ('install torch', 'download Hermes-3 GGUF'). Shown in list_jobs."},
+                "description": {"type": "string", "description": "Short label for the job ('install torch', 'build the site'). Shown in list_jobs."},
             },
             "required": ["command"],
         },
@@ -1519,9 +1519,9 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
                 "description": {"type": "string", "description": "One-line hook (~140 chars). This is what shows up in the always-loaded index, so make it specific."},
                 "body": {"type": "string", "description": "The actual memory content. Markdown OK. Include reasons / how-to-apply when relevant."},
-                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags. Use cat:subcat like project:hearth for finer bucket."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags, cat:subcat for a finer bucket, like project:thesis."},
                 "volatility": {"type": "string", "enum": ["durable", "seasonal", "transient"], "description": "How long this stays true. durable=forever, seasonal=school term/project phase, transient=days. Default durable."},
-                "sub_category": {"type": "string", "description": "Finer bucket within type, e.g. school, hearth, health. Or use tags cat:subcat."},
+                "sub_category": {"type": "string", "description": "Finer bucket within type, e.g. school, work, health. Or use tags cat:subcat."},
                 "supersedes": {"type": "string", "description": "Slug of a seasonal memory this replaces, e.g. school. Archives the old one."},
                 "force": {"type": "boolean", "description": "After a [possible-dup] warning, true if this really is a separate fact."},
             },
@@ -6845,7 +6845,7 @@ TOOL_DEFINITIONS.append({
     "parameters": {
         "type": "object",
         "properties": {
-            "name": {"type": "string", "description": "Skill slug from list_skills (e.g. 'make-pdf')."},
+            "name": {"type": "string", "description": "The skill's name from the Skills list in your instructions (e.g. 'make-pdf')."},
         },
         "required": ["name"],
     },
@@ -8487,6 +8487,21 @@ except Exception:
     _loaded_plugins = []
 
 
+def sync_plugins() -> List[str]:
+    """Plugins another process made or deleted since this one started; a new one is held back
+    like any plugin, so load_tools finds it. The names added."""
+    try:
+        got = _plugins.sync(WORKSPACE, TOOL_DEFINITIONS, _HANDLERS)
+    except Exception:
+        return []
+    for n in got["added"]:
+        _DEFERRED_TOOLS.add(n)
+    for n in got["removed"]:
+        _DEFERRED_TOOLS.discard(n)
+        _unlocked_tools.pop(n, None)
+    return got["added"]
+
+
 ACTIVITY_LOG = os.path.join(LOGS_DIR, "activity.jsonl")
 
 
@@ -8584,6 +8599,8 @@ def _execute_tool(name: str, args: Optional[Dict] = None) -> str:
         except Exception as e:
             return f"Error ({name}): {type(e).__name__}: {e}"
     handler = _HANDLERS.get(name)
+    if not handler and name in sync_plugins():
+        handler = _HANDLERS.get(name)       # a plugin made in another process (a bridge, the window)
     if not handler:
         # A SKILL name reached here as if it were a tool. The model sees skills
         # in the catalog (make-diagram, make-pdf, ...) and tries to invoke one
@@ -8767,7 +8784,7 @@ def _says_failed(text: str) -> bool:
 # not happen. These fill the gaps in one place so no required field ships
 # undescribed; a schema that already describes a field is left alone.
 _REQUIRED_PARAM_HELP = {
-    "path": "Full path to the file. Required, the call is rejected without it.",
+    "path": "Full path to the file.",
     "source": "Path to move or copy from.",
     "destination": "Path to move or copy to.",
     "content": "Full text to write. Required alongside path.",
@@ -8799,6 +8816,15 @@ _REQUIRED_PARAM_HELP_BY_TOOL = {
     ("computer_drag", "x2"): "Horizontal pixel where the drag ends.",
     ("computer_drag", "y2"): "Vertical pixel where the drag ends.",
     ("launch_team", "members"): "One entry per sub-agent, each with its own task.",
+    ("open_app", "name"): "An app's name ('spotify', 'notepad'), a file or folder path, or a URL.",
+    ("create_skill", "name"): "The skill's name, lower-kebab-case, like 'summarize-youtube'.",
+    ("create_skill", "body"): "The workflow in markdown: steps, defaults, what to avoid.",
+    ("computer_type", "text"): "What to type, as it should appear.",
+    ("desktop_type", "text"): "What to put in the field.",
+    ("clipboard_write", "text"): "What to put on the clipboard.",
+    ("delete_path", "path"): "The file or folder to delete, inside the workspace.",
+    ("move_path", "source"): "The file or folder to move or rename.",
+    ("move_path", "destination"): "Where it goes: the new path, or the new name in the same folder.",
 }
 
 
@@ -9114,6 +9140,7 @@ def unlock_tools(query: str = "", touch: bool = True) -> "List[Dict[str, Any]]":
 
 
 def _h_load_tools(p: "Dict[str, Any]") -> str:
+    sync_plugins()
     matched = unlock_tools(p.get("query", ""))
     if not matched:
         return ("No extra tools matched that. what_can_i_do shows what this PC can do and has set "

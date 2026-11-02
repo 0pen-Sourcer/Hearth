@@ -310,8 +310,13 @@ for td in TOOL_DEFINITIONS:
 # the way load_tools does in Hearth itself.
 if _BRAIN_URL and _BRAIN_TOKEN and not _MCP_ALL_TOOLS:
     def _reachable(name: str) -> bool:
-        return name in _IN_HEARTH or (_IN_HEARTH and name.startswith("mcp_")) or (
-            name in _DEFERRED_TOOLS and name not in _MCP_NEVER)
+        from hearth.tools import TOOL_DEFINITIONS, sync_plugins
+        if name in _IN_HEARTH or (_IN_HEARTH and name.startswith("mcp_")) or (
+                name in _DEFERRED_TOOLS and name not in _MCP_NEVER):
+            return True
+        # A plugin made since this server started (here or in another process): listed nowhere else.
+        plugin = lambda: any(t["name"] == name and t.get("_plugin") for t in TOOL_DEFINITIONS)  # noqa: E731
+        return plugin() or (name in sync_plugins() and plugin())
 
     from hearth.tools import deferred_menu
 
@@ -320,8 +325,13 @@ if _BRAIN_URL and _BRAIN_TOKEN and not _MCP_ALL_TOOLS:
                           "before saying you can't do something. Give a tool's name or a word for what you "
                           "need, or 'all', then run it with use_tool. They are: " + deferred_menu() + ".")
     def find_tools(query: str) -> str:
-        from hearth.tools import unlock_tools
+        from hearth.tools import TOOL_DEFINITIONS, sync_plugins, unlock_tools
+        sync_plugins()
         found = [td for td in unlock_tools(query, touch=False) if _reachable(td["name"])]
+        q = (query or "").strip().lower()
+        # A plugin made in this server is live but not held back, so the search above can't see it.
+        found += [td for td in TOOL_DEFINITIONS if td.get("_plugin") and td not in found
+                  and q and (q in td["name"] or q in td["description"].lower())]
         if _IN_HEARTH:
             try:
                 found += _post_hearth("/api/brain/tool", "find_mcp_tools", {"query": query}).get("result") or []

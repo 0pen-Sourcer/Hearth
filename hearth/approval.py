@@ -49,6 +49,9 @@ def parts(name: str, args: Dict[str, Any]) -> Tuple[str, str]:
     if name in ("run_command", "start_job"):
         return ("start a command" if name == "start_job" else "run a command",
                 str(a.get("command") or a.get("cmd") or "").strip())
+    if name == "create_plugin":
+        # The code is what they're agreeing to run, every time the tool is used: shown as written.
+        return f"add a tool of its own, {a.get('name') or 'a new one'}", str(a.get("code") or "").strip()
     if name in ("write_file", "append_file"):
         return "write a file", str(a.get("path") or "")
     if name == "edit_file":
@@ -107,6 +110,9 @@ def line(name: str, args: Dict[str, Any]) -> str:
     what, detail = parts(name, args or {})
     if name in ("run_command", "start_job"):
         return f"{what.split()[0]} `{_cut(detail, 160)}`"
+    if name == "create_plugin":
+        code = detail if len(detail) <= 2400 else detail[:2400] + "\n# ...and more"
+        return f"{what}, which runs this code:\n```\n{code}\n```"
     return what + (f": {_cut(detail.replace(chr(10), ', '), 160)}" if detail else "")
 
 
