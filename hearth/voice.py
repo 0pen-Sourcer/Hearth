@@ -11,8 +11,8 @@ ONE-TIME SETUP (Kokoro path, recommended):
     pip install kokoro-onnx sounddevice numpy
 
     Then download the model + voices to ~/Jarvis/voices/:
-      - kokoro-v1.0.onnx           (~80MB)
-      - voices-v1.0.bin            (~20MB)
+      - kokoro-v1.0.fp16.onnx      (~180MB, release model-files-v1.0)
+      - voices-v1.0.bin            (~28MB)
     From: https://huggingface.co/hexgrad/Kokoro-82M (ONNX exports), or:
         https://github.com/thewh1teagle/kokoro-onnx/releases
 
@@ -154,7 +154,7 @@ def _find(*candidates: str) -> Optional[str]:
     return None
 
 
-# Far below their real sizes (about 310 MB and 27 MB): under this a file is a
+# Far below their real sizes (about 177 MB and 28 MB): under this a file is a
 # cut-off download or what an antivirus left of it.
 _MIN_BYTES = {"kokoro": 50 * 1024 * 1024, "voices": 5 * 1024 * 1024}
 _DAMAGE_WORDS = ("protobuf", "corrupt", "unexpected end", "not a valid", "pickle", "bad magic",
@@ -186,14 +186,26 @@ def drop_damaged_models(error: str = "") -> List[str]:
 
 # One fixed release, the same one install.ps1 pulls, each file checked against its sha256.
 # Auto-fetched on first TTS use if the files aren't already on disk (set
-# HEARTH_NO_AUTODOWNLOAD=1 to opt out).
-_KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/"
-KOKORO_MODEL_URL = _KOKORO_RELEASE + "kokoro-v1.0.onnx"
-KOKORO_VOICES_URL = _KOKORO_RELEASE + "voices-v1.0.bin"
+# HEARTH_NO_AUTODOWNLOAD=1 to opt out). model-files-v1.0's fp16 model takes `tokens`;
+# model-files-v1.1's takes `input_ids` with a float speed, which kokoro_onnx 0.5.0
+# feeds as int32, so it fails on every sentence.
+_KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
+KOKORO_MODEL_FILE = "kokoro-v1.0.fp16.onnx"
+KOKORO_VOICES_FILE = "voices-v1.0.bin"
+KOKORO_MODEL_URL = _KOKORO_RELEASE + KOKORO_MODEL_FILE
+KOKORO_VOICES_URL = _KOKORO_RELEASE + KOKORO_VOICES_FILE
 KOKORO_SHA256 = {
-    KOKORO_MODEL_URL: "beb0d1848dee9a49da392cc3df26958d46cfa35d321edf434f52949153f0df3a",
+    KOKORO_MODEL_URL: "c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204",
     KOKORO_VOICES_URL: "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
 }
+
+
+def _undrivable(k) -> bool:
+    """True for a model whose inputs this kokoro_onnx sends with the wrong types."""
+    try:
+        return "input_ids" in [i.name for i in k.sess.get_inputs()]
+    except Exception:
+        return False
 
 
 class DownloadCancelled(Exception):
@@ -269,9 +281,9 @@ def download_models(progress: "Optional[Callable[[str, int, int], None]]" = None
     os.makedirs(VOICES_DIR, exist_ok=True)
     jobs = []
     if not _find("kokoro"):
-        jobs.append(("voice model", KOKORO_MODEL_URL, "kokoro-v1.0.onnx"))
+        jobs.append(("voice model", KOKORO_MODEL_URL, KOKORO_MODEL_FILE))
     if not _find("voices"):
-        jobs.append(("voice bank", KOKORO_VOICES_URL, "voices-v1.0.bin"))
+        jobs.append(("voice bank", KOKORO_VOICES_URL, KOKORO_VOICES_FILE))
     # Sizes are unknown until each transfer starts, so carry the bytes already
     # finished and add the running file on top. The total grows as each file
     # reports in, which the overlay handles.
@@ -334,11 +346,11 @@ def _ensure_kokoro_models(allow_download: bool = False) -> bool:
     os.makedirs(VOICES_DIR, exist_ok=True)
     try:
         if not _find("kokoro"):
-            print("[voice] Kokoro TTS model missing - downloading once (~80MB)...")
-            _download(KOKORO_MODEL_URL, os.path.join(VOICES_DIR, "kokoro-v1.0.onnx"))
+            print("[voice] Kokoro TTS model missing - downloading once (~180MB)...")
+            _download(KOKORO_MODEL_URL, os.path.join(VOICES_DIR, KOKORO_MODEL_FILE))
         if not _find("voices"):
-            print("[voice] Kokoro voices missing - downloading once (~20MB)...")
-            _download(KOKORO_VOICES_URL, os.path.join(VOICES_DIR, "voices-v1.0.bin"))
+            print("[voice] Kokoro voices missing - downloading once (~28MB)...")
+            _download(KOKORO_VOICES_URL, os.path.join(VOICES_DIR, KOKORO_VOICES_FILE))
     except Exception as e:
         _last_load_error = f"Kokoro auto-download failed: {type(e).__name__}: {e}"
         return False
@@ -406,11 +418,27 @@ def _try_kokoro(allow_download: bool = False):
         # Newer kokoro_onnx accepts a `providers=` kw on init; older versions
         # silently ignore extra kwargs. Try both shapes.
         try:
-            return Kokoro(model, voices, providers=providers)  # type: ignore[call-arg]
+            k = Kokoro(model, voices, providers=providers)  # type: ignore[call-arg]
         except TypeError:
             # Fallback: set provider preference via env var for onnxruntime
             os.environ["ORT_PROVIDERS"] = ",".join(providers)
-            return Kokoro(model, voices)
+            k = Kokoro(model, voices)
+        if not _undrivable(k):
+            return k
+        # A model from a release this kokoro_onnx can't drive: swap it for the pinned one.
+        del k
+        try:
+            os.remove(model)
+        except OSError:
+            pass
+        if allow_download and not _healing[0]:
+            _healing[0] = True
+            try:
+                return _try_kokoro(allow_download=True)
+            finally:
+                _healing[0] = False
+        _last_load_error = "The voice model on this PC doesn't fit this version, so I removed it. Get it again from Settings, Voice."
+        return None
     except Exception as e:
         # The files themselves may be the fault: half a download, or what an
         # antivirus left. They are removed so they read as missing, and fetched

@@ -336,33 +336,30 @@ Edit freely; no restart needed.
 if (-not $NoVoice) {
     Write-Step "Voice model files for Kokoro TTS"
     $voicesDir = Join-Path $workspace 'voices'
-    $onnxPath  = Join-Path $voicesDir 'kokoro-v1.0.onnx'
+    $onnxPath  = Join-Path $voicesDir 'kokoro-v1.0.fp16.onnx'
     $binPath   = Join-Path $voicesDir 'voices-v1.0.bin'
 
     if ((Test-Path $onnxPath) -and (Test-Path $binPath)) {
         Write-Skip "voice models already present"
     } else {
-        # Use the regular v1.0 .onnx (not fp16) - better cross-compat with the
-        # current kokoro_onnx Python package + matching voices-v1.0.bin.
-        # If you specifically want the smaller fp16, swap the URL to the
-        # `.fp16.onnx` variant from the same release.
-        # One fixed release, kept in step with hearth/voice.py (KOKORO_SHA256).
-        $onnxUrl = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx'
-        $binUrl  = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
-        $onnxSha = 'beb0d1848dee9a49da392cc3df26958d46cfa35d321edf434f52949153f0df3a'
+        # One fixed release, kept in step with hearth/voice.py (KOKORO_SHA256). Its fp16 model is the
+        # one the bundled kokoro_onnx can drive.
+        $onnxUrl = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx'
+        $binUrl  = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin'
+        $onnxSha = 'c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204'
         $binSha  = 'bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d'
 
-        Write-Host "   Voice download is ~150MB. Press Enter to download, or Ctrl-C to skip." -ForegroundColor DarkGray
+        Write-Host "   Voice download is ~205MB. Press Enter to download, or Ctrl-C to skip." -ForegroundColor DarkGray
         try { [void](Read-Host) } catch { Write-Skip "non-interactive; skipping voice download"; $skip = $true }
 
         if (-not $skip) {
             try {
                 if (-not (Test-Path $onnxPath)) {
-                    Write-Host "   downloading kokoro-v1.0.onnx ..." -ForegroundColor DarkGray
+                    Write-Host "   downloading kokoro-v1.0.fp16.onnx ..." -ForegroundColor DarkGray
                     Invoke-WebRequest -Uri $onnxUrl -OutFile $onnxPath -UseBasicParsing
                     if ((Get-FileHash $onnxPath -Algorithm SHA256).Hash -ne $onnxSha) {
                         Remove-Item $onnxPath -Force
-                        throw "kokoro-v1.0.onnx does not match its published sha256"
+                        throw "kokoro-v1.0.fp16.onnx does not match its published sha256"
                     }
                 }
                 if (-not (Test-Path $binPath)) {
