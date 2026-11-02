@@ -3,14 +3,12 @@
 Inglen runs your Windows machine for you, including files, shell, apps, a real browser, and
 the desktop itself. You reach it from a terminal, a desktop app, your phone, an MCP
 client, or a headless script. It thinks with a model on your PC, a cloud model, or an
-agent you already pay for like Claude Code or Codex, with no account and no telemetry.
+agent you already pay for like Claude Code or Codex, with no account, and no telemetry
+unless you opt in to an install count.
 
-This is where it is and where it's going. Dates are intent, not promises. I build
-this in my spare time, so things land when they're actually good, not on a schedule.
+This is where it is and where it's going. Dates are intent, not promises.
 
 ## Where it is now (v0.7.6-preview)
-
-The core is stable and I use it every day.
 
 - Reading and writing files, running commands in PowerShell, cmd or bash, opening
   apps, and driving a real browser, including the Chrome you already use.
@@ -30,10 +28,12 @@ The core is stable and I use it every day.
   Chromium/Electron apps, and weaker on canvas-drawn UIs and games that don't
   expose their controls.
 - Voice in eight languages, local listen (Whisper) and speak (Kokoro), hands-free,
-  with a wake word. Interrupting by voice works on headphones, and on speakers by
-  starting with its name ("Inglen, stop").
+  with a wake word. You can talk over a reply in the window on headphones or speakers.
+  In the terminal, on speakers, you start with its name ("Inglen, stop").
 - Your phone through Telegram, Discord or WhatsApp, running the full agent on your PC,
   with pairing codes for anyone new and approvals asked in the chat.
+- Inglen Plus, a paid add-on: a phone app that reaches your PC from anywhere through an
+  end-to-end encrypted relay, with approvals, the Team room and voice calls.
 - An optional bundled llama.cpp engine. If you already run LM Studio or Ollama,
   point Inglen at that instead.
 - Pictures and short videos made on your own graphics card with stable-diffusion.cpp,
@@ -43,13 +43,12 @@ The core is stable and I use it every day.
   your window handed back when it's done.
 
 There are over a hundred tools, and they aren't equal. About forty are core. The rest
-are specialized (image and video generation, email, some desktop-control cases) and depend on setup you may not have. Those stay
-held back until the model actually needs one, so you don't trip over them.
+are specialized (image and video generation, email, some desktop-control cases) and
+depend on setup you may not have. Those stay held back until the model actually needs
+one, so you don't trip over them.
 
-## What I'm working on next
+## What's next
 
-- Talking over it on speakers without saying its name first, with echo cancellation
-  on the microphone.
 - A signed installer, so Windows stops warning about an unknown app.
 - Image models with names of their own, picked up by trying them rather than by
   their file names.
@@ -63,17 +62,20 @@ held back until the model actually needs one, so you don't trip over them.
   accessibility tree is sparse, and multi-monitor and fullscreen awareness.
 - A guided mode. Instead of doing a task silently, it walks you through an app step
   by step, narrating and handing you the wheel at each point.
-- Mac and Linux. The CLI, the web UI, most tools and both engines already run from
-  source on Linux today, and the whole test suite passes there. What's still
+- Sync, so your memory, settings and skills follow you across devices, end-to-end
+  encrypted, as part of Plus.
+- Mac and Linux. The terminal, the web window, most tools and both engines already run
+  from source on Linux today, and the whole test suite passes there. What's still
   Windows-only is the desktop-control layer and the one-click installer, and macOS
   hasn't been tried on a real Mac yet.
 - A bigger skills ecosystem, with easier discovery of what other people have shared, and
   an idle curator that refines and prunes the skills the agent writes for itself.
 
-## What I won't change
+## What won't change
 
 - Local-first. Cloud is an option you can turn on, never something you're forced into.
-- Everything is visible. Every tool call, every file change, every bit of reasoning
-  is on screen. Nothing happens behind your back.
-- No account, no telemetry, no server I run in the middle. It's your machine and
-  your data.
+- You can see what it did. Every tool call, file change and piece of reasoning a model
+  shows can be opened in the chat, and the Logs page keeps the record.
+- The free app needs no account and no server of ours in the middle. It's your machine
+  and your data. The only exceptions are ones you choose: the Plus relay, which can't
+  read what it carries, and the opt-in install count.

@@ -1,24 +1,24 @@
-# Hearth
+# Inglen
 
-> Hearth is an open-source, local-first personal AI for Windows that controls the user's own computer: files, shell, apps, a browser, the desktop itself, screenshots, and voice that talks and listens. It runs on a local model (its built-in llama.cpp engine, LM Studio, Ollama, vLLM or any OpenAI-compatible server) or on a cloud model the user picks. The assistant it ships with is called JARVIS and can be renamed. MIT licensed, no account, no telemetry. Built by Ishant (GitHub 0pen-Sourcer) at 17.
+> Inglen (formerly Hearth) is an open-source, local-first personal AI for Windows that controls the user's own computer: files, shell, apps, a browser, the desktop itself, screenshots, and voice that talks and listens. It runs on a local model (its built-in llama.cpp engine, LM Studio, Ollama, vLLM or any OpenAI-compatible server), on a cloud model the user picks, or on the user's Claude Code, Codex or Cursor plan. The assistant it ships with is called Inglen and can be renamed. MIT licensed, no account, no telemetry unless the user opts in to an install count. Built by Ishant (GitHub 0pen-Sourcer) at 17. Inglen Plus is a paid add-on: a phone app that reaches the PC from anywhere through an end-to-end encrypted relay.
 
 Key facts:
 
-- Platform: Windows installer (Full, with the GPU engine; Lite, for people already running Ollama or LM Studio). Linux runs from source and downloads the model and image engines itself; macOS runs the same code but is less tested; desktop control is Windows only.
+- Platform: Windows installer (Full, with the GPU engine; Lite, for people already running Ollama or LM Studio, a cloud key or an agent). Linux runs from source and downloads the model and image engines itself; macOS runs the same code but has not been tried on a real Mac; desktop control is Windows only.
 - Graphics: reads NVIDIA, AMD and Intel cards; the built-in engine uses CUDA on NVIDIA and Vulkan on AMD and Intel.
-- Surfaces: desktop app, terminal CLI, a headless bridge, Telegram, Discord and WhatsApp (new senders need a pairing code the owner approves; custom connectors are one Python file), and an MCP server.
-- Tools: 111 built in, 36 loaded by default and the rest pulled in by name when needed. It can write new tools for itself (plugins) and install shareable skills.
+- Surfaces: desktop app, terminal, a headless bridge, Telegram, Discord and WhatsApp (new senders need a pairing code the owner approves; custom connectors are one Python file), an MCP server, and with Plus a phone app.
+- Tools: 112 built in, 37 loaded by default and the rest pulled in by name when needed. It can write new tools for itself (plugins) and install shareable skills.
 - Voice: speaks and listens in eight languages (English, Hindi, Spanish, French, Italian, Portuguese, Japanese, Mandarin), with a wake word.
-- Agent brains: JARVIS can think with Claude Code, Codex or Cursor's agent installed on the user's PC, on their own Claude, ChatGPT or Cursor plan, with a choice of that agent's models and no local model needed, while keeping Hearth's tools, memory, voice and permission prompts.
-- Other agents: JARVIS can hand a task to coding agent CLIs the user has installed, such as Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Aider and Goose, and relay the answer. A Team view shows every helper at work, as a list or as a room by a fire.
-- Safety: writes are confined to a workspace folder; an approval switch (Ask, Auto-edit, Auto) decides what runs without asking, and destructive commands always ask.
+- Agent brains: Inglen can think with Claude Code, Codex or Cursor's agent installed on the user's PC, on their own Claude, ChatGPT or Cursor plan, with a choice of that agent's models and no local model needed, while keeping Inglen's tools, memory, voice and approval switch.
+- Other agents: Inglen can hand a task to coding agent CLIs the user has installed, with adapters for 23, such as Claude Code, Codex, Antigravity, Gemini CLI, Grok, Kimi Code, OpenCode, Aider and Goose, and relay the answer. A Team view shows every helper at work, as a list or as a room by a fire.
+- Safety: writes are confined to a workspace folder; an approval switch (Ask, Auto-edit, Auto) decides what runs without asking, and destructive commands ask. Changes made by Inglen's own file tools can be undone for a week.
 - Memory: remembers facts about the user across sessions, in plain Markdown files on their own disk, and keeps track of what is going on across chats. It can be shared with Claude Code, Codex, Cursor and OpenCode as an MCP server.
-- Images and video: made on the user's own graphics card with stable-diffusion.cpp, which Hearth installs and runs, or with a cloud key for xAI Grok, OpenAI or Google Gemini.
+- Images and video: made on the user's own graphics card with stable-diffusion.cpp, which Inglen installs and runs, or with a cloud key for xAI Grok, OpenAI or Google Gemini.
 - Desktop control: clicks and types through the accessibility tree; while it acts, a breathing accent edge round the screen shows it, and the user's window is handed back at the end.
 
 ## Docs
 
-- [README](https://github.com/0pen-Sourcer/Hearth/blob/main/README.md): what Hearth is, install, interfaces, FAQ
+- [README](https://github.com/0pen-Sourcer/Hearth/blob/main/README.md): what Inglen is, install, interfaces, FAQ
 - [User guide](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/USER_GUIDE.md): everyday use of the app and the terminal
 - [Tool reference](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/TOOLS.md): every tool, generated from the code
 - [Skills](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/SKILLS.md): writing and installing shareable skills
@@ -34,6 +34,6 @@ Key facts:
 
 ## Optional
 
-- [Website](https://get-hearth.vercel.app)
+- [Website](https://inglen.app)
 - [Source code](https://github.com/0pen-Sourcer/Hearth)
 - [Support](https://github.com/0pen-Sourcer/Hearth/blob/main/docs/SUPPORT.md)

@@ -1,28 +1,28 @@
-<!-- Thanks for sending a PR! A small note: keep this template's headings; remove the prompts under them. -->
+<!-- Keep these headings and replace the prompts under them. -->
 
 ## What this changes
 
-<!-- One paragraph. What did you do, and why. -->
+<!-- One paragraph: what you did, and why. -->
 
-## How I tested it
+## How it was tested
 
-<!-- Concrete. "Ran `python -m hearth.dev_tools`, called `call new_tool {...}`, got expected output." Beats "it works on my machine." -->
+<!-- Be concrete: "Ran `python -m hearth.dev_tools`, called `call new_tool {...}`, got the expected output." -->
 
-## Screenshots / transcript (if user-facing)
+## Screenshots or transcript
 
-<!-- A CLI session capture or screenshot makes reviews 10x faster. -->
+<!-- For anything a user sees, a screenshot or terminal capture. -->
 
 ## Checklist
 
-- [ ] My change matches the style of the surrounding code
-- [ ] I ran `python -c "import hearth"` and it still imports
-- [ ] If I added a tool, it's in `TOOL_DEFINITIONS` and works in the dev_tools REPL
-- [ ] If I touched the persona, I added to it and didn't rewrite the existing voice
-- [ ] If I added a dep, it's optional / lazy-imported (Inglen installs in one step today; don't break that)
-- [ ] Docs / README updated if user-facing behavior changed
-- [ ] Tested on the OS my change affects (and noted which one below)
+- [ ] It matches the style of the surrounding code
+- [ ] `python -c "import hearth"` still works
+- [ ] A new tool is in `TOOL_DEFINITIONS` and works in the dev_tools REPL
+- [ ] Changes to the persona add to it and leave the existing voice alone
+- [ ] A new dependency is optional and lazy-imported
+- [ ] Docs are updated if user-facing behavior changed
+- [ ] Tested on the OS this change affects
 
-**Tested on:** <!-- Windows 10 / Windows 11 / macOS / Ubuntu / etc. -->
+**Tested on:** <!-- Windows 10 / Windows 11 / macOS / Ubuntu -->
 
 ## Related issues
 

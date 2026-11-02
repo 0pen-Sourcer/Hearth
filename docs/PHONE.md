@@ -1,5 +1,8 @@
 # Reach Inglen from your phone
 
+This page covers the free chat-app bridges. For the phone app that needs no bot, see Inglen Plus in the
+[user guide](USER_GUIDE.md#inglen-plus).
+
 Message Inglen from Telegram, Discord or WhatsApp and it runs the full agent on your PC, then
 replies, with files, pictures and voice notes going both ways. There is no OAuth, no public server
 and no port forwarding. Nothing leaves your machine except through the app you connect.
@@ -63,8 +66,8 @@ in the window.
 ## Reminders on your phone
 
 Turn on **Send reminders to my phone** in Settings, Behavior, Notifications and every reminder also
-goes to the Inglen app on your paired phone (with Plus) and to the Telegram or Discord you connected. Inglen can also send you something on request ("send this to my
-Telegram").
+goes to the Inglen app on your paired phone (with Plus) and to the Telegram or Discord you
+connected. Inglen can also send you something on request ("send this to my Telegram").
 
 ## Running a bot without the window
 

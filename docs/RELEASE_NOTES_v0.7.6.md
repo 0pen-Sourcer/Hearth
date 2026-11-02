@@ -68,7 +68,7 @@ One switch in the chat bar decides what runs without asking, and Shift+Tab cycle
 
 Auto has a reviewer. When a step would stop to ask, a quick check reads what you said in the chat and the step itself, never the brain's own words or anything a tool brought back, and lets the step go ahead when you clearly asked for exactly that. "Delete the old log" deletes the old log without a second question. It runs on whatever brain you use, and a model becomes the reviewer only after it passes a set of a couple of hundred labelled steps, checked in the background the first time Auto meets it or from Settings, Behavior, which shows how it did. Shutting down, disks, accounts, security settings, hidden commands and saved passwords always ask, whatever you said.
 
-File changes can be undone. Before Inglen writes, edits, deletes or moves a file it keeps a copy of what was there, and /undo in the window or the terminal lists the recent changes and puts one back. In Auto, something Inglen made itself in the past week can be deleted or moved without asking, since it can be put back.
+File changes can be undone. Before one of Inglen's own tools writes, edits, deletes or moves a file it keeps a copy of what was there for a week, and /undo in the window or the terminal lists the recent changes and puts one back. A shell command, an agent program's own edits and anything over 200 MB aren't covered. In Auto, something Inglen made itself in the past week can be deleted or moved without asking, since it can be put back.
 
 ## Security
 

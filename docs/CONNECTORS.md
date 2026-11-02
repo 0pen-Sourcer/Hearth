@@ -41,7 +41,7 @@ import time
 
 from hearth.channel_core import Adapter
 
-INBOX = os.environ.get("HEARTH_INBOX") or os.path.expanduser("~/Sync/hearth-inbox")
+INBOX = os.environ.get("HEARTH_INBOX") or os.path.expanduser("~/Sync/inglen-inbox")
 
 
 class Folder(Adapter):

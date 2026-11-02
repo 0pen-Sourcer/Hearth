@@ -8,8 +8,8 @@ Inglen runs on your machine with broad permissions: files, shell commands, app l
 
 Instead, use one of these:
 
-1. **GitHub Private Vulnerability Reporting** (preferred). Go to the repo's Security tab and choose "Report a vulnerability". This lets us coordinate a fix privately before disclosure.
-2. **Email** the address in the maintainer's GitHub profile.
+1. **Email** [hello@inglen.app](mailto:hello@inglen.app) with "Security" in the subject.
+2. **GitHub private reporting.** Go to the repo's Security tab and choose "Report a vulnerability".
 
 Include:
 - A short description of what's wrong
@@ -46,7 +46,7 @@ Out of scope:
 
 - **Prompt injection in Auto mode.** Content from a page, file, email or message can contain instructions aimed at the model rather than the person. Once a chat has read something from outside (a web page, search results, an email, the screen, a downloaded file), a request to an address nobody gave asks first in every mode, and so does any call to an MCP server's tool. An address counts as given only when it appears whole in the person's words or in what came in; one with something appended, or to a host nobody mentioned, asks. The check reads the addresses in tool arguments and in shell commands. A program the model writes and then runs, or a command that builds its address at run time, makes requests the check can't see.
 - **`run_command`** runs arbitrary shell commands. Destructive commands and redirects to disk ask before running. An approved destructive command does run. Do not blanket-allow it unless you trust the model and the task.
-- **`edit_file` / `write_file`** can damage files if the model writes the wrong thing. Writes are confined to the active workspace by default; file snapshots make ordinary edits reversible, but that is not a substitute for backups.
+- **`edit_file` / `write_file`** can damage files if the model writes the wrong thing. Writes are confined to the active workspace by default; file snapshots make ordinary edits reversible for a week (not shell commands, an agent's own edits, or anything over 200 MB), but that is not a substitute for backups.
 - **`open_app`** can launch executables found on the system. It is permission-gated.
 - **`web_fetch` and `browse`** refuse addresses on this PC and the local network (private, link-local, carrier-grade NAT and IPv6 unique-local ranges, checked after the name is looked up and again on each `web_fetch` redirect) unless the person named that host in their own words; on this PC the port must match too. A link on a page doesn't count. The check runs before the request, so a name whose DNS answer changes between the check and the connection, a redirect inside the browser, or a click in an already open page can still reach a local address. Programs the model writes and runs make their own requests and are not covered.
 - **`browse`, `browse_click`, `browse_type` and `browse_key`** drive a real Chromium session. Opening/reading can happen without an input approval; clicks, typing and key presses use the input permission path. A prompt-injected page may try to steer the model, so keep the approval mode appropriate to the site and task.
@@ -60,7 +60,7 @@ Out of scope:
 
 ## What is already hardened
 
-The current development line includes fixes for issues found in the October 2026 security review:
+v0.7.6 includes fixes for issues found in the October 2026 security review:
 
 - untrusted text can no longer turn a modal into executable HTML on the local app origin;
 - browser requests from other sites are refused by the local API;
@@ -76,7 +76,7 @@ The current development line includes fixes for issues found in the October 2026
 
 ## Supported versions
 
-Inglen is pre-1.0 and ships rapidly. Only the latest public release receives security fixes. If you are running an older build, upgrade before reporting a problem that may already have been fixed.
+Only the latest public release receives security fixes. If you are running an older build, upgrade before reporting a problem that may already have been fixed.
 
 ## Conversation style is not a security boundary
 

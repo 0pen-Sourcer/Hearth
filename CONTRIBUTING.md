@@ -1,20 +1,16 @@
 # Contributing to Inglen
 
-Inglen started as one person's tool and got opened up to the world because the gap between "your model can chat" and "your model can run your machine" is too big to leave unfilled. The faster Inglen generalizes beyond one developer's setup, the better it gets for everyone, so PRs are welcome and triaged seriously.
+Inglen is MIT licensed and pull requests are welcome. The aim is an assistant that runs well on any Windows PC first and on macOS and Linux next, so anything that makes it work beyond one developer's setup is worth sending.
 
-## TL;DR
+## Short version
 
-1. Open an [Issue](https://github.com/0pen-sourcer/hearth/issues) describing the change, *or* claim an existing one before you start. Saves both of us doing duplicate work.
-2. Fork, branch, code, test locally with `python -m hearth.dev_tools`.
-3. Open a PR using the [template](.github/PULL_REQUEST_TEMPLATE.md). Small + focused merges fast; sprawling rewrites stall.
+1. Open an [issue](https://github.com/0pen-Sourcer/Hearth/issues/new/choose) describing the change, or comment on an existing one before you start, so two people don't do the same work.
+2. Fork, branch, code, and test locally with `python -m hearth.dev_tools`.
+3. Open a pull request using the [template](.github/PULL_REQUEST_TEMPLATE.md). Small, focused changes merge fastest.
 
-Discussion happens in [GitHub Discussions](https://github.com/0pen-sourcer/hearth/discussions).
+## Where help is most useful
 
-## The shortlist of where help is most useful
-
-These are the items that genuinely change the experience for everyone. Pick one of these for the fastest "yes, please merge" path.
-
-### 1. Mac / Linux ports
+### 1. macOS and Linux
 
 Most of [`hearth/tools.py`](hearth/tools.py) already runs on Linux and macOS: files, shell, screenshots, app launching, windows, the clipboard, web, reminders and notifications. What's still Windows-only is the desktop-control layer (reading a window's controls and clicking them by name), the one-click installer and the packaged build. [`hearth/desktop_a11y.py`](hearth/desktop_a11y.py) already has experimental backends for macOS (the Accessibility API) and Linux (AT-SPI) that haven't been run on real hardware; testing and finishing either would be the biggest single contribution. Search for `sys.platform` to find the Windows branches.
 
@@ -25,6 +21,7 @@ Most of [`hearth/tools.py`](hearth/tools.py) already runs on Linux and macOS: fi
 ### 3. New tools
 
 A tool is one function in [`hearth/tools.py`](hearth/tools.py) (`_my_tool(p: Dict) -> str`) and a definition in `TOOL_DEFINITIONS`. The runtime wires it everywhere (window, terminal, phone bridges, MCP, the dev_tools REPL), and `docs/TOOLS.md` is generated from the definitions (`python scripts/gen_tools_doc.py`). Tool ideas that would help everyone:
+
 - `calendar_*` to read and write the user's Outlook or Google Calendar.
 - A Linux or macOS backend for `desktop_snapshot` and `desktop_click`.
 
@@ -34,20 +31,20 @@ Any agent that speaks the Agent Client Protocol can already be the assistant's b
 
 ### 5. Share a skill (no code needed)
 
-The highest-leverage contribution isn't even to this repo. A skill is a folder with a `SKILL.md` that teaches Inglen a workflow; see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-sourcer/awesome-hearth-skills). Anyone installs it with `/skill install <you>/<repo>`. The more good skills exist, the more reasons there are to run Inglen.
+A skill is a folder with a `SKILL.md` that teaches Inglen a workflow; see [docs/SKILLS.md](docs/SKILLS.md). Write one that does something useful on a real PC ("archive last month's screenshots", "set up a new Python project"), push it to a repo, and add it to the community index, [awesome-hearth-skills](https://github.com/0pen-Sourcer/awesome-hearth-skills). Anyone can then install it with `/skill install <you>/<repo>`.
 
-## What we won't merge
+## What won't be merged
 
-- New backends (cloud APIs) that change the "local-first" promise. Cloud opt-in is fine, default-on isn't.
-- Heavy dependencies for niche features. `kokoro-onnx` is ~80MB and earns its place; an electron UI doesn't.
-- Refactors without a behavior change unless they unlock something specific. We're not optimizing for a clean codebase, we're optimizing for shipping a useful tool fast.
+- New backends that change the local-first promise. A cloud option you turn on is fine; one that's on by default isn't.
+- Heavy dependencies for niche features. `kokoro-onnx` earns its size; an Electron UI wouldn't.
+- Refactors with no change in behavior, unless they unlock something specific.
 - Anything that breaks an existing user's setup without a clear migration path.
 
 ## Development setup
 
 ```powershell
-git clone https://github.com/0pen-sourcer/hearth.git
-cd hearth
+git clone https://github.com/0pen-Sourcer/Hearth.git
+cd Hearth
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -56,13 +53,15 @@ pip install -r requirements.txt
 python -m hearth.dev_tools
 
 # Run the terminal app (a model in LM Studio or Ollama, a cloud key, or an agent like Claude Code)
-.\hearth.bat
+.\inglen.bat
 
 # Run the window
-python -m hearth.tray --open
+.\inglen.bat window
 ```
 
-Smoke test that nothing's broken:
+The code keeps the project's old name on purpose: the `hearth` package, `HEARTH_*` settings and `hearth.bat` are all current.
+
+Check that nothing is broken:
 
 ```powershell
 python -c "import hearth; print(len(hearth.TOOL_DEFINITIONS), 'tools loaded')"
@@ -74,10 +73,10 @@ python -X utf8 tests/test_team.py
 
 ## Code style
 
-- Match what's already there. Inglen is pragmatic, not pedantic. Reads like 2026 Python; uses type hints where they help; avoids `class` for things that fit in a function.
-- One feature per PR. Tangentially-related cleanups are fine in the same PR if they're small.
-- No comments for the sake of comments. If the code is self-explanatory, leave it. Comment the *why*, not the *what*.
-- Black/ruff-clean if you can; we don't enforce it in CI yet.
+- Match what's already there: type hints where they help, and a function rather than a `class` where a function fits.
+- One feature per pull request. Small related cleanups can go in the same one.
+- Comment the why, not the what, and leave self-explanatory code alone.
+- Black and ruff are welcome but not enforced in CI.
 
 ## Commit messages
 
@@ -93,11 +92,11 @@ If a commit needs more context, add a body after a blank line.
 
 ## Code of Conduct
 
-We don't have a long one. Be normal. Don't be mean to people. Don't ship vibes-only PRs that waste reviewer time. Disagreement is fine; condescension isn't. If you wouldn't want it said to you, don't say it to someone else.
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Questions
 
-- Code question: [Discussions](https://github.com/0pen-sourcer/hearth/discussions)
-- Bug: [Issue](https://github.com/0pen-sourcer/hearth/issues/new?template=bug_report.md)
-- Idea: [Issue](https://github.com/0pen-sourcer/hearth/issues/new?template=feature_request.md)
+- Using Inglen: [docs/SUPPORT.md](docs/SUPPORT.md)
+- Bug: [bug report](https://github.com/0pen-Sourcer/Hearth/issues/new?template=bug_report.yml)
+- Idea: [feature request](https://github.com/0pen-Sourcer/Hearth/issues/new?template=feature_request.yml)
 - Security: see [SECURITY.md](SECURITY.md)

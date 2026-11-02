@@ -1,0 +1,117 @@
+name: Bug report
+description: Something Inglen does that it shouldn't, or doesn't do that it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. For a security problem, don't file here: see [SECURITY.md](https://github.com/0pen-Sourcer/Hearth/blob/main/SECURITY.md). Questions about Plus or billing go to hello@inglen.app.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: A concrete description. "It opened Edge when I asked for Brave" is more useful than "the browser is broken".
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Inglen version
+      description: Settings, About, or `/about` in the terminal. From source, the commit.
+      placeholder: 0.7.6-preview
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Full installer
+        - Lite installer
+        - From source
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: brain
+    attributes:
+      label: Brain
+      description: What Inglen was thinking with.
+      options:
+        - Inglen's engine (a model on this PC)
+        - LM Studio
+        - Ollama
+        - Another local server
+        - Cloud provider with a key
+        - Claude Code
+        - Codex
+        - Cursor
+        - OpenCode
+        - Another agent
+        - Not relevant
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: Qwen3 9B, Claude Sonnet, ...
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it happened
+      options:
+        - Window
+        - Terminal
+        - Phone app (Plus)
+        - Telegram, Discord or WhatsApp
+        - MCP or headless
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Approval mode
+      options:
+        - Ask
+        - Auto-edit
+        - Auto
+        - Not relevant
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        If a tool was involved, paste the last lines of the activity log: `/log 20` in the terminal, or the Logs tab in the window. Check for anything private first.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Screenshots, a screen recording, or the file that triggered it.

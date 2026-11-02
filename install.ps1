@@ -66,7 +66,7 @@ function Write-FailMsg ($msg) { Write-Host "   FAIL " -NoNewline -ForegroundColo
 
 # ----- Banner --------------------------------------------------------------
 Write-Host ""
-Write-Host "  Hearth installer" -ForegroundColor Cyan
+Write-Host "  Inglen installer" -ForegroundColor Cyan
 Write-Host "  Local AI for your machine. It talks. It listens. It actually does things." -ForegroundColor DarkGray
 Write-Host ""
 
@@ -239,7 +239,7 @@ if ($Browser) {
 if ($BuiltinLLM) {
     $variant = $BuiltinLLM.ToLower().Trim()
     if ($variant -eq 'cuda' -or $variant -eq 'gpu') {
-        Write-Step "Installing llama-cpp-python (CUDA 12.4 prebuilt wheel - ~460MB) so Hearth has its own LLM server"
+        Write-Step "Installing llama-cpp-python (CUDA 12.4 prebuilt wheel - ~460MB) so Inglen has its own model server"
         & $venvPython -m pip install --quiet llama-cpp-python `
             --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
         if ($LASTEXITCODE -eq 0) {
@@ -268,7 +268,7 @@ if ($BuiltinLLM) {
             }
         }
     } elseif ($variant -eq 'cpu') {
-        Write-Step "Installing llama-cpp-python (CPU prebuilt wheel - ~50MB) so Hearth has its own LLM server"
+        Write-Step "Installing llama-cpp-python (CPU prebuilt wheel - ~50MB) so Inglen has its own model server"
         & $venvPython -m pip install --quiet llama-cpp-python `
             --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
         if ($LASTEXITCODE -eq 0) {
@@ -287,7 +287,7 @@ if ($BuiltinLLM) {
         Write-WarnX "llama-cpp-python install failed. You can retry with:"
         Write-WarnX "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/$( if ($variant -eq 'cuda' -or $variant -eq 'gpu') { 'cu124' } else { 'cpu' } )"
     } elseif ($variant) {
-        Write-OK "installed (Hearth's Models tab can now download a GGUF and run a built-in server - no LM Studio needed)"
+        Write-OK "installed (the Models tab can now download a GGUF and run it on the built-in server, no LM Studio needed)"
     }
 } else {
     Write-Skip "built-in LLM server (pass -BuiltinLLM cuda or -BuiltinLLM cpu to install llama-cpp-python and skip LM Studio entirely)"
@@ -406,18 +406,18 @@ if ($lmsRunning) {
     if ($installed) {
         Write-WarnX "LM Studio installed but not serving on :1234. Open it, load a chat model, click 'Start Server'."
     } else {
-        Write-WarnX "LM Studio not detected. Install from https://lmstudio.ai (or re-run with -BuiltinLLM cuda to use Hearth's built-in server, or point LOCAL_API_BASE at any OpenAI-compatible endpoint)."
+        Write-WarnX "LM Studio not detected. Install from https://lmstudio.ai (or re-run with -BuiltinLLM cuda to use Inglen's built-in server, or point LOCAL_API_BASE at any OpenAI-compatible endpoint)."
     }
 }
 
 # ----- 7. All done ---------------------------------------------------------
 Write-Host ""
-Write-Host "  Hearth is ready." -ForegroundColor Green
+Write-Host "  Inglen is ready." -ForegroundColor Green
 Write-Host ""
 Write-Host "  Next:" -ForegroundColor White
 Write-Host "    1. Make sure LM Studio (or your OpenAI-compatible server) is running" -ForegroundColor DarkGray
 Write-Host "    2. Run:  " -NoNewline -ForegroundColor DarkGray
-Write-Host ".\hearth.bat" -ForegroundColor Cyan
+Write-Host ".\inglen.bat" -ForegroundColor Cyan
 Write-Host "    3. Try:  /voice on  (TTS) or  /listen on  (mic input)" -ForegroundColor DarkGray
 Write-Host "    4. Edit your house rules anytime:  $rulesPath" -ForegroundColor DarkGray
 Write-Host ""

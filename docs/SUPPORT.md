@@ -1,17 +1,25 @@
-# Support Inglen
+# Getting help
 
-Inglen is free, open source (MIT) and built by one person in their spare time. There's no
-company behind it and no cloud bill to cover, just someone who wanted the assistant from the films on their own PC and
-decided to share it.
+## Using Inglen
 
-## Ways to help
+The [user guide](USER_GUIDE.md) covers setup, brains, voice, approvals and the phone, and its [When something goes wrong](USER_GUIDE.md#when-something-goes-wrong) section has the common fixes. Settings, About has Repair, which puts Inglen's own files back without touching your chats or memory.
 
-| | How | Why it matters |
-|---|---|---|
-| 🐛 **Report a bug** | open an [issue](https://github.com/0pen-sourcer/hearth/issues) | A clear way to reproduce it is worth a lot. It's how Inglen gets reliable across the huge range of machines it runs on. |
-| 🔧 **Send a pull request** | see [CONTRIBUTING.md](../CONTRIBUTING.md) | Linux and macOS versions of the Windows-only tools, new tools, and running other agents as the brain are all welcome. |
-| 🧩 **Share a skill** | see [SKILLS.md](SKILLS.md) | A skill you wrote for your own PC is one line for someone else to install. |
-| 📣 **Tell someone** | share it | If Inglen solved something for you, a post or a link helps more than you'd think. |
+## Reporting a bug
 
-If Inglen saved you time, or feels like the thing you always wished existed, that's the
-whole reason it's here.
+Open a [bug report](https://github.com/0pen-Sourcer/Hearth/issues/new?template=bug_report.yml). It asks for your version, edition and brain, which are what we need to reproduce it. If Inglen closed on its own, the next start offers to fill in a report for you. Nothing is sent until you press Submit on GitHub.
+
+## Asking for a feature
+
+Open a [feature request](https://github.com/0pen-Sourcer/Hearth/issues/new?template=feature_request.yml). The [roadmap](../ROADMAP.md) shows what's already planned.
+
+## Plus, billing and refunds
+
+Write to [hello@inglen.app](mailto:hello@inglen.app) with the email you bought Plus with. Your licence key is in the email from Dodo Payments, and that email has the link to cancel. The refund policy is at [inglen.app/refund.html](https://inglen.app/refund.html).
+
+## Security
+
+Please don't open a public issue for a vulnerability. [SECURITY.md](../SECURITY.md) says how to report one privately.
+
+## Anything else
+
+Write to [hello@inglen.app](mailto:hello@inglen.app).

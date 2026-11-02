@@ -1,8 +1,8 @@
-; Inno Setup script for Hearth — packages dist\Hearth\ into a single Setup.exe.
+; Inno Setup script for Inglen. Packages dist\Hearth\ into a single Setup.exe.
 ;
 ; Built by build_release.ps1 (both editions); build.bat makes dist\Hearth\ alone
 ; Then open this in Inno Setup Compiler and hit Compile (or: iscc Hearth.iss).
-; Output: Output\Hearth-Setup-v0.7.0-preview.exe
+; Output: Output\Hearth-Setup-v<version>.exe
 ;
 ; Installs to %LOCALAPPDATA%\Hearth so NO admin rights are needed (easier for a
 ; tester). Creates Start Menu + optional desktop shortcuts. If the Edge WebView2
@@ -14,7 +14,7 @@
 ; What people see. MyAppName stays: it names the folder existing installs live in.
 #define MyAppDisplay "Inglen"
 #define MyAppVersion "0.7.6-preview"
-#define MyAppPublisher "0pen-sourcer"
+#define MyAppPublisher "Inglen"
 #define MyAppExeName "Hearth.exe"
 
 ; --- Edition parameters (override on the iscc command line) ---
@@ -37,6 +37,14 @@ AppId={{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}
 AppName={#MyAppDisplay}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL=https://inglen.app
+AppSupportURL=https://github.com/0pen-Sourcer/Hearth/blob/main/docs/SUPPORT.md
+AppUpdatesURL=https://github.com/0pen-Sourcer/Hearth/releases
+AppContact=hello@inglen.app
+AppCopyright=Copyright (c) 2026 Ishant
+LicenseFile=LICENSE
+SetupIconFile=assets\icon_app.ico
+UninstallDisplayIcon={app}\_internal\assets\icon_app.ico
 DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppDisplay}
 DisableProgramGroupPage=yes
@@ -101,7 +109,7 @@ Type: filesandordirs; Name: "{app}"
 [Run]
 ; Install the WebView2 runtime if missing (needed for the GUI). Silent.
 Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; \
-  StatusMsg: "Installing Edge WebView2 runtime (needed for the GUI)..."; \
+  StatusMsg: "Installing the Edge WebView2 runtime, which the Inglen window needs..."; \
   Flags: waituntilterminated; Check: WebView2Missing and FileExists(ExpandConstant('{tmp}\MicrosoftEdgeWebView2Setup.exe'))
 ; Offer to launch after a normal install (checkbox on the final page).
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppDisplay}"; \
