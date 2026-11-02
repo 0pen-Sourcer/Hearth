@@ -570,14 +570,32 @@ def set_device(device: str) -> str:
     return f"STT device -> {device}"
 
 
+_cublas_seen: List[bool] = []
+
+
+def _cublas_loads() -> bool:
+    """Whether cuBLAS can be loaded. ctranslate2 sees a card and loads a model
+    without it, then fails on every transcription; Lite doesn't carry it."""
+    if os.name != "nt":
+        return True
+    if not _cublas_seen:
+        try:
+            import ctypes
+            ctypes.WinDLL("cublas64_12.dll")
+            _cublas_seen.append(True)
+        except OSError:
+            _cublas_seen.append(False)
+    return _cublas_seen[0]
+
+
 def cuda_available() -> bool:
     """True only if faster-whisper can ACTUALLY run on GPU right now — i.e. the
-    GPU build of ctranslate2 is installed AND a CUDA device is visible. A plain
-    CPU ctranslate2 wheel reports 0 devices even on a machine with an RTX card,
-    so this reflects 'usable today', not 'has a GPU'."""
+    GPU build of ctranslate2 is installed, a CUDA device is visible and cuBLAS
+    loads. A plain CPU ctranslate2 wheel reports 0 devices even on a machine with
+    an RTX card, so this reflects 'usable today', not 'has a GPU'."""
     try:
         import ctranslate2  # type: ignore
-        return ctranslate2.get_cuda_device_count() > 0
+        return ctranslate2.get_cuda_device_count() > 0 and _cublas_loads()
     except Exception:
         return False
 
@@ -672,6 +690,10 @@ def _try_load_model():
         elif cuda_available():
             _device_now = "cuda"
         else:
+            _device_now = "cpu"
+        # A saved pick of the card on a PC that can't run on it: a settings file
+        # from Full on a Lite install, a CUDA library since removed.
+        if _device_now == "cuda" and not cuda_available():
             _device_now = "cpu"
         _compute = "float16" if _device_now == "cuda" else COMPUTE_TYPE
         try:
