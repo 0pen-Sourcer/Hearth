@@ -73,6 +73,7 @@ class Rec:
 
 sys.modules["RealtimeSTT"] = types.SimpleNamespace(AudioToTextRecorder=Rec)
 rv.model_downloaded = lambda size="": True
+rv._fetch_model = lambda name: name
 rv._let_recorder_use_gpu = lambda: None
 plan("small", free=350)
 sess = rv._Session(1, lambda t: None, None, None, None, None, fed=True)
