@@ -47,6 +47,9 @@ SetupIconFile=assets\icon_app.ico
 UninstallDisplayIcon={app}\_internal\assets\icon_app.ico
 DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppDisplay}
+; Setup would otherwise reuse the Start menu folder an older install recorded
+; ("Hearth"); the folder is a name people read, the install dir is not.
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=Output

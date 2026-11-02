@@ -305,13 +305,18 @@ def main(argv: Optional[list] = None) -> int:
         if not primary:
             singleton.announce_secondary_and_exit()
 
-    # Shortcuts made before the rename say Hearth with the old icon; an update
-    # can't change them, so the installed app renames its own once.
+    # Shortcuts and the Apps entry made before the rename say Hearth with the old
+    # icon; a patch can't change them, so the installed app renames its own.
     if getattr(sys, "frozen", False) and sys.platform == "win32":
         def _rebrand():
             try:
                 from .install_shortcuts import rebrand
                 rebrand()
+            except Exception:
+                pass
+            try:
+                from .updater import _sync_registry_version
+                _sync_registry_version()
             except Exception:
                 pass
         threading.Thread(target=_rebrand, daemon=True).start()

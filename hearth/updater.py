@@ -389,31 +389,52 @@ def apply_patch(path: str) -> dict:
     return {"ok": True, "files": len(names)}
 
 
-def _sync_registry_version() -> None:
-    """Point Windows' uninstall entry at the patched version. Inno only writes
-    DisplayVersion at install time, so a patched install otherwise shows the OLD
-    installer's version in Control Panel (e.g. stuck at 0.7.2 after patching to
-    0.7.5). Best-effort, Windows-only; the Hearth AppId matches Hearth.iss."""
+def _sync_registry_version(app_dir: str = "") -> None:
+    """Make Windows' uninstall entry match this version. Inno writes it only at
+    install time, so a patched install keeps the old installer's name, version,
+    publisher and icon in Apps. Runs after a patch and at each packaged start
+    (a patch applied by an older version never called it). Only the entry whose
+    InstallLocation is this app's folder is touched. Best-effort, Windows-only;
+    the AppId matches Hearth.iss."""
     if os.name != "nt":
         return
+    if not app_dir:
+        app_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else ""
     key = (r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
            r"\{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}_is1")
+    want = {"DisplayVersion": HEARTH_VERSION,
+            "DisplayName": f"Inglen version {HEARTH_VERSION}",
+            "Publisher": "Inglen"}
+    icon = os.path.join(app_dir, "_internal", "assets", "icon_app.ico") if app_dir else ""
+    if icon and os.path.isfile(icon):
+        want["DisplayIcon"] = icon
     try:
         import winreg
         for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
             try:
-                k = winreg.OpenKey(root, key, 0, winreg.KEY_SET_VALUE)
-                winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, HEARTH_VERSION)
-                # Inno bakes the version into the display NAME too ("Hearth version
-                # 0.7.2-preview"), so sync it or Control Panel still reads old.
-                winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ,
-                                  f"Inglen version {HEARTH_VERSION}")
-                winreg.CloseKey(k)
-                return
-            except FileNotFoundError:
+                k = winreg.OpenKey(root, key, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE)
+            except OSError:
                 continue
+            try:
+                try:
+                    loc = winreg.QueryValueEx(k, "InstallLocation")[0]
+                except OSError:
+                    loc = ""
+                if app_dir and loc and (os.path.normcase(os.path.normpath(loc))
+                                        != os.path.normcase(os.path.normpath(app_dir))):
+                    continue
+                for name, value in want.items():
+                    try:
+                        if winreg.QueryValueEx(k, name)[0] == value:
+                            continue
+                    except OSError:
+                        pass
+                    winreg.SetValueEx(k, name, 0, winreg.REG_SZ, value)
+                return
             except Exception:
                 continue
+            finally:
+                winreg.CloseKey(k)
     except Exception:
         pass
 
