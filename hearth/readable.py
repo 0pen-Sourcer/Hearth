@@ -27,9 +27,10 @@ class _Page(HTMLParser):
         self.title = ""
         self._in_title = False
         self.stack: List[Tuple[str, bool]] = []    # (tag, dropped here)
+        self.open: dict = {}                       # tag -> how many are on the stack
         self.drop = 0
         self.parts: dict = {"article": [], "main": [], "body": []}
-        self.where: List[str] = []                 # article/main we are inside
+        self.where: dict = {"article": 0, "main": 0}   # how deep inside each we are
         self.href: Optional[str] = None
         self.link_text: List[str] = []
         self.pre = 0
@@ -37,7 +38,7 @@ class _Page(HTMLParser):
     def _out(self, s: str) -> None:
         if self.drop:
             return
-        for k in set(self.where) | {"body"}:
+        for k in [k for k, n in self.where.items() if n] + ["body"]:
             self.parts[k].append(s)
 
     def handle_starttag(self, tag, attrs):
@@ -55,11 +56,12 @@ class _Page(HTMLParser):
         drop = tag in _DROP or hidden or (tag in ("div", "section", "ul", "span") and bool(_NOISE.search(cls))
                                           and not re.search(r"article|content|post|entry|story", cls, re.I))
         self.stack.append((tag, drop))
+        self.open[tag] = self.open.get(tag, 0) + 1
         if drop:
             self.drop += 1
             return
         if tag in ("article", "main"):
-            self.where.append(tag)
+            self.where[tag] += 1
         if tag == "pre":
             self.pre += 1
             self._out("\n```\n")
@@ -81,14 +83,17 @@ class _Page(HTMLParser):
             self._in_title = False
         if tag in _VOID:
             return
-        # Close up to the matching open tag; HTML in the wild leaves tags open.
-        for i in range(len(self.stack) - 1, -1, -1):
+        # Close up to the matching open tag; HTML in the wild leaves tags open. A close
+        # with nothing open to match is skipped at once: looking down the whole stack
+        # for each one made a page of stray closes take hours.
+        for i in (range(len(self.stack) - 1, -1, -1) if self.open.get(tag) else ()):
             if self.stack[i][0] == tag:
                 for t, dropped in reversed(self.stack[i:]):
+                    self.open[t] -= 1
                     if dropped:
                         self.drop -= 1
-                    elif t in ("article", "main") and t in self.where:
-                        self.where.remove(t)
+                    elif t in ("article", "main") and self.where[t]:
+                        self.where[t] -= 1
                     elif t == "pre":
                         self.pre = max(0, self.pre - 1)
                         self._out("\n```\n")

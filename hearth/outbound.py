@@ -47,6 +47,16 @@ MCP_PREFIX = "mcp_"
 
 _URL = re.compile(r"""https?://[^\s'"`<>()\[\]{}]+""", re.I)
 _THIS_PC = re.compile(r"^(https?://)?(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(/|$)", re.I)
+# A path on another machine: \\host\share\..., //host/share/... or file://host/...
+# Opening one connects to that host (SMB, or WebDAV over https with host@SSL), and
+# the path itself, and the Windows sign-in hash, go with it.
+_UNC = re.compile(r"""(?:(?<![\w:/\\])(?:\\\\|//)|file://(?://?)?(?=[^/]))([A-Za-z0-9][\w.-]*)(?:@SSL)?(?:@\d+)?"""
+                  r"""[\\/][^\s'"`<>|]*""", re.I)
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", ".", "?", "wsl$", "wsl.localhost"}
+# Native tools that type text where an address bar may have the focus.
+_TYPES_TEXT = {"desktop_type": "text", "computer_type": "text", "browse_type": "text"}
+# open_app takes a name, a path or an address.
+_NAME_ARGS = {"open_app": "name"}
 
 
 def tool_name(name: str) -> str:
@@ -216,7 +226,50 @@ def _urls(name: str, args: Any) -> List[str]:
         return [str(a.get(k) or "").strip() for k in URL_ARGS[name] if str(a.get(k) or "").strip()]
     if name in _SHELL:
         return _URL.findall(_flat(a.get("command") or a.get("cmd") or ""))
+    if name in _NAME_ARGS:
+        # open_app hands an address to the default browser.
+        return _URL.findall(str(a.get(_NAME_ARGS[name]) or ""))
+    if name in _TYPES_TEXT:
+        # Typed into an address bar, an address is a request like any other.
+        return _URL.findall(str(a.get(_TYPES_TEXT[name]) or ""))
     return []
+
+
+def _strings(v: Any, depth: int = 0) -> Iterable[str]:
+    if isinstance(v, str):
+        yield v
+    elif depth < 4 and isinstance(v, (list, tuple)):
+        for x in v:
+            yield from _strings(x, depth + 1)
+    elif depth < 4 and isinstance(v, dict):
+        for x in v.values():
+            yield from _strings(x, depth + 1)
+
+
+# Arguments that name a place to open or a command to run; what a file is to hold is not one.
+_PLACE_ARGS = ("path", "file", "file_path", "filePath", "source", "archive", "paths", "files", "folder",
+               "directory", "dir", "target", "image", "attachment", "attachments", "destination", "dest",
+               "cwd", "workdir", "url", "name", "command", "cmd", "text", "image_path", "output")
+
+
+def _unc_paths(args: Any) -> List[tuple]:
+    """(host, path) for every path on another machine in a call's arguments."""
+    a = args if isinstance(args, dict) else {}
+    out = []
+    for s in _strings([a.get(k) for k in _PLACE_ARGS if k in a]):
+        for m in _UNC.finditer(s):
+            host = m.group(1).lower()
+            if host not in _LOCAL_HOSTS and not host.startswith("127."):
+                out.append((host, m.group(0)))
+    return out
+
+
+def _unc_given(path: str, seen: "Seen") -> bool:
+    def flat(t: str) -> str:
+        t = re.sub(r"^file:/*", "", html.unescape(t).strip(), flags=re.I)
+        return t.replace("\\", "/").lstrip("/").rstrip("/").lower()
+    p = flat(path)
+    return bool(p) and any(p in html.unescape(t).replace("\\", "/").lower() for t in seen.given)
 
 
 def reason(name: str, args: Any = None) -> str:
@@ -235,6 +288,11 @@ def reason(name: str, args: Any = None) -> str:
             continue
         return (f"This would send a request to {_host(url)}: {_short(url)}. Nobody gave that address, "
                 f"and this chat has read {src}, which could have asked for it.")
+    for host, path in _unc_paths(args):
+        if _unc_given(path, seen):
+            continue
+        return (f"This would connect to {host} for {_short(path)}, a path on another machine. Nobody gave "
+                f"that path, and this chat has read {src}, which could have asked for it.")
     return ""
 
 

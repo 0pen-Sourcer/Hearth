@@ -2413,6 +2413,17 @@ class HearthHandler(BaseHTTPRequestHandler):
         if args and isinstance(args[1], str) and args[1].startswith(("4", "5")):
             sys.stderr.write(f"[hearth.web] {self.address_string()} - {fmt % args}\n")
 
+    def end_headers(self) -> None:
+        # Only the window's own page runs script on this origin. Anything else opened
+        # here as a page (a file from Downloads, a site's SVG icon) gets an origin of
+        # its own and no script: on this origin it could call every route.
+        if getattr(self, "_own_page", False):
+            self._own_page = False
+        else:
+            self.send_header("Content-Security-Policy", "sandbox")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
     # -------- helpers --------
 
     def _drain_body(self) -> None:
@@ -6152,6 +6163,7 @@ class HearthHandler(BaseHTTPRequestHandler):
             tag = f"Inglen · v{_ver}"
         payload = payload.replace(b"__HEARTH_EDITION__", tag.encode("utf-8"))
         payload = payload.replace(b"/*__HEARTH_LOOK__*/{}", _saved_look().encode("utf-8"), 1)
+        self._own_page = True
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

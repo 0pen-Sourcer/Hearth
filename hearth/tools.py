@@ -9236,8 +9236,14 @@ def is_risky(name: str, args=None) -> bool:
 def sends_out(name: str, args=None) -> str:
     """Why this call asks in every mode: it would read a place that holds keys
     (hearth/secret_places.py), or send something out after the chat took in
-    content from outside (hearth/outbound.py); '' when neither."""
-    r = reads_secret(name, args)
+    content from outside (hearth/outbound.py); '' when neither. A call that
+    carries other calls (a batch of desktop steps, a reminder's tool) is judged
+    by each of them too."""
+    for inner, inner_args in _carried_calls(name, args):
+        r = sends_out(inner, inner_args)
+        if r:
+            return r
+    r = reads_secret(name, args) or changes_controls(name, args)
     if r:
         return r
     try:
@@ -9245,6 +9251,62 @@ def sends_out(name: str, args=None) -> str:
         return reason(name, args)
     except Exception:
         return ""
+
+
+# Files in the workspace that decide what Inglen may do or runs at start: the
+# approval mode, standing yeses, MCP servers' commands, plugins and connectors
+# (code that is run), reminders' actions and the persona's standing rules. A
+# file edit that lands on one changes what the switch in the chat bar means.
+_CONTROL_FILES = {"settings.json", "permissions.json", "mcp.json", "brain_keys.json", "reminders.json",
+                  "rules.md", "soul.md", "profile.md"}
+_CONTROL_DIRS = {"plugins", "connectors"}
+_WRITE_TOOLS = {"write_file": ("path",), "edit_file": ("path",), "create_directory": ("path",),
+                "delete_path": ("path",), "move_path": ("source", "destination"),
+                "extract_archive_file": ("output_name",)}
+
+
+def changes_controls(name: str, args=None) -> str:
+    """Why this file edit asks in every mode: it would change one of Inglen's own
+    control files in the workspace; '' when it wouldn't."""
+    keys = _WRITE_TOOLS.get(name)
+    if not keys or not isinstance(args, dict):
+        return ""
+    if name == "extract_archive_file" and not args.get("output_name"):
+        args = {"output_name": os.path.basename(str(args.get("inner_path") or "").replace("\\", "/"))}
+    try:
+        ws = os.path.realpath(WORKSPACE)
+    except (OSError, ValueError):
+        return ""
+    for k in keys:
+        v = args.get(k)
+        if not isinstance(v, str) or not v.strip():
+            continue
+        try:
+            real = os.path.realpath(_write_path(v.strip()))
+        except (OSError, ValueError):
+            continue
+        if not path_within(real, ws):
+            continue
+        rel = os.path.relpath(real, ws).replace("\\", "/")
+        top = rel.split("/", 1)[0].lower()
+        if rel == "." or rel.lower() in _CONTROL_FILES or top in _CONTROL_DIRS:
+            return (f"This would change {rel if rel != '.' else 'the workspace itself'}, one of the files "
+                    f"that decide what Inglen may do, so it always asks, whatever the approval mode.")
+    return ""
+
+
+def _carried_calls(name: str, args) -> List[Tuple[str, Dict]]:
+    """The calls a call runs for itself: execute_actions' steps, a reminder's action."""
+    a = args if isinstance(args, dict) else {}
+    out: List[Tuple[str, Dict]] = []
+    if name == "execute_actions" and isinstance(a.get("actions"), list):
+        for s in a["actions"][:_BATCH_MAX_STEPS + 1]:
+            if isinstance(s, dict) and s.get("tool") and s.get("tool") != "execute_actions":
+                out.append((str(s["tool"]), {k: v for k, v in s.items() if k != "tool"}))
+    elif name == "set_reminder" and a.get("action_tool") and a.get("action_tool") != "set_reminder":
+        inner = a.get("action_args")
+        out.append((str(a["action_tool"]), inner if isinstance(inner, dict) else {}))
+    return out
 
 
 def reads_secret(name: str, args=None) -> str:

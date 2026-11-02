@@ -188,8 +188,12 @@ def _answered(name: str, args: Dict[str, Any], out: Any) -> Any:
 
 def _one_yes(name: str, args: Dict[str, Any]) -> bool:
     """Whether a step falls under the turn's one yes to using the computer. Opening
-    a page has its own question, and anything that could send data out always asks."""
+    a page has its own question, and so does opening a file, a program by its path
+    or an address with open_app: the yes was to driving apps, not to running
+    whatever a page or the screen names. Anything that could send data out always asks."""
     if name not in DESKTOP_TOOLS or name in ("open_url", "open_in_browser"):
+        return False
+    if name == "open_app" and any(c in str((args or {}).get("name") or "") for c in "\\/:~%$"):
         return False
     try:
         from .tools import sends_out
@@ -200,6 +204,16 @@ def _one_yes(name: str, args: Dict[str, Any]) -> bool:
 
 def _said_yes(out: Any) -> bool:
     return (out.get("decision") if isinstance(out, dict) else out) in ("allow", "always")
+
+
+def _already_allowed(name: str, args: Dict[str, Any]) -> bool:
+    """Whether this step goes ahead without a question (the mode, or an "always" for
+    this one tool). Such a yes is to that tool, not to using the computer."""
+    try:
+        from .tools import standing_permission
+        return standing_permission(name, args) == "allow"
+    except Exception:
+        return False
 
 
 def _check_wrap(check, emit, pending: Dict[str, Any]):
@@ -226,8 +240,9 @@ def _check_wrap(check, emit, pending: Dict[str, Any]):
             if pending.get("computer"):
                 return "allow"
             begin(name, args)
+            silent = _already_allowed(name, args)
             out = await ask_async(name, args)
-            pending["computer"] = _said_yes(out)
+            pending["computer"] = _said_yes(out) and not silent
             return out
 
         async def ask_async(name, args):
@@ -258,8 +273,9 @@ def _check_wrap(check, emit, pending: Dict[str, Any]):
         if pending.get("computer"):
             return "allow"
         begin(name, args)
+        silent = _already_allowed(name, args)
         out = ask(name, args)
-        pending["computer"] = _said_yes(out)
+        pending["computer"] = _said_yes(out) and not silent
         return out
 
     def ask(name, args):
