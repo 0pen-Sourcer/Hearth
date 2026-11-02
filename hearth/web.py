@@ -1892,8 +1892,6 @@ def _save_settings_locked(d: Dict) -> Dict:
     _prev_tts_device = cur.get("tts_device", "cpu")
     _changed = sorted(k for k, v in d.items() if v is not None and cur.get(k) != v)
     cur.update({k: v for k, v in d.items() if v is not None})
-    if _changed:
-        live_bus.publish({"kind": "settings", "keys": [k for k in _changed if "key" not in k]})
     # A model file on this PC is never a cloud provider's model. Saved as one,
     # every message would ask the provider for a name it has never heard of.
     from .headless import PROVIDERS as _known
@@ -1904,6 +1902,10 @@ def _save_settings_locked(d: Dict) -> Dict:
     # lose the brain, workspace pointer and voice prefs in one go. Keys sealed.
     from . import keystore
     keystore.write_settings(cur, SETTINGS_PATH)
+    # Said once it is on disk: whoever hears it (the window, the phone bridge) reads it back
+    # at once, and told before the write it read the old settings and kept them.
+    if _changed:
+        live_bus.publish({"kind": "settings", "keys": [k for k in _changed if "key" not in k]})
     # Brain switched cloud → local: ditch the cached disk_models and rescan
     # in the background so the Models tab reflects what's actually on disk
     # without making the user think the GUI froze.
@@ -2611,7 +2613,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                     ev = q.get(timeout=15)
                     data = "data: " + json.dumps(ev, ensure_ascii=False, default=str) + "\n\n"
                 except _queue.Empty:
-                    data = ": still here\n\n"
+                    data = 'data: {"kind": "ping"}\n\n'      # seen by the page, so a dead stream is noticed
                 self.wfile.write(data.encode("utf-8"))
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):

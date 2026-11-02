@@ -175,7 +175,7 @@ if sync_playwright:
                 pass
         pg = b.new_page(viewport={"width": 1200, "height": 800})
         pg.goto(url + "/", wait_until="domcontentloaded")
-        pg.wait_for_function("typeof setActiveId === 'function' && STATE.conversations.some(c => c.id === 'relay_live')", timeout=30000)
+        pg.wait_for_function("typeof setActiveId === 'function' && STATE.conversations.some(c => c.id === 'relay_live')", timeout=30000, polling=100)
         pg.evaluate("""async () => { const c = STATE.conversations.find(c => c.id === 'relay_live'); await ensureConvoLoaded(c);
           setActiveId('relay_live'); renderChat(); }""")
         pg.wait_for_timeout(1500)
@@ -188,7 +188,7 @@ if sync_playwright:
         say(type="start", text="what's on my desktop?")
         say(type="step", words="Listed ~/Desktop", tool="list_dir", cmd="~/Desktop")
         say(type="chunk", text="Three files: ")
-        pg.wait_for_function("document.body.innerText.includes('Three files:')", timeout=5000)
+        pg.wait_for_function("document.body.innerText.includes('Three files:')", timeout=5000, polling=100)
         mid = time.time() - t0
         shown = pg.evaluate("document.body.innerText")
         check(f"the window shows the phone's message and the reply as it's written ({mid:.2f} s)",
@@ -198,8 +198,11 @@ if sync_playwright:
         say(type="end")
         pg.wait_for_timeout(600)
         check("and the rest of it", "a.txt, b.txt and c.txt." in pg.evaluate("document.body.innerText"))
-        pg.screenshot(path=os.path.join(WORK, "window_live.png"))
-        print("screenshot:", os.path.join(WORK, "window_live.png"))
+        try:                        # a headless page's frames can stall; the checks above don't need the picture
+            pg.screenshot(path=os.path.join(WORK, "window_live.png"), timeout=20000, animations="disabled")
+            print("screenshot:", os.path.join(WORK, "window_live.png"))
+        except Exception as e:
+            print("screenshot skipped:", type(e).__name__)
         # A phone turn saved later replaces the live copy; the window never saves the live one itself.
         pg.evaluate("persistConvo(STATE.conversations.find(c => c.id === 'relay_live'))")
         pg.wait_for_timeout(500)
@@ -208,7 +211,7 @@ if sync_playwright:
         # A chat just started on the phone, which this window has never seen: shown as it goes.
         for ev in ({"type": "start", "text": "plan my week"}, {"type": "chunk", "text": "Monday: gym."}):
             say(**dict(ev, chat="relay_new", turn="p2"))
-        pg.wait_for_function("STATE.conversations.some(c => c.id === 'relay_new' && (c.messages || []).some(m => (m.content || '').includes('Monday: gym.')))", timeout=5000)
+        pg.wait_for_function("STATE.conversations.some(c => c.id === 'relay_new' && (c.messages || []).some(m => (m.content || '').includes('Monday: gym.')))", timeout=5000, polling=100)
         got = pg.evaluate("STATE.conversations.find(c => c.id === 'relay_new').title")
         check(f"a turn in a chat started on the phone shows in the window as it goes, the chat listed ({got!r})", got == "plan my week")
         b.close()
