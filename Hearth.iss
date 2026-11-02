@@ -110,6 +110,8 @@ Type: files; Name: "{autodesktop}\Hearth.lnk"
 Type: files; Name: "{autodesktop}\Hearth CLI.lnk"
 Type: filesandordirs; Name: "{autoprograms}\Hearth"
 #endif
+; Terminal save files an older build shipped by mistake.
+Type: filesandordirs; Name: "{app}\_internal\Windows Terminal\saves"
 
 [UninstallDelete]
 ; Inno removes only the files it put down itself. Inglen also writes inside its own
