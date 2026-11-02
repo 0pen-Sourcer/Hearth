@@ -113,7 +113,9 @@ def apply(answers: Dict[str, str]) -> Dict[str, object]:
         from . import memory
         memory.append_rule(f"Avoid: {a['avoid']}.")
 
-    settings: Dict[str, object] = {"onboarded": True}
+    # Set up on this release: its What's new is not news.
+    from .whats_new import mark_seen
+    settings: Dict[str, object] = {"onboarded": True, **mark_seen()}
     if a.get("audio") in AUDIO:
         # On speakers the mic hears the reply, so it stays closed while Hearth
         # talks. On headphones it stays open so you can cut in.

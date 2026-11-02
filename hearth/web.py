@@ -3095,6 +3095,13 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/settings":
             # With the name the agent has until the person picks one, for the window's fallbacks.
             return self._send_json(200, dict(_load_settings(), agent_name_default=__import__("hearth").default_agent_name()))
+        if path == "/api/whats_new":
+            from . import whats_new
+            with _SETTINGS_WRITE_LOCK:
+                st, save = whats_new.status(_load_settings())
+                if save:
+                    _save_settings_locked(save)
+            return self._send_json(200, st)
         if path == "/api/auto_review":
             from . import auto_review
             return self._send_json(200, auto_review.status())
@@ -3520,6 +3527,10 @@ class HearthHandler(BaseHTTPRequestHandler):
             return self._send_json(200, _eject_model())
         if path == "/api/settings":
             return self._send_json(200, _save_settings(self._read_json()))
+        if path == "/api/whats_new/seen":
+            from . import whats_new
+            _save_settings(whats_new.mark_seen())
+            return self._send_json(200, {"ok": True})
         if path == "/api/auto_review/check":
             from . import auto_review
             started = auto_review.check_in_background(again=True)
@@ -6185,7 +6196,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         mime = {
             ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
             ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
-            ".ico": "image/x-icon",
+            ".ico": "image/x-icon", ".webm": "video/webm",
             # JS/CSS for vendored libraries (d3, mermaid in future). Without
             # the correct Content-Type, the browser refuses to execute d3
             # under strict-mime-sniffing.
