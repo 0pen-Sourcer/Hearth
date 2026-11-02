@@ -29,7 +29,8 @@ _WHO = ""
 # What faulthandler writes when it records a crash.
 _STACK_MARKS = ("Fatal Python error", "fatal exception", "Current thread 0x", "Thread 0x")
 ISSUES_URL = "https://github.com/0pen-Sourcer/Hearth/issues/new"
-_URL_MAX = 7000     # browsers and GitHub cut a longer address
+# issues/new answers 500 ("Whoops") from about 6,950 characters and 414 past 8,200.
+_URL_MAX = 6000
 
 
 def _folder() -> str:
@@ -76,16 +77,31 @@ def scrub(text: str) -> str:
     return out
 
 
+def _alive(st: Dict) -> bool:
+    """The process that wrote this entry is still running (not a reused pid)."""
+    pid = st.get("pid")
+    if not pid or pid == os.getpid():
+        return False
+    try:
+        import psutil
+        p = psutil.Process(int(pid))
+        started = float(st.get("started") or 0)
+        return not started or abs(p.create_time() - started) < 30
+    except Exception:
+        return False
+
+
 def _look_back(who: str, path: str) -> None:
     """Whether the last run of `who` crashed; if so, keep its stack as pending."""
     st = _read_json(_state_path()).get(who) or {}
-    if not st or st.get("clean"):
+    if not st or st.get("clean") or _alive(st):
         return
     try:
         size = os.path.getsize(path)
     except OSError:
         return
-    start = int(st.get("offset") or 0)
+    # Windows hands faulthandler faults that get handled too; what the process lived past isn't a crash.
+    start = max(int(st.get("offset") or 0), int(st.get("survived") or 0))
     if start > size:      # the log was set aside since; its tail is in .old
         return
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -96,7 +112,7 @@ def _look_back(who: str, path: str) -> None:
     if not any(m in tail for m in _STACK_MARKS):
         return
     _write_json(_pending_path(), {"at": int(time.time()), "who": who, "version": _version(),
-                                  "stack": scrub(tail.strip())[-12000:]})
+                                  "stack": _died_first(scrub(tail.strip()))[:12000]})
 
 
 def _version() -> str:
@@ -129,16 +145,50 @@ def enable(who: str) -> str:
         _WHO = who
         try:
             st = _read_json(_state_path())
-            st[who] = {"pid": os.getpid(), "offset": _FILE.tell(), "clean": False}
+            st[who] = {"pid": os.getpid(), "started": _started(), "offset": _FILE.tell(), "clean": False}
             _write_json(_state_path(), st)
         except Exception:
             pass
         faulthandler.enable(file=_FILE, all_threads=True)
         import atexit
         atexit.register(clean_exit)
+        import threading
+        threading.Thread(target=_watch, daemon=True, name="hearth-crashlog-watch").start()
         return path
     except Exception:
         return ""
+
+
+def _started() -> float:
+    try:
+        import psutil
+        return psutil.Process(os.getpid()).create_time()
+    except Exception:
+        return time.time()
+
+
+_WATCH_S = 3.0
+
+
+def _watch() -> None:
+    """A stack this process is still alive well after was a fault it survived:
+    note where the log stands once it has stopped growing."""
+    fd = _FILE.fileno()
+    seen = os.fstat(fd).st_size
+    marked = seen
+    while True:
+        time.sleep(_WATCH_S)
+        try:
+            size = os.fstat(fd).st_size
+            if size == seen and size > marked:
+                st = _read_json(_state_path())
+                if st.get(_WHO, {}).get("pid") == os.getpid():
+                    st[_WHO]["survived"] = size
+                    _write_json(_state_path(), st)
+                marked = size
+            seen = size
+        except Exception:
+            return
 
 
 def clean_exit() -> None:
@@ -173,12 +223,42 @@ def report_url(p: Optional[Dict] = None) -> str:
     p = p or pending() or {}
     title = "Inglen closed unexpectedly"
     head = f"Inglen {p.get('version') or _version()} on {platform.system()} {platform.release()}\n\nStack:\n"
-    stack = p.get("stack") or ""
-    while True:
-        body = head + "```\n" + stack + "\n```\n"
-        url = f"{ISSUES_URL}?title={quote(title)}&body={quote(body)}"
-        if len(url) <= _URL_MAX or not stack:
-            return url
-        # Keep the end, where the call it died in is; drop whole lines from the top.
-        lines = stack.splitlines()
-        stack = "\n".join(lines[max(1, len(lines) // 5):]) if len(lines) > 1 else stack[len(stack) // 2:]
+    lines = _died_first(scrub(p.get("stack") or "")).splitlines()
+
+    def url_for(ls) -> str:
+        body = head + "```\n" + "\n".join(ls) + "\n```\n"
+        return f"{ISSUES_URL}?title={quote(title)}&body={quote(body)}"
+
+    if len(url_for(lines)) <= _URL_MAX:
+        return url_for(lines)
+    if any(_is_current(x) for x in lines):
+        # The fault and the thread it happened on lead; other threads go from the bottom.
+        lo, hi = 1, len(lines)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if len(url_for(lines[:mid] + ["..."])) <= _URL_MAX:
+                lo = mid
+            else:
+                hi = mid - 1
+        return url_for(lines[:lo] + ["..."])
+    # No thread header: keep the end, drop whole lines from the top.
+    while len(lines) > 1 and len(url_for(lines)) > _URL_MAX:
+        lines = lines[max(1, len(lines) // 5):]
+    return url_for(lines)
+
+
+def _is_current(line: str) -> bool:
+    return line.startswith("Current thread 0x") or line.startswith("Stack (most recent call first)")
+
+
+def _died_first(stack: str) -> str:
+    """The last dump in the stretch (the one it died of), its own thread right under
+    the fault line, the other threads after."""
+    parts = re.split(r"(?m)^(?=Fatal Python error|Windows fatal exception)", stack)
+    last = parts[-1] if parts and parts[-1].strip() else stack
+    blocks = re.split(r"\n\s*\n", last.strip())
+    cur = [b for b in blocks if _is_current(b)]
+    rest = [b for b in blocks if not _is_current(b)]
+    head = [b for b in rest if not b.startswith("Thread 0x")]
+    threads = [b for b in rest if b.startswith("Thread 0x")]
+    return "\n\n".join(head + cur + threads)
