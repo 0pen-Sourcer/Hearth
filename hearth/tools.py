@@ -362,10 +362,43 @@ def _enumerate_non_system_drives() -> List[str]:
     return roots
 
 
+# Lines that say a run failed. The end of a long output is where these land,
+# so a cut keeps that part whole.
+_TAIL_ERROR_RE = re.compile(
+    r"^.*?(Traceback \(most recent call last\)|\bexit(?:ed with)? (?:code|status)\b"
+    r"|\[exit -?[1-9]\d*\]|\w*(?:Error|Exception)\b|\bFAILED\b|\bfatal\b|\bpanic\b)",
+    re.IGNORECASE | re.MULTILINE)
+
+
 def _trunc(s: str, cap: int) -> str:
+    """Fit a long result into about `cap` characters, keeping start and end.
+
+    A quarter of the room goes to the end by default. When the end holds an
+    error, a traceback or an exit code, the end is kept from the first such
+    line on (up to three quarters of the room), so the failure is never the
+    part that gets dropped."""
     if len(s) <= cap:
         return s
-    return s[:cap] + f"\n…[truncated {len(s) - cap} chars]"
+    cap = max(cap, 120) - 48        # room for the marker, so the result fits cap
+    tail_n = cap // 4
+    window = s[-(cap * 3 // 4):]
+    tb = window.rfind("Traceback (most recent call last)")
+    if tb < 0:
+        m = _TAIL_ERROR_RE.search(window)
+        tb = m.start() if m else -1
+    if tb >= 0:
+        tail_n = max(tail_n, len(window) - (window.rfind("\n", 0, tb) + 1))
+    head = s[:cap - tail_n]
+    nl = head.rfind("\n")
+    if nl >= len(head) * 4 // 5:
+        head = head[:nl]
+    tail = s[len(s) - tail_n:]
+    if s[len(s) - tail_n - 1] != "\n":
+        nl = tail.find("\n")
+        if 0 <= nl < tail_n // 5:
+            tail = tail[nl + 1:]
+    dropped = len(s) - len(head) - len(tail)
+    return f"{head.rstrip()}\n…[{dropped} chars cut from the middle]…\n{tail}"
 
 
 # ============================================================
@@ -2588,6 +2621,47 @@ def _write_file(p: Dict) -> str:
     return f"{verb}: {path} ({len(content)} chars, {content.count(chr(10))+1} lines)"
 
 
+def _squash(text: str) -> str:
+    return "\n".join(" ".join(ln.split()) for ln in text.split("\n")).strip()
+
+
+def _edit_miss_note(content: str, old: str, new: str) -> str:
+    """What to say when old_text is nowhere in the file: either the edit is
+    already there, or here are the lines that come closest, numbered, so the
+    call can be fixed without reading the file again."""
+    new_sq = _squash(new)
+    if new_sq and new_sq not in _squash(old) and new_sq in _squash(content):
+        return ("NOT FOUND, but new_text is already in the file, so this edit "
+                "looks already applied. Skip it unless the file should change again.")
+    import difflib
+    c_lines = content.split("\n")
+    span = max(1, len(old.strip("\n").split("\n")))
+    if len(c_lines) > 20000 or not old.strip():
+        return ("NOT FOUND. Re-read the file with read_file and copy the exact "
+                "text, whitespace included.")
+    sq_lines = [" ".join(ln.split()) for ln in c_lines]
+    sm = difflib.SequenceMatcher(autojunk=False)
+    sm.set_seq2(_squash(old))
+    best, best_at = 0.0, -1
+    for si in range(max(1, len(c_lines) - span + 1)):
+        sm.set_seq1("\n".join(sq_lines[si:si + span]))
+        if sm.real_quick_ratio() <= best or sm.quick_ratio() <= best:
+            continue
+        r = sm.ratio()
+        if r > best:
+            best, best_at = r, si
+    if best < 0.5 or best_at < 0:
+        return ("NOT FOUND, and nothing in the file comes close. Re-read it with "
+                "read_file; it may have changed or be the wrong file.")
+    end = min(len(c_lines), best_at + span)
+    hi = min(end, best_at + 30)
+    shown = "\n".join(f"    {n + 1}\t{c_lines[n]}" for n in range(best_at, hi))
+    more = f"\n    ... ({end - hi} more lines)" if end > hi else ""
+    return (f"NOT FOUND. Closest text is at lines {best_at + 1}-{end} "
+            f"({int(best * 100)}% alike):\n{shown}{more}\n"
+            f"  Copy old_text from these lines exactly and call edit_file again.")
+
+
 def _edit_file(p: Dict) -> str:
     """Targeted string-replace edits — never rewrites the whole file.
 
@@ -2720,16 +2794,13 @@ def _edit_file(p: Dict) -> str:
             log.append(f"  edit {i}: fuzzy match at line {si+1} (indent-corrected)")
             continue
 
-        log.append(
-            f"  edit {i}: NOT FOUND — re-read the file with read_file and copy "
-            f"the EXACT text including surrounding whitespace."
-        )
+        log.append(f"  edit {i}: " + _edit_miss_note(content, old, new))
 
     if content == original:
         return (
             f"edit_file({path}):\n" + "\n".join(log) +
             "\n\nNo bytes changed. If you expected edits to land, the old_text "
-            "didn't match anywhere — try read_file first."
+            "didn't match anywhere; the notes above show what is there."
         )
 
     with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -9784,18 +9855,16 @@ def sanitize_tool_pairing(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
 def _truncate_kept_tool_results(msgs: List[Dict[str, Any]],
                                  max_chars: int = 600) -> List[Dict[str, Any]]:
-    """Replace long `tool` role payloads in the kept tail with a short
-    truncation marker. The model just needs to know the tool ran and got
-    a result; the FULL text from 8 turns ago doesn't help and eats budget.
-    Browse results in particular are massive (~3500 chars each)."""
+    """Shorten long `tool` role payloads in the kept tail to their start and
+    end. The model just needs to know the tool ran and how it ended; the full
+    text from 8 turns ago doesn't help and eats budget. Browse results in
+    particular are massive (~3500 chars each)."""
     out: List[Dict[str, Any]] = []
     for m in msgs:
         if m.get("role") == "tool":
             content = m.get("content") or ""
             if isinstance(content, str) and len(content) > max_chars:
-                trunc = (f"{content[:max_chars].rstrip()} "
-                         f"…[truncated, full result was {len(content)} chars]")
-                m = {**m, "content": trunc}
+                m = {**m, "content": _trunc(content, max_chars)}
         out.append(m)
     return out
 
