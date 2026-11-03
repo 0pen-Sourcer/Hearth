@@ -378,7 +378,7 @@ class Hub:
                 run["steer"].append(text)
                 return "joined"
             run = {"steer": [], "question": None, "answer": None, "key": key, "regen": regen,
-                   "shown": shown, "files": files, "spoken": spoken}
+                   "shown": shown, "files": files, "spoken": spoken, "at": int(time.time() * 1000)}
             self._busy[key] = run
         t = threading.Thread(target=self._turn, args=(chat, text, reply_to, run, cid), daemon=True,
                              name=f"{self.a.name}-turn")
@@ -676,7 +676,8 @@ class Hub:
             events.append({"kind": "error", "text": final, "pos": 0})
         stand_in = " ".join(text.split())[:60] if chosen else f"{self.a.label}: {text[:50]}"
         chat_sync.post(cid, stand_in, self.a.name, [
-            {"role": "user", "content": text, "via": self.a.name, "at": now,
+            # When they said it, not when the reply ended: what they said meanwhile sits after it.
+            {"role": "user", "content": text, "via": self.a.name, "at": int(run.get("at") or now),
              **({"displayContent": run.get("shown") or "", "attachments": attachments(run["files"])}
                 if run.get("files") else {})},
             *steered,
@@ -692,7 +693,7 @@ class Hub:
         _TURN.ctx = None
         if late:
             nxt = {"steer": [], "question": None, "answer": None, "key": run.get("key", chat), "regen": False,
-                   "shown": "", "files": []}
+                   "shown": "", "files": [], "at": int(time.time() * 1000)}
             with self._lock:
                 if run.get("key", chat) in self._busy:
                     self._busy[run.get("key", chat)]["steer"].extend(late)

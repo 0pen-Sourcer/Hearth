@@ -110,7 +110,11 @@ class Call:
         self.post = post              # a line it says on its own, kept in the call's chat
         self.leaving = False          # it said goodbye: the call ends once that has been heard
         self.ready = False
-        self.turn = 0                 # the turn being spoken; a cut makes the one running go quiet
+        self.turn = 0                 # the turn being spoken; a hush makes the one running go quiet
+        # Talked over: what the running reply has written so far stays unsaid, and only
+        # what it writes after (its answer to them) is spoken.
+        self.skip = False
+        self.muted = False            # the orb tapped: the rest of this reply stays unsaid
         # How soon a reply starts to be heard: by default the first clause once it is long enough
         # to sound whole; quick, at any clause break once a dozen letters are written (as the
         # window's voice mode always has).
@@ -288,10 +292,11 @@ class Call:
         self.send({"type": "call.partial", "text": text})
 
     def _barge(self) -> None:
-        """They talked over it: stop speaking here and on the phone."""
+        """They talked over it: stop speaking here and on the phone. A reply still being
+        written goes on (their words reach it), and only what it writes from now is said."""
         self.speaker.stop()
         with self._lock:
-            self.turn += 1
+            self.skip = True
         self.send({"type": "call.state", "state": "listening", "barge": True})
         if self.times:
             sess = _rv.session_for(self.lease)
@@ -305,6 +310,7 @@ class Call:
         self.speaker.stop()                     # the rest of this reply stays unsaid; its text still shows
         with self._lock:
             self.turn += 1
+            self.muted = True
         self.send({"type": "call.state", "state": "listening"})
 
     def begin(self) -> int:
@@ -312,6 +318,7 @@ class Call:
         Returns the turn's number; a reply given with an older one is not spoken."""
         with self._lock:
             self.spoken, self.reply = 0, ""
+            self.skip = self.muted = False
             self.turn += 1
             n = self.turn
         self.speaker.reset_abort()
@@ -329,8 +336,15 @@ class Call:
         stopped = sess.speech_stopped_at if sess is not None else 0.0
         self.times = {"speech_end": stopped if stopped and now - stopped < 30 else now, "final": now,
                       "stt": getattr(sess, "stt", "") if sess is not None else ""}
+        # What was written so far is not reset here: a reply still running goes on, and a
+        # new turn starts from nothing (begin). Reset here, the reply running when they
+        # spoke was said again from its first word with each new piece.
+        from .stop_words import is_stop
+        if is_stop(text):
+            self.speaker.stop()                 # "stop" cuts the voice now, whether or not it barged
+            with self._lock:
+                self.skip = True
         with self._lock:
-            self.spoken, self.reply = 0, ""
             self.heard_n += 1
         self.speaker.reset_abort()
         self.send({"type": "call.heard", "text": text})
@@ -358,9 +372,13 @@ class Call:
     def live(self, text: str, turn: Optional[int] = None) -> None:
         """The reply so far: speak each piece that is complete."""
         with self._lock:
-            if turn is not None and turn != self.turn:
+            if (turn is not None and turn != self.turn) or self.muted:
                 return
             self.reply = text or ""
+            if self.skip:
+                self.skip = False
+                self.spoken = max(self.spoken, len(self.reply))   # written before they spoke: left unsaid
+                return
             while True:
                 rest = self.reply[self.spoken:]
                 m = _SENTENCE.search(rest)
@@ -398,9 +416,14 @@ class Call:
             if turn is not None and turn != self.turn:
                 return
             full = text or self.reply
+            if self.skip:
+                self.skip = False
+                self.spoken = max(self.spoken, len(self.reply))
             rest = full[self.spoken:].strip() if full.startswith(self.reply[:self.spoken]) else ""
             self.spoken = len(full)
             self.reply = ""
+            if self.muted:
+                rest = ""
         if rest:
             self._speak(rest)
         self._settle()
@@ -524,6 +547,27 @@ ASK_TAP = ("Not run yet, and nothing changed: this step can only be allowed with
            "and that it needs their tap on Allow, then stop.")
 
 
+def _why_it_asks(name: str, args: Any) -> str:
+    """Why this step asks at all (an address nobody gave after the chat read the screen,
+    a destructive command, Auto's reviewer), so the brain can say it and not guess."""
+    from . import tools as _tl
+    try:
+        from .auto_review import why
+        because = why(name, args)
+    except Exception:
+        because = ""
+    if not because:
+        try:
+            if name in _tl._SHELL_TOOLS:
+                cmd = str((args or {}).get("command") or (args or {}).get("cmd") or "")
+                hit = _tl._is_destructive(cmd) or _tl._is_outward(cmd)
+                if hit:
+                    because = f"the command has \"{hit}\" in it, which always asks"
+        except Exception:
+            because = ""
+    return f" Why it asks: {because.strip()}" if because.strip() else ""
+
+
 def aside_note(said: str) -> str:
     """What the brain hears when something else was said while it waited for an OK."""
     return (f"Not run yet: while you waited for their OK they said something else: \"{said}\". "
@@ -595,6 +639,6 @@ def voice_permission_check(check, emit_fn, prompt: str, history, *, asks, tapped
         _c = _card(name, args)
         emit_fn("permission_request", id=rid, name=name, args=args, aloud=True, head=_c["head"], what=_c["what"],
                 detail=_c["detail"], **({"tap": True} if tap else {}))
-        return {"decision": "ask_aloud", "reason": ASK_TAP if tap else ASK_ALOUD}
+        return {"decision": "ask_aloud", "reason": (ASK_TAP if tap else ASK_ALOUD) + _why_it_asks(name, args)}
     return _check
 
