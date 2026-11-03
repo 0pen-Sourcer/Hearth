@@ -521,4 +521,14 @@ def why(name: str, args: Any) -> str:
     v = turn.verdicts.get(sig)
     if v is None or v.go or not v.why:
         return ""
-    return v.why if v.by == "unreviewed" else words(v)
+    if v.by != "unreviewed":
+        return words(v)
+    hit = ""
+    try:
+        from .tools import _SHELL_TOOLS, _is_destructive, _is_outward
+        if name in _SHELL_TOOLS:
+            cmd = _cmd(args)
+            hit = _is_destructive(cmd) or _is_outward(cmd) or ""
+    except Exception:
+        hit = ""
+    return (f"The command has \"{hit}\" in it, which Auto asks about. " if hit else "") + v.why
