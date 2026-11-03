@@ -599,6 +599,11 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             _settle_brain(what, m)
         warm_brain()
         return out
+    if what == "load":
+        # A local model loading now, for a phone that came back mid-load: as the window has it.
+        from .llmserver import load_event
+        p = _window("GET", "/api/llmserver/progress", timeout=5)
+        return load_event(p) if p and p.get("ok") is not False else {"phase": "idle", "percent": 0, "model": ""}
     if what == "look":
         try:
             from .web import _load_settings
@@ -2279,6 +2284,18 @@ class Bridge:
             # Checked again here: the rules may have changed since it was asked for.
             if call_me.allowed(ev):
                 threading.Thread(target=self.ring, args=(ev,), daemon=True, name="relay-ring").start()
+            return
+        if kind == "load":
+            # A local model loading: the phones that are here show the bar as it goes. Now or never,
+            # so never kept in the mailbox for a phone that's away (it asks with 'load' when back).
+            frame = {"type": "load", **{k: ev[k] for k in ("phase", "percent", "model", "eta_s", "error") if k in ev}}
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+            try:
+                for r in list(self.adapter.rooms.values()):
+                    if getattr(r, "peer_up", False) and getattr(r, "chan", None) is not None:
+                        self.adapter._push(r.chat, frame)
+            finally:
+                cc._TURN.ctx = prev
             return
         if kind == "phone_notice":
             # A reminder (or the notify tool) for the phone: a notification on each paired phone.

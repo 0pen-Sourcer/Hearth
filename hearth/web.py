@@ -3520,7 +3520,7 @@ class HearthHandler(BaseHTTPRequestHandler):
         if path == "/api/events":
             # Another process (a bridge, the terminal) saying what changed; passed to every listener.
             ev = self._read_json()
-            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn", "phone_notice"):
+            if isinstance(ev, dict) and ev.get("kind") in ("chat", "settings", "turn", "phone_notice", "load"):
                 live_bus.publish(ev)
             return self._send_json(200, {"ok": True})
         if path == "/api/cancel":

@@ -1056,8 +1056,22 @@ def _weight_load_fraction(pid: int, total_bytes: int) -> Optional[float]:
     return max(0.0, min(1.0, rss / float(total_bytes)))
 
 
+_said_load: Dict[str, Any] = {"at": 0.0, "phase": None}
+
+
 def _set_progress(**kwargs) -> None:
     _load_progress.update(kwargs)
+    # Told as it goes (live_bus), so a phone shows the same bar without asking: every phase
+    # change, and the percent at most four times a second.
+    now = time.time()
+    phase = _load_progress.get("phase")
+    if phase != _said_load["phase"] or now - _said_load["at"] >= 0.25:
+        _said_load.update(at=now, phase=phase)
+        try:
+            from . import live_bus
+            live_bus.publish(dict(load_event(), kind="load"))
+        except Exception:
+            pass
 
 
 def get_load_progress() -> Dict[str, Any]:
@@ -1069,6 +1083,21 @@ def get_load_progress() -> Dict[str, Any]:
     elif snap.get("started_at") and snap.get("finished_at"):
         snap["elapsed_s"] = round(snap["finished_at"] - snap["started_at"], 1)
     return snap
+
+
+def load_event(p: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The load as another screen shows it: the model, the phase, the percent and, once there is
+    enough to go on, the seconds left (from the pace so far). `p`: a /api/llmserver/progress
+    snapshot read from the window's process; this process's own by default."""
+    p = get_load_progress() if p is None else p
+    pct, el = int(p.get("percent") or 0), float(p.get("elapsed_s") or 0)
+    out = {"phase": p.get("phase") or "idle", "percent": pct, "model": str(p.get("model") or ""),
+           "elapsed_s": round(el, 1)}
+    if out["phase"] not in ("ready", "error", "idle") and 15 <= pct < 100 and el >= 2:
+        out["eta_s"] = int(round(el * (100 - pct) / pct))
+    if out["phase"] == "error" and p.get("error"):
+        out["error"] = str(p.get("error"))[:200]
+    return out
 
 
 def server_extras_missing() -> Optional[str]:
