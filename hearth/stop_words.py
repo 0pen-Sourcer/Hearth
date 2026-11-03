@@ -11,8 +11,16 @@ from __future__ import annotations
 
 import re
 
-# Words said before the stop itself: "no, no, stop", "okay wait, stop it".
-_LEAD = r"(?:(?:no|nope|nah|hey|okay|ok|oh|whoa|woah|wait|please|just|bro|man|dude|jarvis|inglen)[\s,.!?]+)*"
+# Words said before the stop itself: "no, no, stop", "okay wait, stop it", "actually, never mind".
+_LEAD = (r"(?:(?:no|nope|nah|hey|okay|ok|oh|whoa|woah|wait|please|just|bro|man|dude|jarvis|inglen|actually|"
+         r"nvm|eh|hmm)[\s,.!?]+)*")
+# Letting it go: "leave it", "forget it", "drop it", on its own or with only a word to finish it
+# ("leave it for now", "forget it, I'll do it"). "Leave the file as is" is a request, not one of these.
+_LETGO = re.compile(
+    rf"^{_LEAD}(?:leave (?:it|that|this)(?: alone)?|forget (?:it|that|about it)|drop (?:it|that)|skip (?:it|that)"
+    r"|scrap (?:it|that)|let it be|never ?mind|nvm|don'?t bother|no need)"
+    r"(?=$|[,.!?;]|\s+(?:for now|then|now|bro|man|dude|please|already|actually|i'?ll|i will|i can|i got it|thanks)\b)",
+    re.I)
 # A stop word that opens the message, then the end or a word that only finishes it.
 _HEAD = re.compile(
     rf"^{_LEAD}(?:stop|halt|abort|cancel|terminate|enough|freeze|hold on|hold up|never ?mind)"
@@ -33,4 +41,4 @@ def is_stop(text: str) -> bool:
     t = " ".join(str(text or "").replace("’", "'").split()).strip()
     if not t or len(t) > 240:
         return False
-    return bool(_ONLY.match(t) or _HEAD.match(t) or _ANY.search(t))
+    return bool(_ONLY.match(t) or _HEAD.match(t) or _LETGO.match(t) or _ANY.search(t))

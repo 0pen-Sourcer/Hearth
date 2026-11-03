@@ -8395,6 +8395,8 @@ function renderMessage(m) {
   // Never render silent turns or the notification-flush sentinel (old convos
   // saved it as a user message before the notify path skipped it).
   if (m && (m.silent || m.content === '__HEARTH_NOTIFY_FLUSH__')) return null;
+  // Said while a turn ran (from a chat app or the phone): it shows inside that reply, where it came.
+  if (m && m.role === 'user' && m.steered) return null;
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
   const agentInit = _agentInitial();
