@@ -4032,7 +4032,8 @@
   .wn-stage { min-width: 0; }
   .wn-media { position: relative; aspect-ratio: 720 / 364; border-radius: var(--r-lg); overflow: hidden;
     background: #0c0b0a; border: 1px solid var(--border); }
-  .wn-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .wn-media video, .wn-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .wn-media [hidden] { display: none; }
   .wn-copy h3 { margin: 16px 0 6px; font-size: 15px; font-weight: 600; color: var(--fg); }
   .wn-copy p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--fg-dim); max-width: 600px; }
   .wn-foot { display: flex; align-items: center; gap: 10px; padding: 20px 28px 22px; }
@@ -5781,7 +5782,7 @@
       <div class="wn-split">
         <div class="wn-list" id="wn-list" role="tablist"><div class="wn-pill" id="wn-pill"></div></div>
         <div class="wn-stage">
-          <div class="wn-media" id="wn-media"><video id="wn-video" muted loop playsinline preload="auto"></video></div>
+          <div class="wn-media" id="wn-media"><video id="wn-video" muted loop playsinline preload="auto"></video><img id="wn-still" alt="" hidden></div>
           <div class="wn-copy" id="wn-copy"><h3 id="wn-h3"></h3><p id="wn-p"></p></div>
         </div>
       </div>
@@ -21873,6 +21874,8 @@ function _wnBuild() {
   $('wn-go').addEventListener('click', () => _wnShowPage('wn-feats'));
   const v = $('wn-video');
   v.addEventListener('click', () => { if (v.paused) v.play().catch(() => {}); });
+  // A clip this engine can't play would sit on a frozen frame: show its still.
+  v.addEventListener('error', _wnStill);
   document.addEventListener('keydown', (e) => {
     if (!$('whatsnew').classList.contains('open')) return;
     if (e.key === 'Escape') _wnClose();
@@ -21894,11 +21897,13 @@ function _wnPick(i) {
   $('wn-count').textContent = `${i + 1} of ${WN_FEATS.length}`;
   $('wn-next').hidden = i === WN_FEATS.length - 1;
   const v = $('wn-video'), media = $('wn-media'), copy = $('wn-copy');
+  const still = $('wn-still');
   const fill = () => {
-    v.style.objectFit = f.id === 'phone' ? 'contain' : 'cover';   // the phone is upright
-    v.poster = `/assets/whats_new/${f.id}.jpg`;
+    v.style.objectFit = still.style.objectFit = f.id === 'phone' ? 'contain' : 'cover';   // the phone is upright
+    still.hidden = true; v.hidden = false;
+    still.src = v.poster = `/assets/whats_new/${f.id}.jpg`;
     v.src = `/assets/whats_new/${f.id}.webm`;
-    if (!_reduceMotion()) v.play().catch(() => {});
+    if (!_reduceMotion()) v.play().catch(e => { if (e && e.name === 'NotSupportedError') _wnStill(); });
     $('wn-h3').textContent = f.title;
     $('wn-p').textContent = f.text;
   };
@@ -21914,6 +21919,11 @@ function _wnPick(i) {
     [media, copy].forEach(el => el.animate([out, { opacity: 1, filter: 'blur(0px)' }],
       { duration: sp.duration, easing: sp.easing, fill: 'forwards' }));
   }).catch(() => {});
+}
+
+function _wnStill() {
+  $('wn-still').hidden = false;
+  $('wn-video').hidden = true;
 }
 
 function _wnShowPage(id) {
