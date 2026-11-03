@@ -359,7 +359,9 @@ if _BRAIN_URL and _BRAIN_TOKEN and not _BRAIN_GATE:
         verdict = _ask_hearth(tool_name, input)
         if verdict.get("behavior") == "allow" and tool_name.startswith("mcp__hearth__"):
             import time as _t
-            _APPROVED.append((tool_name[len("mcp__hearth__"):], _t.time()))
+            from hearth.claude_brain import ran_by_use_tool
+            inner = ran_by_use_tool(tool_name, input)
+            _APPROVED.append((inner[0] if inner else tool_name[len("mcp__hearth__"):], _t.time()))
         return json.dumps(verdict)
 
 
