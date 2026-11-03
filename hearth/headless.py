@@ -331,6 +331,11 @@ STOPPED_NOTE = ("(Inglen's note, not the person's words: they told you to stop. 
                 "and no more steps run this turn. In one or two plain sentences, say what you had already "
                 "done that is still open or running, and ask before doing anything more.)")
 
+# What the brain is told when the turn is out of steps. It answers with no tools.
+CAPPED_NOTE = ("(Inglen's note, not the person's words: this turn is out of steps, so no more tools run. "
+               "Answer them now in plain words: what you found and did, what is still left undone, and the "
+               "next step if they say continue. Don't claim anything you didn't see happen.)")
+
 
 async def _until_stopped(aw, should_cancel):
     """Await a model call, giving it up the moment stop is asked. None when stopped."""
@@ -1564,11 +1569,21 @@ async def _run_once(
             emit("done", reply="", iterations=0)
             return 0
 
-    for depth in range(max_depth):
+    _cancelled = False        # Stop pressed: the turn ends as stopped, not as out of steps
+    _capped = False           # the step limit was reached: one last reply, with no tools
+    for depth in range(max_depth + 1):
         iterations = depth + 1
+        if iterations > max_depth:
+            # Out of steps: one more reply, with no tools, saying what it found and what is left,
+            # so the person isn't left with a sentence cut off mid-task.
+            _capped = True
+            emit("nudge", reason=f"step limit {max_depth} reached: last reply with no tools")
+            messages.append({"role": "user", "content": CAPPED_NOTE})
+            _force_answer, _quiet_force = True, True
         # User hit Stop in the GUI — bail out cleanly between turns.
         if _stop.pressed():
             emit("cancelled", message="stopped by user")
+            _cancelled = True
             break
         # Steering: the user typed while the turn was still running. Drain any
         # queued messages and inject them as user turns BEFORE the next
@@ -1969,6 +1984,7 @@ async def _run_once(
             if not _stop.pressed():
                 continue                    # a stop they said: answered at the top of the loop
             emit("cancelled", message="stopped by user")
+            _cancelled = True
             break
 
         # Streaming accumulator. OpenAI streams tool_calls as partial deltas
@@ -2072,6 +2088,7 @@ async def _run_once(
             if not _stop.pressed():
                 continue                    # a stop they said: what this reply was about to do is dropped
             emit("cancelled", message="stopped by user")
+            _cancelled = True
             break
 
         # Empty-stream rescue. llama.cpp's chatml-function-calling STREAMING
@@ -2239,7 +2256,7 @@ async def _run_once(
                 tc = _NS(id=_d["id"], function=_NS(name=_d["function"]["name"],
                                                    arguments=_d.get("raw_arguments") or _d["function"]["arguments"]))
                 name = tc.function.name
-                if _stopped_turn or _stop.cancelled():
+                if _stopped_turn or _capped or _stop.cancelled():
                     # Stop came (pressed, typed or said) before this step: it doesn't run,
                     # nor does any step after it in this reply.
                     _held_back += 1
@@ -2730,7 +2747,7 @@ async def _run_once(
              duration_ms=int((time.time() - t_start) * 1000),
              iterations=iterations,
              stats=_with_use(_turn_stats),
-             reason=("stopped_early" if _stopped_note else "finished"),
+             reason=("max_depth_reached" if _capped else "stopped_early" if _stopped_note else "finished"),
              note=(_stopped_note or None))
 
         # The turn is over: release the model for a new turn, and let the
@@ -2738,6 +2755,15 @@ async def _run_once(
         _TURN_ACTIVE.clear()
 
         _memory_pass_async()
+        return 0
+
+    if _cancelled:
+        # Stop was pressed: say so, not that it ran out of steps.
+        emit("turn_messages", messages=_turn_tail())
+        _TURN_ACTIVE.clear()
+        _memory_pass_async()
+        emit("done", duration_ms=int((time.time() - t_start) * 1000), iterations=iterations,
+             stats=_with_use(_turn_stats), reason="stopped")
         return 0
 
     # We hit the cap. The wrap-up nudge at 75% should have prompted the
