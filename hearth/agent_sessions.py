@@ -362,9 +362,16 @@ def _picture_of(args: Any) -> str:
 
 def _msg(role: str, text: str, at: int, steps: Optional[List[Dict[str, Any]]] = None,
          error: bool = False) -> Dict[str, Any]:
+    files: List[str] = []
     if role == "user":
         text = _clean(text) or text
+        # Files the phone sent with it: kept on the message, as the window keeps attachments, not as text.
+        files = [g.group(2) for g in _ATTACHED.finditer(text)]
+        if files:
+            text = _ATTACHED.sub("", text).strip()
     m = {"role": role, "text": text[-8000:], "at": at, "steps": steps or []}
+    if files:
+        m["files"] = files
     if error:
         m["error"] = True
     return m
@@ -418,7 +425,7 @@ def _fold(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if n["role"] == "assistant":
                 n["parts"] = _parts(n)
             out.append(n)
-    return [m for m in out if m["text"] or m["steps"]]
+    return [m for m in out if m["text"] or m["steps"] or m.get("files")]
 
 
 # ---------------------------------------------------------------- Claude Code
@@ -449,12 +456,20 @@ def _claude_read(path: str, head: bool) -> Dict[str, Any]:
         if o.get("isSidechain") or o.get("isMeta") or o.get("type") not in ("user", "assistant"):
             continue
         if o["type"] == "user":
-            for b in content if isinstance(content, list) else []:
-                if isinstance(b, dict) and b.get("type") == "tool_result":
-                    _give_out(by_id, b.get("tool_use_id"), b.get("content"))
+            results = [b for b in (content if isinstance(content, list) else [])
+                       if isinstance(b, dict) and b.get("type") == "tool_result"]
             text = _text_of(content)
+            if results:
+                # A tool's turn: what its harness wrote beside the result (an agent launched in the
+                # background, where its output goes) is part of that step's detail, never the person's words.
+                for n, b in enumerate(results):
+                    out = _result_text(b.get("content"))
+                    if text.strip() and n == len(results) - 1:
+                        out = (out + "\n\n" + text).strip()
+                    _give_out(by_id, b.get("tool_use_id"), out)
+                continue
             if not _typed(text):
-                continue                        # tool results and the program's own notes
+                continue                        # the program's own notes
             title = title or _title(text)
             if head and title and cwd:
                 break
@@ -1288,6 +1303,9 @@ def attached(paths: List[str]) -> str:
     """What a coding agent is told about files sent with a message from the phone: where they are, to open."""
     return "".join(f"\n\n[Attached from the phone: {os.path.basename(p)}, saved at {p}. Open it to look at it.]"
                    for p in paths if p)
+
+
+_ATTACHED = re.compile(r"\s*\[Attached from the phone: (.+?), saved at (.+?)\. Open it to look at it\.\]")
 
 
 def _mode() -> str:

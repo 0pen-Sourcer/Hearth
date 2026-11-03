@@ -1165,7 +1165,8 @@ async def run_turn(prompt: str, *, emit, history: Optional[List[Dict[str, Any]]]
 
     full = used_up(agent)
     if full:
-        when = time.strftime("%I:%M %p", time.localtime(full["resets_at"])).lstrip("0")
+        from .clock import hm
+        when = hm(full["resets_at"])
         emit("error", category="quota",
              message=f"{BRAINS.get(agent, 'The agent')} is out of usage until {when}.")
         emit("done", reply="", iterations=0)

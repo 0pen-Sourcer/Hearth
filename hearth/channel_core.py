@@ -252,22 +252,22 @@ OUT_MAX = 3000
 def detail_of(args: Any) -> str:
     if not isinstance(args, dict):
         return ""
-    from .redact import redact_secrets_only
+    from .redact import for_display
     for k in _DETAIL_KEYS:
         v = args.get(k)
         if isinstance(v, list):
             v = " ".join(str(x) for x in v)
         if v:
-            return redact_secrets_only(str(v)[:2000])[0]
+            return for_display(str(v)[:2000])
     return ""
 
 
 def out_of(content: Any) -> str:
     """A tool's result as the phone's step detail shows it: the start of it, secrets blanked."""
-    from .redact import redact_secrets_only
+    from .redact import for_display
     text = str(content or "")
     cut = text[:OUT_MAX] + (f"\n... ({len(text) - OUT_MAX} more characters)" if len(text) > OUT_MAX else "")
-    return redact_secrets_only(cut)[0]
+    return for_display(cut)
 
 
 def sites_in(text: str, most: int = 6) -> List[str]:

@@ -78,6 +78,12 @@ def phone_id(phone_public: bytes) -> str:
     return hashlib.sha256(phone_public).hexdigest()[:12]
 
 
+def phone_name(room) -> str:
+    """The name a paired phone was given ("Pixel 9"), for "Answered on Pixel 9"."""
+    key = getattr(room, "room", "")
+    return next((str(p.get("name") or "") for p in _read().get("phones", []) if p.get("room") == key), "") or "another phone"
+
+
 def start_pairing(name: str = "") -> Dict[str, Any]:
     """A new pairing: what the QR code holds, as a link that opens the phone app."""
     url = relay_url()
@@ -344,6 +350,28 @@ class Joiner:
 
 # ---------------------------------------------------------------- what the phone asks for
 
+def in_order(text: str, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A reply's words and steps in the order they came, as the window draws a saved turn: each step
+    keeps how much of the text was written when it ran (`_pos`); one without it goes where the last left off."""
+    parts: List[Dict[str, Any]] = []
+    cursor = 0
+    for st in steps:
+        pos = st.get("_pos")
+        pos = cursor if not isinstance(pos, int) else max(cursor, min(pos, len(text)))
+        seg = text[cursor:pos]
+        if seg.strip():
+            parts.append({"text": seg.strip()})
+        cursor = pos
+        clean = {k: v for k, v in st.items() if k != "_pos"}
+        if parts and "steps" in parts[-1]:
+            parts[-1]["steps"].append(clean)
+        else:
+            parts.append({"steps": [clean]})
+    if text[cursor:].strip():
+        parts.append({"text": text[cursor:].strip()})
+    return parts
+
+
 def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
     """A picture a step looked at (Codex's view_image, Claude Code reading a .png) as a
     card the phone shows and opens; the path alone showed only "Looked at an image"."""
@@ -359,6 +387,12 @@ def _pictures(got: Dict[str, Any]) -> Dict[str, Any]:
             cards = session_files(msg.get("text") or "", got.get("cwd") or "")
             if cards:
                 msg["files"] = cards
+        elif msg.get("role") == "user" and msg.get("files"):
+            # What the phone sent with the message, as cards with it (a file since removed drops out).
+            cards = [relay_media.card(p) for p in msg["files"] if isinstance(p, str)]
+            msg["files"] = [c for c in cards if c is not None]
+            if not msg["files"]:
+                del msg["files"]
     return got
 
 
@@ -397,7 +431,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "media":
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
-        return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0))
+        return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0),
+                                 stat=bool(m.get("stat")))
     if what == "call_me":
         from . import call_me
         return call_me.view()
@@ -436,7 +471,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
         from . import agent_sessions
         if agent_sessions.parse_chat(cid):
-            return _pictures(agent_sessions.transcript(cid, int(m.get("last") or 60)))
+            from .redact import clean_session
+            return _pictures(clean_session(agent_sessions.transcript(cid, int(m.get("last") or 60))))
         d = chat_sync.load(cid) or {}
         msgs = []
         for x in d.get("messages") or []:
@@ -466,6 +502,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
                     step["out"] = cc.out_of(e.get("result"))
                 if e.get("name") == "web_search":
                     step["sites"] = cc.sites_in(str(e.get("result") or ""))
+                step["_pos"] = e.get("pos")
                 steps.append(step)
             # The window keeps a turn's stats on its done event and its reasoning as think chunks.
             done = next((e for e in reversed(events) if e.get("kind") == "done"), {})
@@ -491,10 +528,14 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             if failed and not text.strip():
                 msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
                 continue
+            parts = in_order(text, steps) if role == "assistant" and steps else None
+            for st in steps:
+                st.pop("_pos", None)
             if text or steps or files:
                 msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps, "files": files,
                              "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
-                             "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)]})
+                             "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)],
+                             **({"parts": parts} if parts else {})})
         keep = int(m.get("last") or 60)
         return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
                 "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
@@ -511,7 +552,7 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "story":
         return story(str(m.get("id") or ""))
     if what == "ideas":
-        return ideas()
+        return ideas(m)
     if what == "memory_item":
         # "wrong / forget" or "done with this" on what a reply had in mind.
         from . import memory_cards
@@ -564,7 +605,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             s = _load_settings() or {}
         except Exception:
             s = {}
-        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or ""}
+        from .clock import style
+        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or "", "clock": style(s)}
     return {"error": f"unknown request {what!r}"}
 
 
@@ -782,10 +824,15 @@ def context_item(t: Dict[str, Any]) -> Dict[str, Any]:
             "chat": t.get("chat") or "", "chat_title": t.get("chat_title") or ""}
 
 
-def ideas() -> Dict[str, Any]:
-    """What a new chat on the phone offers: the chats still going on and the
-    reminder ideas, as kept (hearth/offers.py; the phone picks its rows from them)."""
+def ideas(m: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """What a new chat on the phone offers: the ideas as kept (hearth/offers.py), the same the
+    window shows. {"dismiss": ask} is "Not useful" on one, saved through the window as there."""
     from . import offers
+    m = m or {}
+    if m.get("dismiss"):
+        r = _window("POST", "/api/ideas/dismiss", {"ask": str(m["dismiss"])[:300]})
+        if r.get("ok") is False:
+            return r
     return offers.sources()
 
 
@@ -797,7 +844,8 @@ _SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, 
              "gen_stats": (True, False),
              # The look, as the window's Appearance writes it: either side follows the other.
              "ui_theme": ("classic", "dark", "light", "system"),
-             "ui_accent": ("ember", "sage", "ocean", "rose", "violet", "mono")}
+             "ui_accent": ("ember", "sage", "ocean", "rose", "violet", "mono"),
+             "clock_style": ("auto", "12", "24")}
 
 
 def _front(raw: str) -> tuple:
@@ -824,6 +872,7 @@ def voice_view(m: Dict[str, Any]) -> Dict[str, Any]:
         r = _window("POST", "/api/settings", {"voice_name": pick})
         if r.get("ok") is False:
             return r
+        _voice.set_default_voice(pick)            # this process too: calls and Read aloud speak from here
     settings = _window("GET", "/api/settings")
     return {"voice": str(settings.get("voice_name") or _voice.current_voice()), "voices": voices()}
 
@@ -1198,6 +1247,14 @@ class Relay(cc.Adapter):
             return None
         return mid
 
+    def push_now(self, chat: str, obj: Dict[str, Any]) -> Optional[str]:
+        """A frame about this moment (an agent at work): only to a phone that is connected. Kept in
+        the mailbox, it would read as current when the phone opens hours later, with the PC off."""
+        room = self.rooms.get(str(chat))
+        if room is None or not room.peer_up or room.chan is None:
+            return None
+        return self._push(chat, obj)
+
     def _call_for(self, chat):
         """The call in progress in this phone's room, when the turn is in its chat."""
         room = self.rooms.get(str(chat))
@@ -1488,7 +1545,8 @@ class Room:
             from .call_me import agent_name
             # The turns running now: the phone drops any other it still draws as
             # working (one whose end it missed while it was closed).
-            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running()})
+            # acks: this PC answers each message with "got", so the phone knows what reached it.
+            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running(), "acks": True})
             warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "box" and self.phone:          # Allow or Deny tapped on a notification
@@ -1496,7 +1554,7 @@ class Room:
             if m and m.get("type") == "answer":
                 await asyncio.to_thread(self.bridge.on_answer, self, m)
             elif m and m.get("type") == "call.decline":
-                await asyncio.to_thread(self.bridge.decline, str(m.get("ring") or ""))
+                await asyncio.to_thread(self.bridge.decline, str(m.get("ring") or ""), self)
             return
         if t == "msg" and self.chan is not None:
             m = self.chan.open(f)
@@ -1548,9 +1606,18 @@ class Room:
 
         speaker = _voice.Speaker(sink=Sink(), first_chunk=40)
         self.saying = speaker
+        # The voice picked now (on the phone or in the window), read at the time: this bridge
+        # runs in a process of its own, started with whatever voice was set then.
+        from .call_me import _settings as saved
+        s = saved()
+        voice = str(s.get("voice_name") or "").strip() or None
+        try:
+            speed = float(s.get("voice_speed")) if s.get("voice_speed") else None
+        except (TypeError, ValueError):
+            speed = None
 
         def run():
-            said = speaker.speak(str(m["text"]), blocking=True)
+            said = speaker.speak(str(m["text"]), blocking=True, voice=voice, speed=speed)
             if said == "no_voice":
                 _log("read aloud: voice isn't set up on this PC")
                 send({"type": "say.error", "detail": "Voice isn't set up on your PC"})
@@ -1578,7 +1645,7 @@ class Room:
                 asyncio.ensure_future(self.deliver({"type": "call.ended", "gone": True, "id": secrets.token_hex(6)}))
             return
         if kind == "call.decline":
-            threading.Thread(target=self.bridge.decline, args=(str(m.get("ring") or ""),), daemon=True).start()
+            threading.Thread(target=self.bridge.decline, args=(str(m.get("ring") or ""), self), daemon=True).start()
             return
         if kind == "call.start":
             if call is not None and not call.ended:
@@ -1586,7 +1653,7 @@ class Room:
             from .call import Call
             adapter, chat = self.bridge.adapter, self.chat
             cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(m.get("chat") or ""))[:80]
-            ring = self.bridge.answered(str(m.get("ring") or "")) if m.get("ring") else None
+            ring = self.bridge.answered(str(m.get("ring") or ""), self) if m.get("ring") else None
 
             def send(obj):
                 # Only to a phone that is there: call frames never wait in the mailbox.
@@ -1686,6 +1753,7 @@ class Bridge:
         self._said: Dict[str, List[str]] = {}
         self.agent_runs: Dict[str, Dict[str, Any]] = {}     # session chat -> its run, while an agent answers
         self.phone_sessions: Dict[str, float] = {}          # session chat -> when the phone last sent into it
+        self._got: List[str] = []                           # the phone's messages taken, by their id
         from . import call_me
         self.rings = call_me.Rings()                        # the agent calling the phone by itself
         self._ring_timer: Optional[threading.Timer] = None
@@ -1735,23 +1803,25 @@ class Bridge:
             return
         if m.get("type") != "user":
             return
-        from . import agent_sessions
-        if agent_sessions.parse_chat(str(m.get("chat") or "")):
-            # Pictures and files sent into a coding agent's session go with the message, saved where it can open them.
-            paths = []
-            for f in m.get("files") or []:
-                try:
-                    paths.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
-                except Exception:
-                    continue
-            self.agent_say(room, dict(m, paths=paths))
+        mid = str(m.get("mid") or "")[:40]
+        if mid and mid in self._got:
+            self._ack(room, mid)                  # sent again because the first answer was lost: taken once
             return
-        files = []
+        from . import agent_sessions
+        saved = []
         for f in m.get("files") or []:
             try:
-                files.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
+                saved.append(cc.save_upload(R.unb64(f.get("data") or ""), f.get("name") or "file"))
             except Exception:
                 continue
+        if mid:
+            self._got = (self._got + [mid])[-500:]
+            self._ack(room, mid)                  # here, with its files saved: the phone stops holding it
+        if agent_sessions.parse_chat(str(m.get("chat") or "")):
+            # Pictures and files sent into a coding agent's session go with the message, saved where it can open them.
+            self.agent_say(room, dict(m, paths=saved))
+            return
+        files = saved
         voice = ""
         if m.get("voice"):
             ext = str(m.get("voice_ext") or "webm").strip(".").lower()
@@ -1769,6 +1839,15 @@ class Bridge:
             drop_from(cid, str(edit.get("text") or ""), int(edit.get("back") or 0))
         self.hub.receive(room.chat, "phone", str(m.get("text") or ""), name="Phone", voice=voice, files=files,
                          cid=str(m.get("chat") or ""), regen=bool(m.get("regen")))
+
+    def _ack(self, room: Room, mid: str) -> None:
+        """Tell the phone its message is here. Until it hears this it keeps the message and sends it again."""
+        fut = asyncio.run_coroutine_threadsafe(room.deliver({"type": "got", "mid": mid, "id": secrets.token_hex(6)}),
+                                               self.loop)
+        try:
+            fut.result(15)
+        except Exception:
+            pass
 
     def on_answer(self, room: Room, m: Dict[str, Any]) -> None:
         """Allow or Deny from a notification. It answers only the question it was
@@ -2027,17 +2106,23 @@ class Bridge:
         _log(f"calling the phone: {got['reason']}")
         return rid
 
-    def _stopped(self, ring: Dict[str, Any], missed: bool) -> None:
+    def _stopped(self, ring: Dict[str, Any], missed: bool, by: Optional["Room"] = None, how: str = "") -> None:
+        """The ring is over on every phone: unanswered (missed), or answered or declined on one (`by`),
+        when the others stop ringing at once, as a call picked up on one device does."""
         from . import call_me
         name = call_me.agent_name()
+        where = phone_name(by) if by is not None else ""
         prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
         try:
             for r in self._phones():
+                if r is by:
+                    continue
                 if r.peer_up and r.chan is not None:
                     self.adapter._push(r.chat, {"type": "call.unring", "ring": ring["id"], "missed": missed})
-                if missed:
-                    # Takes the ringing notification's place: a plain one that opens the chat.
-                    self.adapter.notify(r.chat, {"kind": "missed", "title": f"Missed call from {name}",
+                if missed or how:
+                    # Takes the ringing notification's place, quietly: a phone in a pocket stops ringing too.
+                    title = f"Missed call from {name}" if missed else f"{how} on {where}" if where else f"Call {how.lower()}"
+                    self.adapter.notify(r.chat, {"kind": "missed", "title": title,
                                                  "body": ring.get("why") or "", "c": ring.get("c") or "",
                                                  "ring": ring["id"]})
         finally:
@@ -2048,18 +2133,23 @@ class Bridge:
         if ring is not None:
             self._stopped(ring, missed=True)
 
-    def decline(self, rid: str) -> None:
+    def decline(self, rid: str, by: Optional["Room"] = None) -> None:
         ring = self.rings.drop(rid)
         if ring is not None:
             if self._ring_timer is not None:
                 self._ring_timer.cancel()
-            self._stopped(ring, missed=False)
+            self._stopped(ring, missed=False, by=by, how="Declined" if by is not None else "")
 
-    def answered(self, rid: str) -> Optional[Dict[str, Any]]:
-        """The ring a call from the phone answers (also one that just went unanswered), for what it says first."""
+    def answered(self, rid: str, by: Optional["Room"] = None) -> Optional[Dict[str, Any]]:
+        """The ring a call from the phone answers (also one that just went unanswered), for what it says first.
+        The other phones stop ringing at once."""
         ring = self.rings.take(rid)
         if ring is not None and self._ring_timer is not None:
             self._ring_timer.cancel()
+        if ring is not None:
+            # On a thread: this runs on the connection's loop, and telling the phones waits on it.
+            threading.Thread(target=self._stopped, args=(ring, False), kwargs={"by": by, "how": "Answered"},
+                             daemon=True, name="relay-unring").start()
         return ring or self._rang.get(rid)
 
     def watch_questions(self) -> None:
@@ -2095,6 +2185,12 @@ class Bridge:
         got = agent_sessions.parse_chat(c)
         return bool(got) and tuple(got) in agent_sessions._RAN_HERE
 
+    def worth_telling(self, n: Dict[str, Any], idle: Optional[float] = None) -> bool:
+        """An agent's finished turn is news for the phone unless they are at the PC, in a session they
+        are working in there themselves. Work handed off from the phone or Inglen is always told."""
+        from . import call_me
+        return self.from_here(str(n.get("c") or "")) or not call_me.at_pc(idle)
+
     def agent_call(self, n: Dict[str, Any], idle: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """The ring an agent's finished turn makes: only for work handed off from the phone or Inglen,
         only when it has news, and one per session per stretch of work."""
@@ -2122,8 +2218,9 @@ class Bridge:
             except Exception:
                 continue
             for n in notes:
-                for chat in list(self.adapter.rooms):     # each paired phone
-                    self.adapter.notify(chat, n)
+                if self.worth_telling(n):
+                    for chat in list(self.adapter.rooms):     # each paired phone
+                        self.adapter.notify(chat, n)
                 try:
                     ev = self.agent_call(n)
                     if ev is not None:
@@ -2143,12 +2240,12 @@ class Bridge:
                 prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
                 try:
                     for chat in list(self.adapter.rooms):
-                        self.adapter._push(chat, {"type": "changed", "what": "chat", "c": c, "working": busy_now})
+                        self.adapter.push_now(chat, {"type": "changed", "what": "chat", "c": c, "working": busy_now})
                 finally:
                     cc._TURN.ctx = prev
 
     # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
-    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme)")
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme|clock_)")
 
     def follow_window(self) -> None:
         """Pass what changes on the PC (live_bus) to every paired phone as it happens:
@@ -2180,9 +2277,18 @@ class Bridge:
             threading.Thread(target=self.to_phone, args=(ev,), daemon=True, name="relay-to-phone").start()
             return
         out: Optional[Dict[str, Any]] = None
+        if kind == "settings" and "voice_name" in (ev.get("keys") or []):
+            # The voice picked in the window: calls and Read aloud on the phone speak in it from now.
+            from .call_me import _settings as saved
+            from . import voice as _voice
+            v = str(saved().get("voice_name") or "").strip()
+            if v:
+                _voice.set_default_voice(v)
         if kind == "settings" and any(self._PHONE_SETTINGS.match(str(k)) for k in ev.get("keys") or []):
             _BRAIN_CACHE.clear()                  # the phone's next look at the brain reads it fresh
             out = {"type": "changed", "what": "brain"}
+        elif kind == "ideas":
+            out = {"type": "changed", "what": "ideas"}
         elif kind == "chat" and ev.get("chat"):
             out = {"type": "changed", "what": "chat", "c": ev["chat"], **({"gone": True} if ev.get("gone") else {})}
         elif kind == "turn" and ev.get("from") not in (None, "", self.adapter.name) and ev.get("chat"):

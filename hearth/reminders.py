@@ -902,8 +902,8 @@ def _when_said(iso: str) -> str:
         d = datetime.fromisoformat(iso)
     except Exception:
         return ""
-    clock = d.strftime("%I:%M %p").lstrip("0")
-    return clock if d.date() == datetime.now().date() else d.strftime("%a ") + clock
+    from .clock import hm
+    return hm(d, day=d.date() != datetime.now().date())
 
 
 def chat_id_for(r: Dict) -> str:

@@ -3728,6 +3728,7 @@
     animation: modalIn 0.14s var(--ease);
   }
   .think-menu.open { display: block; }
+  .idea-menu { position: fixed; bottom: auto; min-width: 200px; }
   .think-menu-item {
     display: flex; align-items: baseline; gap: 8px;
     width: 100%; padding: 7px 10px;
@@ -5294,6 +5295,13 @@
             <div class="hint">Its own pointer on what it clicks, so you can tell it from yours.</div>
           </div>
           <div class="switch" data-key="cu_pointer"></div>
+        </div>
+
+        <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Clock</h4>
+        <div class="ap-modes ap-three" id="ap-clock">
+          <button type="button" class="ap-mode" data-clock="auto"><b>Automatic</b><small>Follows your Windows setting. The phone app follows the phone's.</small></button>
+          <button type="button" class="ap-mode" data-clock="12"><b>12-hour</b><small>2:34 PM</small></button>
+          <button type="button" class="ap-mode" data-clock="24"><b>24-hour</b><small>14:34</small></button>
         </div>
 
         <h4 style="margin-top:24px; color:var(--fg-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Pop-ups</h4>
@@ -7552,6 +7560,12 @@ function onLiveEvent(ev) {
     try { refreshState(); } catch {}
     try { refreshModels(); } catch {}
     if ((ev.keys || []).some(k => k === 'ui_theme' || k === 'ui_accent')) followLook();
+    if ((ev.keys || []).includes('clock_style')) refreshSettings();   // the clock picked on the phone
+    return;
+  }
+  if (ev.kind === 'ideas') {
+    _offerAt = 0;                       // an idea set aside on the phone goes here too
+    try { const w = document.querySelector('.empty'); if (w) drawOffers(w); } catch {}
     return;
   }
   if (ev.kind === 'setup') {
@@ -8201,13 +8215,32 @@ function emptyState() {
   return wrap;
 }
 
-// Under the empty chat, by the box: at most three rows, one line each, the chats
-// still going on first and then the reminder ideas (hearth/offers.py). Only
-// once something can think; nothing while it gets ready.
+// Under the empty chat, by the box: at most three ideas, one line each (hearth/offers.py),
+// each a fresh message that fills the box: something to ask, or a reminder to set (the bell).
+// A right click offers the chat it came from and Not useful. Only once something can think.
 const _OFFER_ICO = {
-  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
-  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  idea: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>',
+  reminder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
 };
+// The small menu a right click on an idea opens.
+function _ideaMenu(r, x, y, gone) {
+  let m = document.getElementById('idea-menu');
+  if (!m) { m = document.createElement('div'); m.id = 'idea-menu'; m.className = 'think-menu idea-menu'; document.body.appendChild(m); }
+  m.innerHTML = (r.chat ? `<button type="button" class="think-menu-item" data-act="from">From: ${esc(r.chat_title || 'a chat')}</button>` : '')
+    + '<button type="button" class="think-menu-item" data-act="nope">Not useful</button>';
+  m.classList.add('open');
+  m.style.left = Math.min(x, innerWidth - m.offsetWidth - 8) + 'px';
+  m.style.top = Math.min(y, innerHeight - m.offsetHeight - 8) + 'px';
+  const close = () => { m.classList.remove('open'); document.removeEventListener('pointerdown', away, true); };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+  m.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+    close();
+    if (b.dataset.act === 'from') { _openChatById(r.chat); return; }
+    gone();
+    try { await api('/api/ideas/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ask: r.ask }) }); } catch {}
+  });
+}
 // A change to the empty screen (its line, the rows under it) moves the mark in
 // the middle; it glides there with one spring instead of jumping in a frame.
 function _emptyKeepPlace(wrap, change) {
@@ -8239,13 +8272,23 @@ async function drawOffers(wrap) {
       `<button type="button" class="empty-offer" data-i="${i}"><span class="eo-ico">${_OFFER_ICO[r.kind] || _OFFER_ICO.idea}</span>`
       + `<span class="eo-text">${esc(r.text || '')}</span></button>`).join('');
   });
-  box.querySelectorAll('.empty-offer').forEach(b => b.onclick = () => {
-    const r = _offerRows[+b.dataset.i];
-    if (!r) return;
-    if (r.kind === 'chat' && r.chat) { _openChatById(r.chat); return; }
-    input.value = r.ask || r.text || '';
-    input.dispatchEvent(new Event('input'));
-    input.focus();
+  box.querySelectorAll('.empty-offer').forEach(b => {
+    b.onclick = () => {
+      const r = _offerRows[+b.dataset.i];
+      if (!r) return;
+      input.value = r.ask || r.text || '';
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    };
+    b.oncontextmenu = (e) => {
+      const r = _offerRows[+b.dataset.i];
+      if (!r) return;
+      e.preventDefault();
+      _ideaMenu(r, e.clientX, e.clientY, () => {          // gone at once, and not suggested again
+        _offerRows = _offerRows.filter(x => x !== r);
+        drawOffers(wrap);
+      });
+    };
   });
 }
 
@@ -8308,10 +8351,29 @@ function _agentInitial() {
   return (n[0] || 'J').toUpperCase();
 }
 
-// When something was said, in the PC's own format.
-function clockOf(t) { return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+// The clock as Settings > Appearance has it (12 or 24 hours), Windows' own format when automatic.
+// The phone reads the same setting.
+function clockHour12() {
+  const s = STATE.settings || {};
+  if (s.clock_style === '12') return true;
+  if (s.clock_style === '24') return false;
+  return s.clock_12h !== false;
+}
+function paintClockChoice() {
+  const box = document.getElementById('ap-clock');
+  const v = (STATE.settings && STATE.settings.clock_style) || 'auto';
+  if (box) box.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.clock === v));
+}
+// Every time on screen is drawn again in the new format.
+function clockChanged() {
+  try { renderConvoList(); } catch {}
+  try { renderChat(); } catch {}
+  try { refreshReminders(); } catch {}
+}
+// When something was said.
+function clockOf(t) { return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: clockHour12() }); }
 function fullWhen(t) {
-  return new Date(t).toLocaleString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return new Date(t).toLocaleString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: clockHour12() });
 }
 function dayLabel(t) {
   const d = new Date(t), key = x => x.toDateString(), now = new Date();
@@ -14532,7 +14594,7 @@ async function refreshReminders() {
     ? `<div class="rm-row pending"><span class="rm-ico">${_rmIco('wait')}</span><span class="what">${esc(_rmPending)}<small>${_agentName()} is setting it&hellip;</small></span></div>` : '';
   for (const it of shown) {
     const done = RM_FILTER === 'done', at = done ? (it.fired_at || it.due_iso) : it.due_iso;
-    const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const time = clockOf(at);
     const parts = [it.recurring_text ? `Repeats ${it.recurring_text}${it.until_iso ? ', until ' + _rmDay(it.until_iso).replace(/^(Today|Tomorrow)$/, w => w.toLowerCase()) : ''}` : (done ? '' : 'Once'),
                    done ? `Came due ${_rmDay(at).toLowerCase()} at ${time}`
                         : it.paused ? (it.recurring_seconds ? 'Paused, picks up at its next time when resumed' : 'Paused')
@@ -15326,9 +15388,12 @@ async function refreshSettings() {
     for (const [k, v] of Object.entries(_justSaved)) {
       if (now - v.at < 4000) s[k] = v.value; else delete _justSaved[k];
     }
+    const hadHour12 = STATE.settings ? clockHour12() : null;
     STATE.settings = s;
     const popBox = document.getElementById('ap-popups');
     if (popBox) popBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.pop === popupsMode()));
+    paintClockChoice();
+    if (hadHour12 !== null && hadHour12 !== clockHour12()) clockChanged();
     // The brain is derived from settings: the first state poll can run before
     // they arrive and call an agent or cloud brain "local" until the next one.
     if (deriveBrainKind().providerKey !== (STATE.brain && STATE.brain.providerKey)) refreshState();
@@ -23167,6 +23232,17 @@ window.addEventListener('load', function initSidebarDrawer() {
     saveSetting('popups', b.dataset.pop);
     saveSetting('mute_toasts', b.dataset.pop === 'none');
     mark();
+  });
+  const clockBox = document.getElementById('ap-clock');
+  if (clockBox) clockBox.addEventListener('click', async e => {
+    const b = e.target.closest('.ap-mode'); if (!b) return;
+    STATE.settings = STATE.settings || {};
+    const was = clockHour12();
+    STATE.settings.clock_style = b.dataset.clock;
+    paintClockChoice();
+    if (was !== clockHour12()) clockChanged();
+    await saveSetting('clock_style', b.dataset.clock);
+    if (b.dataset.clock === 'auto') refreshSettings();      // Windows' own format, read on the PC
   });
   const mark = () => {
     if (roomBox) roomBox.querySelectorAll('.ap-mode').forEach(b => b.classList.toggle('on', b.dataset.look === cur('hearth_room_look', 'her')));

@@ -76,6 +76,48 @@ bridge.watch_agents()
 CM.at_pc = real_at_pc
 check(f"of a desk session's turn, phone work finishing and a usage limit, only the phone work rings ({[e.get('c') for e in rang]})",
       [e.get("c") for e in rang] == [FROM_PHONE])
+
+
+# Notifications: a turn in a session they are working in at the PC is not news while they sit there.
+told: list = []
+pushed: list = []
+Adapter.notify = lambda self, chat, n, urgent=False: told.append(n.get("c"))
+Adapter._push = lambda self, chat, obj: pushed.append(obj) or "m"
+Adapter.push_now = RB.Relay.push_now
+Phone.chan = None
+notes = [done(AT_DESK, LONG), done(FROM_PHONE, LONG)]
+for at_desk in (True, False):
+    told.clear()
+    bridge.stopping = False
+    CM.at_pc = (lambda v: (lambda idle=None: v))(at_desk)
+    bridge.watch_agents()
+    CM.at_pc = real_at_pc
+    want = [FROM_PHONE] if at_desk else [AT_DESK, FROM_PHONE]
+    check(f"{'at the PC' if at_desk else 'away from the PC'}, the phone is told of {want} ({told})", told == want)
+
+# "Working" is about this moment: a phone that isn't connected doesn't get it kept in its mailbox.
+real_s = (S.parse_chat, S.read, S.working)
+S.parse_chat, S.read, S.working = (lambda c: ("claude-code", "x")), (lambda a, s: {"messages": [], "path": ""}), (lambda *a: True)
+notes = []
+
+
+def moving_look(self, rows, now_ms, busy):
+    bridge.stopping = True
+    self.moved, self.quiet = [AT_DESK], []
+    return []
+
+
+RB.AgentWatch.look = moving_look
+for up in (False, True):
+    pushed.clear()
+    Phone.peer_up, Phone.chan = up, (object() if up else None)
+    bridge.stopping = False
+    bridge.watch_agents()
+    got = [p.get("working") for p in pushed if p.get("type") == "changed"]
+    check(f"a session at work, with the phone {'connected' if up else 'away'}: {'sent' if up else 'not kept for later'} ({got})",
+          got == ([True] if up else []))
+S.parse_chat, S.read, S.working = real_s
+Phone.peer_up, Phone.chan = False, None
 Adapter.rooms = {}
 
 

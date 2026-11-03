@@ -126,15 +126,20 @@ def card(path: str) -> Optional[Dict[str, Any]]:
             "kind": kind, "thumb": _thumb(path) if kind == "image" else ""}
 
 
-def chunk(mid: str, offset: int = 0, length: int = CHUNK) -> Dict[str, Any]:
-    """One part of a carded file: {data (base64url), offset, size, done} or {error}."""
+def chunk(mid: str, offset: int = 0, length: int = CHUNK, stat: bool = False) -> Dict[str, Any]:
+    """One part of a carded file: {data (base64url), offset, size, version, done} or {error}. The version
+    (modified time and size) changes when the file does, so a phone holding an older copy fetches it again;
+    with stat set, it gives the size and version alone."""
     with _LOCK:
         rec = _load()["files"].get(str(mid or ""))
     if not rec:
         return {"error": "that file isn't one this PC sent"}
     path = rec["path"]
     try:
-        size = os.path.getsize(path)
+        st = os.stat(path)
+        size, version = st.st_size, f"{st.st_mtime_ns}-{st.st_size}"
+        if stat:
+            return {"media": mid, "size": size, "version": version}
         offset = max(0, int(offset or 0))
         length = max(1, min(int(length or CHUNK), CHUNK))
         with open(path, "rb") as f:
@@ -143,4 +148,5 @@ def chunk(mid: str, offset: int = 0, length: int = CHUNK) -> Dict[str, Any]:
     except (OSError, ValueError):
         return {"error": "the file isn't on the PC any more"}
     data = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
-    return {"media": mid, "offset": offset, "size": size, "data": data, "done": offset + len(raw) >= size}
+    return {"media": mid, "offset": offset, "size": size, "version": version, "data": data,
+            "done": offset + len(raw) >= size}
