@@ -94,6 +94,27 @@ again = web.reminder_ideas(fresh=True)
 check("and it is never suggested again", "Not useful to them" in asked[-1]
       and all(i["ask"] != "Check the relay deploy logs for errors" for i in again))
 
+# ------------------------------------------------------------ a file changed on the PC
+from hearth import relay_media  # noqa: E402
+doc = os.path.join(WS, "FINAL_SUBMIT.md")
+with open(doc, "w", encoding="utf-8") as f:
+    f.write("# Plan\n\nfirst draft\n")
+card = relay_media.card(doc)
+first = relay_media.chunk(card["media"], 0, 4096)
+try:
+    st = relay_media.chunk(card["media"], stat=True)
+except TypeError:
+    st = {}
+check(f"a file the phone opens says which version it is, and a look at it alone sends no data ({sorted(st)})",
+      bool(first.get("version")) and st.get("version") == first.get("version") and "data" not in st
+      and st.get("size") == first.get("size"))
+with open(doc, "w", encoding="utf-8") as f:
+    f.write("# Plan\n\nsecond draft, edited on the PC\n")
+os.utime(doc, (os.path.getatime(doc), os.path.getmtime(doc) + 5))
+again = relay_media.chunk(card["media"], 0, 4096)
+check(f"edited on the PC, it is a new version, so the phone fetches it again ({first.get('version')} -> {again.get('version')})",
+      bool(again.get("version")) and again["version"] != first.get("version"))
+
 print()
 if FAILS:
     print(f"{len(FAILS)} check(s) failed")

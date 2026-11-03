@@ -431,7 +431,8 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
     if what == "media":
         # One part of a file the PC carded: the phone fetches a file when it is opened.
         from . import relay_media
-        return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0))
+        return relay_media.chunk(str(m.get("media") or ""), int(m.get("offset") or 0), int(m.get("length") or 0),
+                                 stat=bool(m.get("stat")))
     if what == "call_me":
         from . import call_me
         return call_me.view()
