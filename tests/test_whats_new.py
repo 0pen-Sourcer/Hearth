@@ -72,6 +72,65 @@ check("each clip and its still go out with an update",
 check("and each clip is small",
       all(os.path.getsize(os.path.join(ROOT, "assets", "whats_new", c + ".webm")) < 1_500_000 for c in clips))
 
+
+def _vint(b, i, keep_marker=False):
+    n = 1
+    while not b[i] & (0x80 >> (n - 1)):
+        n += 1
+    v = b[i] if keep_marker else b[i] & (0xFF >> n)
+    for k in range(1, n):
+        v = (v << 8) | b[i + k]
+    return v, i + n
+
+
+def vp9_header(path):
+    """(profile, color_range) from the first frame's VP9 header, or None.
+
+    The window's engine (WebView2) hands clips of 360 lines and up to the
+    graphics card, which fails on full-range VP9 after the first frame: the
+    clip freezes there. So every clip has to be limited range."""
+    with open(path, "rb") as fh:
+        b = fh.read()
+    i = 0
+    while i < len(b):
+        eid, j = _vint(b, i, keep_marker=True)
+        size, j = _vint(b, j)
+        if eid in (0x18538067, 0x1F43B675):   # Segment, Cluster: step inside
+            i = j
+            continue
+        if eid == 0xA3:                       # SimpleBlock: track, time, flags, frame
+            _track, k = _vint(b, j)
+            f = b[k + 3:j + size]
+            profile = ((f[0] >> 5) & 1) | (((f[0] >> 4) & 1) << 1)
+            if profile != 0 or f[1:4] != b"\x49\x83\x42":
+                return profile, None
+            return profile, (f[4] >> 4) & 1     # color_space(3) then color_range(1)
+        i = j + size
+    return None
+
+
+for c in clips:
+    h = vp9_header(os.path.join(ROOT, "assets", "whats_new", c + ".webm"))
+    check(f"{c}: VP9 profile 0, limited range, which every engine plays {h}", h == (0, 0))
+
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+if shutil.which("ffmpeg"):
+    for c in clips:
+        # The first two frames, small and grey: the first is what shows while it
+        # loads, and a clip cut on a transition jumps between the two.
+        out = subprocess.run(["ffmpeg", "-v", "error", "-i", os.path.join(ROOT, "assets", "whats_new", c + ".webm"),
+                              "-vf", "scale=64:32,format=gray", "-frames:v", "2", "-f", "rawvideo", "-"],
+                             capture_output=True).stdout
+        a, b2 = out[:2048], out[2048:4096]
+        mean = sum(a) / len(a) if a else 0
+        spread = (sum((x - mean) ** 2 for x in a) / len(a)) ** 0.5 if a else 0
+        jump = sum(abs(x - y) for x, y in zip(a, b2)) / len(a) if len(b2) == len(a) else 255
+        check(f"{c}: the first frame is a picture, not a blank or a cut (spread {spread:.0f}, jump {jump:.1f})",
+              spread > 2 and jump < 4)
+else:
+    print("skipped the first frames: ffmpeg is not installed")
+
 # ---------------------------------------------------------------- the window's API
 s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
 srv = web._QuietHTTPServer(("127.0.0.1", port), web.HearthHandler)
@@ -165,6 +224,15 @@ with sync_playwright() as pw:
     check("picking one swaps the clip and the words",
           pg.evaluate("() => $('wn-video').src.endsWith('/assets/whats_new/phone.webm')")
           and "phone" in pg.inner_text("#wn-p"))
+    pg.wait_for_timeout(1500)
+    check("the clip plays", pg.evaluate("() => { const v = $('wn-video'); return !v.error && v.currentTime > 0.3; }"))
+    pg.evaluate("() => $('wn-video').dispatchEvent(new Event('error'))")
+    check("a clip that can't play gives way to its still",
+          pg.is_visible("#wn-still") and not pg.is_visible("#wn-video")
+          and pg.evaluate("() => $('wn-still').src.endsWith('/assets/whats_new/phone.jpg')"))
+    pg.click("#wn-list .wn-item:nth-of-type(3)")
+    pg.wait_for_timeout(900)
+    check("and the next clip is back to video", pg.is_visible("#wn-video") and not pg.is_visible("#wn-still"))
     pg.click("#wn-done")
     pg.wait_for_timeout(600)
     check("Done closes it", not pg.evaluate("() => $('whatsnew').classList.contains('open')"))
