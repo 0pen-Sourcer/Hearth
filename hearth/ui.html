@@ -4033,7 +4033,7 @@
   .wn-stage { min-width: 0; }
   .wn-media { position: relative; aspect-ratio: 720 / 364; border-radius: var(--r-lg); overflow: hidden;
     background: #0c0b0a; border: 1px solid var(--border); }
-  .wn-media video, .wn-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .wn-media video, .wn-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
   .wn-media [hidden] { display: none; }
   .wn-copy h3 { margin: 16px 0 6px; font-size: 15px; font-weight: 600; color: var(--fg); }
   .wn-copy p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--fg-dim); max-width: 600px; }
@@ -21939,8 +21939,14 @@ function _wnBuild() {
   $('wn-go').addEventListener('click', () => _wnShowPage('wn-feats'));
   const v = $('wn-video');
   v.addEventListener('click', () => { if (v.paused) v.play().catch(() => {}); });
-  // A clip this engine can't play would sit on a frozen frame: show its still.
-  v.addEventListener('error', _wnStill);
+  // A fetch that failed (antivirus that scans local traffic drops one now and then) is asked
+  // for again; a clip this engine can't decode gives way to its still.
+  v.addEventListener('error', () => {
+    if (v.error && v.error.code !== 3) _wnRetry('clip'); else _wnStill();   // 3: it won't decode here
+  });
+  v.addEventListener('playing', () => clearTimeout(_wn.watch));
+  $('wn-still').addEventListener('error', () => _wnRetry('still'));
+  $('wn-still').addEventListener('load', () => { if (_wn.wantStill) _wnStill(); });
   document.addEventListener('keydown', (e) => {
     if (!$('whatsnew').classList.contains('open')) return;
     if (e.key === 'Escape') _wnClose();
@@ -21964,11 +21970,10 @@ function _wnPick(i) {
   const v = $('wn-video'), media = $('wn-media'), copy = $('wn-copy');
   const still = $('wn-still');
   const fill = () => {
-    v.style.objectFit = still.style.objectFit = f.id === 'phone' ? 'contain' : 'cover';   // the phone is upright
     still.hidden = true; v.hidden = false;
-    still.src = v.poster = `/assets/whats_new/${f.id}.jpg`;
-    v.src = `/assets/whats_new/${f.id}.webm`;
-    if (!_reduceMotion()) v.play().catch(e => { if (e && e.name === 'NotSupportedError') _wnStill(); });
+    _wn.tries = { clip: 0, still: 0 }; _wn.wantStill = false;
+    still.src = v.poster = _wnUrl(f.id, 'jpg', 0);
+    _wnClip(f.id, 0);
     $('wn-h3').textContent = f.title;
     $('wn-p').textContent = f.text;
   };
@@ -21986,9 +21991,44 @@ function _wnPick(i) {
   }).catch(() => {});
 }
 
+// The server names each file's version, so a clip remade under the same name isn't
+// taken from the window's cache, which outlives a restart.
+function _wnUrl(id, ext, attempt) {
+  const q = [];
+  const tok = (_wn.media || {})[`${id}.${ext}`];
+  if (tok) q.push('v=' + encodeURIComponent(tok));
+  if (attempt) q.push('try=' + attempt);
+  return `/assets/whats_new/${id}.${ext}` + (q.length ? '?' + q.join('&') : '');
+}
+function _wnClip(id, attempt) {
+  const v = $('wn-video');
+  v.src = _wnUrl(id, 'webm', attempt);
+  clearTimeout(_wn.watch);
+  if (_reduceMotion()) return;
+  v.play().catch(() => {});      // a failed load is handled by its error event
+  // A request that hangs never errors: give it a few seconds, then ask again.
+  _wn.watch = setTimeout(() => { if (v.readyState < 2 && !v.hidden) _wnRetry('clip'); }, 6000);
+}
+function _wnRetry(what) {
+  const f = WN_FEATS[_wn.i];
+  if (!f || !_wn.tries) return;
+  const n = ++_wn.tries[what];
+  if (n > 3) { if (what === 'clip') _wnStill(); return; }
+  const at = _wn.i;
+  setTimeout(() => {
+    if (_wn.i !== at) return;
+    if (what === 'clip') _wnClip(f.id, n);
+    else { const s = $('wn-still'); s.src = $('wn-video').poster = _wnUrl(f.id, 'jpg', n); }
+  }, 350 * n);
+}
+// The still shows only once it has loaded: a picture that failed would draw the
+// broken-image mark in the box. Until then the box keeps its plain background.
 function _wnStill() {
-  $('wn-still').hidden = false;
+  const s = $('wn-still');
+  clearTimeout(_wn.watch);
+  _wn.wantStill = true;
   $('wn-video').hidden = true;
+  if (s.complete && s.naturalWidth > 0) s.hidden = false;
 }
 
 function _wnShowPage(id) {
@@ -22069,6 +22109,7 @@ function _wnMorph() {
 function openWhatsNew(st) {
   _wnBuild();
   st = st || {};
+  if (st.media) _wn.media = st.media;
   if (st.version) $('wn-version').textContent = `Inglen ${st.version}`;
   const ov = $('whatsnew');
   ov.classList.add('open');

@@ -218,18 +218,18 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(900)
     check("then the changes, six of them, each with its clip",
           pg.is_visible("#wn-feats") and pg.locator("#wn-list .wn-item").count() == 6
-          and pg.evaluate("() => $('wn-video').src.endsWith('/assets/whats_new/computer.webm')"))
+          and pg.evaluate("() => $('wn-video').src.split('?')[0].endsWith('/assets/whats_new/computer.webm')"))
     pg.click("#wn-list .wn-item:nth-of-type(2)")
     pg.wait_for_timeout(900)
     check("picking one swaps the clip and the words",
-          pg.evaluate("() => $('wn-video').src.endsWith('/assets/whats_new/phone.webm')")
+          pg.evaluate("() => $('wn-video').src.split('?')[0].endsWith('/assets/whats_new/phone.webm')")
           and "phone" in pg.inner_text("#wn-p"))
     pg.wait_for_timeout(1500)
     check("the clip plays", pg.evaluate("() => { const v = $('wn-video'); return !v.error && v.currentTime > 0.3; }"))
     pg.evaluate("() => $('wn-video').dispatchEvent(new Event('error'))")
     check("a clip that can't play gives way to its still",
           pg.is_visible("#wn-still") and not pg.is_visible("#wn-video")
-          and pg.evaluate("() => $('wn-still').src.endsWith('/assets/whats_new/phone.jpg')"))
+          and pg.evaluate("() => $('wn-still').src.split('?')[0].endsWith('/assets/whats_new/phone.jpg')"))
     pg.click("#wn-list .wn-item:nth-of-type(3)")
     pg.wait_for_timeout(900)
     check("and the next clip is back to video", pg.is_visible("#wn-video") and not pg.is_visible("#wn-still"))
@@ -247,6 +247,62 @@ with sync_playwright() as pw:
     pg.wait_for_timeout(500)
     check("Escape closes it", not pg.evaluate("() => $('whatsnew').classList.contains('open')"))
     check(f"no page errors {errors[:2]}", not errors)
+
+    # A local request dropped without an answer (antivirus that scans local traffic does
+    # this now and then): the clip and its still are asked for again, and the box never
+    # shows a broken picture.
+    class Dropping(web.HearthHandler):
+        dropped: set = set()
+
+        def do_GET(self):
+            name = self.path.split("?")[0]
+            if name.startswith("/assets/whats_new/") and name not in Dropping.dropped:
+                Dropping.dropped.add(name)
+                self.close_connection = True
+                return
+            return super().do_GET()
+
+    s2 = socket.socket(); s2.bind(("127.0.0.1", 0)); port2 = s2.getsockname()[1]; s2.close()
+    srv2 = web._QuietHTTPServer(("127.0.0.1", port2), Dropping)
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
+    pg2 = browser.new_page(viewport={"width": 1280, "height": 800})
+    for _ in range(4):
+        try:
+            pg2.goto(f"http://127.0.0.1:{port2}/", wait_until="domcontentloaded", timeout=25000)
+            pg2.wait_for_function("typeof openWhatsNew === 'function'", timeout=25000)
+            break
+        except Exception:
+            pass
+    pg2.evaluate("() => $('btn-whats-new').click()")
+    pg2.wait_for_selector("#whatsnew.open", timeout=10000)
+    pg2.evaluate("() => { if (!$('wn-intro').hidden) $('wn-go').click(); }")
+    pg2.wait_for_timeout(900)
+    for k, c in enumerate(("phone", "memory")):
+        pg2.evaluate(f"() => document.querySelectorAll('#wn-list .wn-item')[{k + 1}].click()")
+        pg2.wait_for_timeout(4500)
+        st = pg2.evaluate("""() => { const v = $('wn-video'), s = $('wn-still');
+            return { playing: !v.hidden && !v.error && v.currentTime > 0.3,
+                     still: !s.hidden && s.complete && s.naturalWidth > 0,
+                     broken: !s.hidden && !(s.complete && s.naturalWidth > 0), src: v.src } }""")
+        check(f"{c}: after a dropped request the clip plays or its still shows, never a broken picture {st}",
+              (st["playing"] or st["still"]) and not st["broken"])
+        check(f"{c}: and it is the clip that plays, asked for again", st["playing"])
+    check("the dropped requests were the ones for the clips and stills",
+          {"/assets/whats_new/phone.webm", "/assets/whats_new/phone.jpg"} <= Dropping.dropped)
+    pg2.close()
+    srv2.shutdown()
+
+    # A remade clip under the same name: each file's version is in its address, so the
+    # window's cache (kept between starts) can't hand back the old one.
+    r = get("/api/whats_new")
+    check("the window is told each clip's and still's version",
+          all(f"{c}.{ext}" in (r.get("media") or {}) for c in clips for ext in ("webm", "jpg")))
+    pg.evaluate("() => $('btn-whats-new').click()")
+    pg.wait_for_selector("#whatsnew.open", timeout=10000)
+    pg.evaluate("() => { if (!$('wn-intro').hidden) $('wn-go').click(); }")
+    pg.wait_for_timeout(900)
+    src = pg.evaluate("() => $('wn-video').src")
+    check(f"and asks for the clip by that version {src}", f"v={(r.get('media') or {}).get('computer.webm')}" in src)
     browser.close()
 srv.shutdown()
 

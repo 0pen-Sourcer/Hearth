@@ -3177,7 +3177,7 @@ class HearthHandler(BaseHTTPRequestHandler):
                 st, save = whats_new.status(_load_settings())
                 if save:
                     _save_settings_locked(save)
-            return self._send_json(200, st)
+            return self._send_json(200, dict(st, media=whats_new.media()))
         if path == "/api/auto_review":
             from . import auto_review
             return self._send_json(200, auto_review.status())
