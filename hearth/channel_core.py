@@ -386,6 +386,21 @@ class Hub:
         t.start()
         return voice_result or "ran"
 
+    def stop(self, chat: str, cid: str = "") -> bool:
+        """The Stop button for a chat's turn (the phone's, as the window's): the turn ends at once
+        through the same cancel the window uses, and a step waiting on a yes is answered no."""
+        cid = re.sub(r"[^A-Za-z0-9_-]", "_", str(cid or ""))[:80]
+        with self._lock:
+            run = self._busy.get(cid or chat)
+            if run is None:
+                return False
+            run["cancel"] = True
+            q = run.get("question")
+            if q is not None and not q.is_set():
+                run["answer"] = False
+                q.set()
+        return True
+
     def _ask(self, chat: str, run: Dict[str, Any], name: str, args: Dict[str, Any]) -> str:
         from .tools import mode_allows
         if mode_allows(name, args):
@@ -568,7 +583,7 @@ class Hub:
                 except Exception:
                     pass
             if kind == "tool_result" and steps_kept:
-                st = next((x for x in reversed(steps_kept) if not x.get("_done") and x["name"] == kw.get("name")),
+                st = next((x for x in reversed(steps_kept) if not x.get("_done") and x.get("name") == kw.get("name")),
                           next((x for x in reversed(steps_kept) if not x.get("_done")), None))
                 if st is not None:
                     st["_done"] = True
@@ -618,7 +633,10 @@ class Hub:
             with self._lock:
                 said, run["steer"] = list(run.get("steer") or []), []
             at = int(time.time() * 1000)
-            steered.extend({"role": "user", "content": s, "via": self.a.name, "at": at} for s in said)
+            # Kept twice: as their own messages, for what the model reads next time, and as a steer in the
+            # reply at the point it came (after the steps already taken), where the window and phone show it.
+            steered.extend({"role": "user", "content": s, "via": self.a.name, "at": at, "steered": True} for s in said)
+            steps_kept.extend({"kind": "steer", "text": s, "pos": so_far["n"], "_done": True} for s in said)
             return said
 
         check = lambda n, a: self._ask(chat, run, n, a)
@@ -633,7 +651,7 @@ class Hub:
                 loop.run_until_complete(headless.run_once(
                     text, emit=emit, history=[primer] + history, chat_id=cid, prior_failure=prior_failure,
                     permission_check=check, voice=spoken_turn,
-                    drain_steer=steer, supervised=False,
+                    drain_steer=steer, supervised=False, should_cancel=lambda: bool(run.get("cancel")),
                     think=bool(settings.get("think_default")), think_level=str(settings.get("think_level") or "")))
             finally:
                 loop.close()
@@ -644,7 +662,8 @@ class Hub:
         # A turn that ended on a step after its words (a goodbye, then end_session) has them only as
         # written, never as a final message: those words are the reply, not "couldn't get a response".
         said = "".join(parts).strip() or "".join(written).strip()
-        reply = headless.bridge_reply_or_reason(said, err["cat"], err["msg"])
+        # Stopped with the Stop button: what it had written, or that it stopped; never "couldn't get a response".
+        reply = (said or "Stopped.") if run.get("cancel") else headless.bridge_reply_or_reason(said, err["cat"], err["msg"])
         if tools_used and not self.a.can_edit and not steps:
             foot = bridge_status.footer(tools_used)
             if foot:

@@ -350,6 +350,30 @@ class Joiner:
 
 # ---------------------------------------------------------------- what the phone asks for
 
+def at_steers(text: str, steps: List[Dict[str, Any]]) -> List[tuple]:
+    """A reply cut where the person said something while it ran (a step marked `_steer`): ("reply", its
+    words, its steps) before each, ("said", their words, []) for each, then the rest, so what they said
+    shows after the steps that came before it. A reply with none is one ("reply", text, steps)."""
+    if not any("_steer" in st for st in steps):
+        return [("reply", text, steps)]
+    out: List[tuple] = []
+    start, cur = 0, []
+
+    def rebased(sts, at):
+        return [dict(st, _pos=st["_pos"] - at if isinstance(st.get("_pos"), int) else None) for st in sts]
+    for st in steps:
+        if "_steer" not in st:
+            cur.append(st)
+            continue
+        pos = st.get("_pos")
+        pos = max(start, min(pos if isinstance(pos, int) else start, len(text)))
+        out.append(("reply", text[start:pos], rebased(cur, start)))
+        out.append(("said", st["_steer"], []))
+        start, cur = pos, []
+    out.append(("reply", text[start:], rebased(cur, start)))
+    return out
+
+
 def in_order(text: str, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """A reply's words and steps in the order they came, as the window draws a saved turn: each step
     keeps how much of the text was written when it ran (`_pos`); one without it goes where the last left off."""
@@ -479,9 +503,14 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             role = x.get("role")
             if role not in ("user", "assistant"):
                 continue
+            if role == "user" and x.get("steered"):
+                continue                # said while a turn ran: shown in that reply, where it came (its steer)
             events = [e for e in x.get("events") or [] if isinstance(e, dict)]
             steps = []
             for e in events:
+                if e.get("kind") == "steer" and role == "assistant":
+                    steps.append({"_steer": str(e.get("text") or ""), "_pos": e.get("pos")})
+                    continue
                 if e.get("kind") == "ask" and role == "assistant":
                     # A question the turn asked, answered: the folded line where it was asked.
                     msgs.append({"role": "assistant", "ask": True, "text": str(e.get("text") or ""),
@@ -528,14 +557,22 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             if failed and not text.strip():
                 msgs.append({"role": "assistant", "text": failed, "at": x.get("at") or 0, "steps": steps, "error": True})
                 continue
-            parts = in_order(text, steps) if role == "assistant" and steps else None
-            for st in steps:
-                st.pop("_pos", None)
-            if text or steps or files:
-                msgs.append({"role": role, "text": text, "at": x.get("at") or 0, "steps": steps, "files": files,
-                             "via": x.get("via") or "", "stats": stats, "thought": thought[-6000:],
-                             "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)],
-                             **({"parts": parts} if parts else {})})
+            segs = at_steers(text, steps) if role == "assistant" else [("reply", text, steps)]
+            for n, (kind, seg_text, seg_steps) in enumerate(segs):
+                last = n == len(segs) - 1
+                if kind == "said":
+                    msgs.append({"role": "user", "text": seg_text, "at": x.get("at") or 0, "steps": [], "files": [],
+                                 "via": x.get("via") or ""})
+                    continue
+                parts = in_order(seg_text, seg_steps) if role == "assistant" and seg_steps else None
+                for st in seg_steps:
+                    st.pop("_pos", None)
+                if seg_text or seg_steps or (files and last):
+                    msgs.append({"role": role, "text": seg_text, "at": x.get("at") or 0, "steps": seg_steps,
+                                 "files": files if last else [], "via": x.get("via") or "",
+                                 "stats": stats if last else None, "thought": thought[-6000:] if n == 0 else "",
+                                 "context": [context_item(t) for t in (x.get("context") or []) if isinstance(t, dict)] if last else [],
+                                 **({"parts": parts} if parts else {})})
         keep = int(m.get("last") or 60)
         return {"chat": cid, "title": d.get("title") or "", "source": d.get("source") or "",
                 "messages": msgs[-keep:], "more": max(0, len(msgs) - keep)}
@@ -1565,7 +1602,8 @@ class Room:
             # The turns running now: the phone drops any other it still draws as
             # working (one whose end it missed while it was closed).
             # acks: this PC answers each message with "got", so the phone knows what reached it.
-            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running(), "acks": True})
+            await self.deliver({"type": "hi", "name": agent_name(), "running": self.bridge.running(), "acks": True,
+                                "stop": True})   # stop: it takes the Stop button as {type: "stop"}
             warm_brain()                      # the picker's answers, ready before it's opened
             return
         if t == "box" and self.phone:          # Allow or Deny tapped on a notification
@@ -1819,6 +1857,11 @@ class Bridge:
                 fut.result(30)
             except Exception:
                 pass
+            return
+        if m.get("type") == "stop":
+            # The phone's Stop button: the chat's turn ends as the window's Stop ends it.
+            if self.hub.stop(room.chat, str(m.get("chat") or "")):
+                _log("the phone stopped a turn")
             return
         if m.get("type") != "user":
             return
