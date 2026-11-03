@@ -271,6 +271,72 @@ def one_shot(prompt: str, model: str, base: str = "", key: str = "",
         return ""
 
 
+class _StopWatch:
+    """Words the person sends while a turn runs, read as they arrive (each time
+    the turn checks for Stop), so a "stop" or "no, don't do it" halts it at once
+    rather than after the step or reply in progress. Everything read is handed on
+    as steering in order; the stop words also cut the turn short."""
+
+    def __init__(self, cancel, drain):
+        self._cancel, self._drain = cancel, drain
+        self._held: List[str] = []
+        self._said: List[str] = []           # stop words not yet answered
+        self.ever = False
+        self._lock = threading.Lock()
+
+    def pressed(self) -> bool:
+        """The Stop button (or Esc, or a surface's own stop)."""
+        return bool(self._cancel is not None and self._cancel())
+
+    def _pull(self) -> None:
+        if self._drain is None:
+            return
+        try:
+            got = [s for s in (self._drain() or []) if (s or "").strip()]
+        except Exception:
+            got = []
+        if not got:
+            return
+        from .stop_words import is_stop
+        with self._lock:
+            for s in got:
+                self._held.append(s)
+                if is_stop(s):
+                    self._said.append(s)
+                    self.ever = True
+
+    def heard(self) -> bool:
+        """A stop said or typed and not yet answered."""
+        self._pull()
+        return bool(self._said)
+
+    def cancelled(self) -> bool:
+        return self.pressed() or self.heard()
+
+    def drain(self) -> List[str]:
+        self._pull()
+        with self._lock:
+            out, self._held = self._held, []
+        return out
+
+    def take(self) -> bool:
+        """Answer the stop: True when one was waiting."""
+        with self._lock:
+            had, self._said = bool(self._said), []
+        return had
+
+
+# What the brain is told once a stop has cut the turn short. It answers with no tools.
+STOPPED_NOTE = ("(Inglen's note, not the person's words: they told you to stop. Nothing ran after that, "
+                "and no more steps run this turn. In one or two plain sentences, say what you had already "
+                "done that is still open or running, and ask before doing anything more.)")
+
+# What the brain is told when the turn is out of steps. It answers with no tools.
+CAPPED_NOTE = ("(Inglen's note, not the person's words: this turn is out of steps, so no more tools run. "
+               "Answer them now in plain words: what you found and did, what is still left undone, and the "
+               "next step if they say continue. Don't claim anything you didn't see happen.)")
+
+
 async def _until_stopped(aw, should_cancel):
     """Await a model call, giving it up the moment stop is asked. None when stopped."""
     if should_cancel is None:
@@ -1076,6 +1142,10 @@ async def _run_once(
     _failed = failure_note(prior_failure)
     if _failed:
         _lately = f"{_lately}\n\n{_failed}" if _lately else _failed
+    # A stop typed or said while the turn runs halts it like the Stop button, on every brain.
+    _stop = _StopWatch(should_cancel, drain_steer)
+    if drain_steer is not None:
+        should_cancel, drain_steer = _stop.cancelled, _stop.drain
     # An agent program as the brain (Claude Code, Codex) runs the whole turn itself.
     try:
         from . import claude_brain as _cb
@@ -1099,6 +1169,10 @@ async def _run_once(
                                     permission_check=permission_check if supervised else None,
                                     should_cancel=should_cancel, voice=voice, model=model,
                                     drain_steer=drain_steer, context=_lately)
+            if _stop.take() and not _stop.pressed():
+                # The agent was cut off by their stop: say so, so the reply isn't blank.
+                emit("assistant", content="Stopped. Nothing more ran after you said so.")
+                _said.append("Stopped. Nothing more ran after you said so.")
             # The memory pass runs for an agent brain too. A "done" with no reply
             # (Codex's app server) leaves the reply in what the turn said.
             _text_out = _reply[-1] if _reply else (_said[-1] if _said else "".join(_chunks).strip())
@@ -1427,6 +1501,8 @@ async def _run_once(
     guard = ToolLoopGuard()
     _force_answer = False
     _quiet_force = False      # tools held back without the "answer now" note
+    _stopped_turn = False     # they said stop: no step runs for the rest of this turn
+    _stop_rounds = 0
     _asked_aloud = 0          # steps sent back in a voice turn to be asked about in words
     # Why the loop guard ended the turn, if it did. Without this the turn just
     # stops and hands control back with no explanation, which reads as Hearth
@@ -1493,11 +1569,21 @@ async def _run_once(
             emit("done", reply="", iterations=0)
             return 0
 
-    for depth in range(max_depth):
+    _cancelled = False        # Stop pressed: the turn ends as stopped, not as out of steps
+    _capped = False           # the step limit was reached: one last reply, with no tools
+    for depth in range(max_depth + 1):
         iterations = depth + 1
+        if iterations > max_depth:
+            # Out of steps: one more reply, with no tools, saying what it found and what is left,
+            # so the person isn't left with a sentence cut off mid-task.
+            _capped = True
+            emit("nudge", reason=f"step limit {max_depth} reached: last reply with no tools")
+            messages.append({"role": "user", "content": CAPPED_NOTE})
+            _force_answer, _quiet_force = True, True
         # User hit Stop in the GUI — bail out cleanly between turns.
-        if should_cancel is not None and should_cancel():
+        if _stop.pressed():
             emit("cancelled", message="stopped by user")
+            _cancelled = True
             break
         # Steering: the user typed while the turn was still running. Drain any
         # queued messages and inject them as user turns BEFORE the next
@@ -1514,6 +1600,11 @@ async def _run_once(
                     continue
                 messages.append({"role": "user", "content": _s})
                 emit("steered", text=_s)
+        if _stop.take():
+            # They said stop: nothing more runs; the brain answers them with no tools.
+            emit("stopped", message="stopped at their word")
+            messages.append({"role": "user", "content": STOPPED_NOTE})
+            _force_answer, _quiet_force, _stopped_turn = True, False, True
         # Wrap-up nudge: at 75% of the cap, tell the model how many turns
         # it has left and ask it to write a STATE_SNAPSHOT if the task
         # isn't done. Without this, the cap fires silently at the limit
@@ -1890,7 +1981,10 @@ async def _run_once(
             except Exception:
                 pass
         if resp is None and should_cancel is not None and should_cancel():
+            if not _stop.pressed():
+                continue                    # a stop they said: answered at the top of the loop
             emit("cancelled", message="stopped by user")
+            _cancelled = True
             break
 
         # Streaming accumulator. OpenAI streams tool_calls as partial deltas
@@ -1991,7 +2085,10 @@ async def _run_once(
         if should_cancel is not None and should_cancel():
             if content_buf:
                 messages.append({"role": "assistant", "content": "".join(content_buf)})
+            if not _stop.pressed():
+                continue                    # a stop they said: what this reply was about to do is dropped
             emit("cancelled", message="stopped by user")
+            _cancelled = True
             break
 
         # Empty-stream rescue. llama.cpp's chatml-function-calling STREAMING
@@ -2154,10 +2251,18 @@ async def _run_once(
             messages.append(assistant_entry)
 
             from types import SimpleNamespace as _NS
+            _held_back = 0
             for _d in tc_dicts:
                 tc = _NS(id=_d["id"], function=_NS(name=_d["function"]["name"],
                                                    arguments=_d.get("raw_arguments") or _d["function"]["arguments"]))
                 name = tc.function.name
+                if _stopped_turn or _capped or _stop.cancelled():
+                    # Stop came (pressed, typed or said) before this step: it doesn't run,
+                    # nor does any step after it in this reply.
+                    _held_back += 1
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": name,
+                                     "content": "Not run: they said stop before this step, so nothing changed."})
+                    continue
                 raw_args = tc.function.arguments or "{}"
                 # Repair pass: some local models emit bad JSON (unescaped inner
                 # quotes in PowerShell `if()` strings, trailing commas, numbered
@@ -2466,6 +2571,12 @@ async def _run_once(
                          iterations=iterations,
                          reason="end_session")
                     return 0
+            if _held_back and _stopped_turn:
+                # Asked to stop and it still reached for a tool: once more with none, then the turn ends.
+                _stop_rounds += 1
+                if _stop_rounds > 1:
+                    break
+                _force_answer, _quiet_force = True, True
             # Spiral guard tripped this turn — append a hard "answer now"
             # directive AFTER all tool results (valid ordering), so the next
             # model call (which will have tools withheld) produces text.
@@ -2636,7 +2747,7 @@ async def _run_once(
              duration_ms=int((time.time() - t_start) * 1000),
              iterations=iterations,
              stats=_with_use(_turn_stats),
-             reason=("stopped_early" if _stopped_note else "finished"),
+             reason=("max_depth_reached" if _capped else "stopped_early" if _stopped_note else "finished"),
              note=(_stopped_note or None))
 
         # The turn is over: release the model for a new turn, and let the
@@ -2644,6 +2755,15 @@ async def _run_once(
         _TURN_ACTIVE.clear()
 
         _memory_pass_async()
+        return 0
+
+    if _cancelled:
+        # Stop was pressed: say so, not that it ran out of steps.
+        emit("turn_messages", messages=_turn_tail())
+        _TURN_ACTIVE.clear()
+        _memory_pass_async()
+        emit("done", duration_ms=int((time.time() - t_start) * 1000), iterations=iterations,
+             stats=_with_use(_turn_stats), reason="stopped")
         return 0
 
     # We hit the cap. The wrap-up nudge at 75% should have prompted the

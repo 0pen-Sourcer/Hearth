@@ -9270,7 +9270,7 @@ def sends_out(name: str, args=None) -> str:
         r = sends_out(inner, inner_args)
         if r:
             return r
-    r = reads_secret(name, args) or changes_controls(name, args)
+    r = reads_secret(name, args) or changes_controls(name, args) or touches_install(name, args)
     if r:
         return r
     try:
@@ -9302,7 +9302,124 @@ def control_places() -> List[Tuple[str, bool]]:
         out.append((os.path.join(ws, n), False))
     for n in sorted(_CONTROL_DIRS):
         out.append((os.path.join(ws, n), True))
+    for d in install_folders():
+        out.append((d, True))
     return out
+
+
+_INSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{B7E2B6A4-1C9F-4F3D-9A6E-7E5C2F0A1D34}_is1"
+_installed_at: Optional[List[str]] = None
+
+
+def install_folders() -> List[str]:
+    """Where Inglen itself is installed: the running build's folder, the folder the
+    installer recorded (Windows' uninstall entry, AppId as in Hearth.iss), and
+    HEARTH_INSTALL_DIR when set. A source checkout has none of its own."""
+    global _installed_at
+    if _installed_at is None:
+        found: List[str] = []
+        if getattr(sys, "frozen", False):
+            found.append(os.path.dirname(sys.executable))
+        if os.name == "nt":
+            try:
+                import winreg
+                for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                    try:
+                        with winreg.OpenKey(root, _INSTALL_KEY) as k:
+                            loc = str(winreg.QueryValueEx(k, "InstallLocation")[0] or "")
+                    except OSError:
+                        continue
+                    if loc.strip():
+                        found.append(loc.strip())
+            except Exception:
+                pass
+        _installed_at = found
+    out: List[str] = []
+    for d in _installed_at + [os.environ.get("HEARTH_INSTALL_DIR", "")]:
+        d = d.strip().rstrip("\\/")
+        if not d:
+            continue
+        try:
+            d = os.path.realpath(d)
+        except (OSError, ValueError):
+            continue
+        if os.path.normcase(d) not in {os.path.normcase(x) for x in out}:
+            out.append(d)
+    return out
+
+
+_ENV_PS = re.compile(r"\$env:([A-Za-z_][A-Za-z0-9_]*)", re.I)
+
+
+def _expanded(text: str) -> str:
+    """A command's text with %VAR%, $env:VAR, $VAR and ~ spelled out, slashes one way, lower case."""
+    t = _ENV_PS.sub(lambda m: os.environ.get(m.group(1), m.group(0)), text)
+    t = os.path.expandvars(t)
+    t = re.sub(r"(?<![\w.])~(?=[\\/])", lambda m: os.path.expanduser("~"), t)
+    return os.path.normcase(t.replace("/", "\\"))
+
+
+def touches_install(name: str, args=None) -> str:
+    """Why this call asks in every mode: it would act on the folder Inglen itself is
+    installed in (its program files, or something pointed at that folder, like a
+    browser profile); '' when it wouldn't."""
+    a = args if isinstance(args, dict) else {}
+    homes = install_folders()
+    if not homes or not a:
+        return ""
+    why = ("This would act on {d}, the folder Inglen itself is installed in, so it always asks, "
+           "whatever the approval mode.")
+    keys = _WRITE_TOOLS.get(name)
+    if keys:
+        for k in keys:
+            v = a.get(k)
+            if not isinstance(v, str) or not v.strip():
+                continue
+            try:
+                real = os.path.realpath(os.path.expanduser(os.path.expandvars(v.strip())))
+            except (OSError, ValueError):
+                continue
+            for d in homes:
+                if path_within(real, d):
+                    return why.format(d=d)
+        return ""
+    if name in _SHELL_TOOLS and name != "delegate":
+        text = " ".join(str(a.get(k) or "") for k in ("command", "cmd", "cwd"))
+        flat = _expanded(text)
+        for d in homes:
+            for nd in _spellings(d):
+                for m in re.finditer(re.escape(nd), flat):
+                    nxt = flat[m.end():m.end() + 1]
+                    if not nxt or not (nxt.isalnum() or nxt in "_-."):
+                        return why.format(d=d)
+        # Each path in it, resolved (short and long names mixed, .., links).
+        for m in re.finditer(r"[a-z]:\\[^\"'<>|;,\r\n=]*", flat):
+            tok = m.group(0)
+            parts = tok.split(" ")
+            for i in range(len(parts), 0, -1):
+                cand = " ".join(parts[:i]).rstrip("\\. ")
+                try:
+                    real = os.path.realpath(cand)
+                except (OSError, ValueError):
+                    continue
+                for d in homes:
+                    if path_within(real, d):
+                        return why.format(d=d)
+    return ""
+
+
+def _spellings(d: str) -> List[str]:
+    """A folder as a command may write it: its long form and its 8.3 short form (C:\\Users\\ABC~1\\...)."""
+    out = {os.path.normcase(d.replace("/", "\\"))}
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            if ctypes.windll.kernel32.GetShortPathNameW(d, buf, 1024):
+                out.add(os.path.normcase(buf.value))
+        except Exception:
+            pass
+    return sorted(out)
 
 
 def changes_controls(name: str, args=None) -> str:

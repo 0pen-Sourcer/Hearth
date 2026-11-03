@@ -98,6 +98,7 @@ async def model(prompt, *, emit, history=None, chat_id=None, permission_check=No
             if got:
                 asked["steered"] = got
                 break
+        time.sleep(0.1)                     # the reply goes on a moment after it read them
         emit("assistant", content="done slowly")
         return 0
     emit("assistant", content="Hello from the stand-in. " * 4)
@@ -163,6 +164,9 @@ time.sleep(0.2)
 check("a message mid-reply joins it", hub.receive("111", "111", "also the other thing") == "joined")
 wait_idle(hub)
 check("and the reply sees it", asked.get("steered") == ["also the other thing"])
+kept = [m for m in (chat_sync.load("telegram_111") or {}).get("messages", []) if m.get("role") == "user"][-2:]
+check(f"the message that started it is dated before the one sent meanwhile ({[m.get('at') for m in kept]})",
+      len(kept) == 2 and kept[0]["content"] == "slow job" and kept[0]["at"] <= kept[1]["at"])
 
 # ------------------------------------------------------------ voice notes and files
 listen.transcribe = lambda path: "what's on my calendar"
