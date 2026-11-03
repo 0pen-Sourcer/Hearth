@@ -616,8 +616,23 @@ def decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
         return _decide(token, tool, inp)
 
 
+def ran_by_use_tool(tool: str, inp: Any) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """The tool and arguments a use_tool call runs, or None for any other call.
+    It is asked about as that tool: as use_tool, a delete or a fetch would pass as
+    a lookup."""
+    if tool != "mcp__hearth__use_tool" or not isinstance(inp, dict) or not inp.get("name"):
+        return None
+    a = inp.get("arguments")
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except ValueError:
+            a = {"input": a}
+    return str(inp["name"]), (a if isinstance(a, dict) else {})
+
+
 def _decide(token: str, tool: str, inp: Dict[str, Any]) -> Dict[str, Any]:
-    name, args = hearth_view(tool, inp)
+    name, args = ran_by_use_tool(tool, inp) or hearth_view(tool, inp)
     check = _checks.get(token)
     if check is None:
         # No one is watching this turn: only what the approval switch already
