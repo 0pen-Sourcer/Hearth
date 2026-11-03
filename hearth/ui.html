@@ -7546,7 +7546,18 @@ async function followLook() {
     const s = await api('/api/settings');
     const m = s.ui_theme || null, a = s.ui_accent || null;
     const was = [localStorage.getItem('hearth_theme'), localStorage.getItem('hearth_accent')];
+    // The room first: a repaint saves the room this page holds, which must already be the new one.
+    followRoom(s);
     if ((m && m !== was[0]) || (a && a !== was[1])) window.hearthSetAppearance(m !== was[0] ? m : null, a !== was[1] ? a : null, true);
+  } catch {}
+}
+// The Team room's character, home room and room change, set on the phone: the window follows.
+function followRoom(s) {
+  const now = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+  try {
+    if (s.room_look && s.room_look !== now('hearth_room_look', 'her')) hearthSetRoomLook(s.room_look);
+    if (s.room_home && s.room_home !== now('hearth_room_home', 'cabin')) hearthSetRoomHome(s.room_home);
+    if (s.room_wipe && s.room_wipe !== now('hearth_room_wipe', 'pixel')) hearthSetRoomWipe(s.room_wipe);
   } catch {}
 }
 function onLiveEvent(ev) {
@@ -7559,7 +7570,7 @@ function onLiveEvent(ev) {
   if (ev.kind === 'settings') {
     try { refreshState(); } catch {}
     try { refreshModels(); } catch {}
-    if ((ev.keys || []).some(k => k === 'ui_theme' || k === 'ui_accent')) followLook();
+    if ((ev.keys || []).some(k => k === 'ui_theme' || k === 'ui_accent' || /^room_/.test(k))) followLook();
     if ((ev.keys || []).includes('clock_style')) refreshSettings();   // the clock picked on the phone
     return;
   }
@@ -7568,6 +7579,7 @@ function onLiveEvent(ev) {
     try { const w = document.querySelector('.empty'); if (w) drawOffers(w); } catch {}
     return;
   }
+  if (ev.kind === 'ping') return;
   if (ev.kind === 'setup') {
     // Something the agent is setting up: a row in Downloads like any other.
     dlUpsert('setup:' + ev.id, { name: ev.name, kind: 'setup', job: ev.id, status: ev.status, pct: ev.pct,
@@ -7619,13 +7631,27 @@ function onLiveEvent(ev) {
 }
 (function followLive() {
   if (typeof EventSource === 'undefined') return;
-  let es = null;
+  let es = null, heard = Date.now(), opened = 0;
+  // What changed while the stream was down (asleep, a network stall) is read again, not lost.
+  const catchUp = () => {
+    try { followLook(); } catch {}
+    try { refreshState(); } catch {}
+    try { clearTimeout(LIVE.sync); LIVE.sync = setTimeout(() => syncConvosFromDisk(), 120); } catch {}
+  };
   const open = () => {
     try { es = new EventSource('/api/events'); } catch { return; }
-    es.onmessage = (m) => { try { onLiveEvent(JSON.parse(m.data)); } catch {} };
+    heard = Date.now();
+    // The first open is the page's own start (it has just read everything); a later one is a reconnect.
+    es.onopen = () => { heard = Date.now(); if (opened++) catchUp(); else try { followLook(); } catch {} };
+    es.onmessage = (m) => { heard = Date.now(); try { onLiveEvent(JSON.parse(m.data)); } catch {} };
     es.onerror = () => { try { es.close(); } catch {} setTimeout(open, 3000); };
   };
   open();
+  // The PC says something every 15 seconds; a stream silent much longer has died without an error.
+  setInterval(() => {
+    if (Date.now() - heard > 45000) { try { es && es.close(); } catch {} open(); }
+  }, 10000);
+  window.addEventListener('focus', () => { try { followLook(); } catch {} });
 })();
 
 // Fill in a stub's messages. Shared by every caller, so a chat is fetched once.

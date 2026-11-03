@@ -599,6 +599,11 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
             _settle_brain(what, m)
         warm_brain()
         return out
+    if what == "load":
+        # A local model loading now, for a phone that came back mid-load: as the window has it.
+        from .llmserver import load_event
+        p = _window("GET", "/api/llmserver/progress", timeout=5)
+        return load_event(p) if p and p.get("ok") is not False else {"phase": "idle", "percent": 0, "model": ""}
     if what == "look":
         try:
             from .web import _load_settings
@@ -606,7 +611,10 @@ def answer(m: Dict[str, Any], own_chat: str = "") -> Dict[str, Any]:
         except Exception:
             s = {}
         from .clock import style
-        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or "", "clock": style(s)}
+        return {"theme": s.get("ui_theme") or "", "accent": s.get("ui_accent") or "", "clock": style(s),
+                # The Team room too, so a change made in the window reaches the phone's room and settings.
+                "room": {"look": s.get("room_look") or "her", "home": s.get("room_home") or "cabin",
+                         "wipe": s.get("room_wipe") or "pixel"}}
     return {"error": f"unknown request {what!r}"}
 
 
@@ -845,7 +853,10 @@ _SETTABLE = {"approval_mode": ("ask", "edits", "auto"), "think_default": (True, 
              # The look, as the window's Appearance writes it: either side follows the other.
              "ui_theme": ("classic", "dark", "light", "system"),
              "ui_accent": ("ember", "sage", "ocean", "rose", "violet", "mono"),
-             "clock_style": ("auto", "12", "24")}
+             "clock_style": ("auto", "12", "24"),
+             # The Team room, as the window's Appearance keeps it: the character, the home room, how rooms change.
+             "room_look": ("her", "him"), "room_home": re.compile(r"^[a-z0-9_-]{1,40}$"),
+             "room_wipe": ("pixel", "instant")}
 
 
 def _front(raw: str) -> tuple:
@@ -1068,9 +1079,17 @@ def brain_request(what: str, m: Dict[str, Any]) -> Dict[str, Any]:
     if what == "set":
         key, value = str(m.get("key") or ""), m.get("value")
         allowed = _SETTABLE.get(key, ())
-        if key not in _SETTABLE or (allowed is not None and value not in allowed):
+        if allowed is None:
+            fits = True
+        elif hasattr(allowed, "match"):                  # a pattern: a room's id
+            fits = isinstance(value, str) and bool(allowed.match(value))
+        else:
+            fits = value in allowed
+        if key not in _SETTABLE or not fits:
             return {"ok": False, "error": f"{key} can't be changed from a phone"}
-        return _window("POST", "/api/settings", {key: value})
+        r = _window("POST", "/api/settings", {key: value})
+        # Only whether it took: the window answers with every setting, keys included, which stay on the PC.
+        return {"ok": False, "error": r.get("error") or "That didn't change"} if r.get("ok") is False else {"ok": True}
     return {"error": "unknown"}
 
 
@@ -2245,7 +2264,7 @@ class Bridge:
                     cc._TURN.ctx = prev
 
     # Settings a phone shows: a change on the PC redraws its brain chip and modes at once.
-    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme|clock_)")
+    _PHONE_SETTINGS = re.compile(r"^(llm_|agent_|brain|approval_mode|think_|gen_stats|preferred_model|ui_theme|ui_accent|theme|clock_|room_)")
 
     def follow_window(self) -> None:
         """Pass what changes on the PC (live_bus) to every paired phone as it happens:
@@ -2265,6 +2284,18 @@ class Bridge:
             # Checked again here: the rules may have changed since it was asked for.
             if call_me.allowed(ev):
                 threading.Thread(target=self.ring, args=(ev,), daemon=True, name="relay-ring").start()
+            return
+        if kind == "load":
+            # A local model loading: the phones that are here show the bar as it goes. Now or never,
+            # so never kept in the mailbox for a phone that's away (it asks with 'load' when back).
+            frame = {"type": "load", **{k: ev[k] for k in ("phase", "percent", "model", "eta_s", "error") if k in ev}}
+            prev, cc._TURN.ctx = getattr(cc._TURN, "ctx", None), None
+            try:
+                for r in list(self.adapter.rooms.values()):
+                    if getattr(r, "peer_up", False) and getattr(r, "chan", None) is not None:
+                        self.adapter._push(r.chat, frame)
+            finally:
+                cc._TURN.ctx = prev
             return
         if kind == "phone_notice":
             # A reminder (or the notify tool) for the phone: a notification on each paired phone.
