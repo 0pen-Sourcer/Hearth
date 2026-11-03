@@ -725,8 +725,9 @@ def _make_permission_check(emit_fn):
         if isinstance(decision, dict):
             _reason = (decision.get("reason") or "").strip()
             decision = decision.get("decision") or "deny"
-        if decision == "always" and _out: return "allow"          # this request only
-        if decision == "always": _always_allow.add(name); _save_perms_to_disk(); return "allow"
+        if decision == "always":
+            # Kept for the tool; a request that could carry data out still asks each time, as its card says.
+            _always_allow.add(name); _always_deny.discard(name); _save_perms_to_disk(); return "allow"
         if decision == "never":  _always_deny.add(name);  _save_perms_to_disk(); return "deny"
         if decision == "aside":
             # Something else was said while this waited (voice): not a no. A brain that

@@ -301,10 +301,18 @@ def checks() -> Dict[str, Any]:
         return {}
 
 
-def _keep_check(key: str, result: Dict[str, Any]) -> None:
+PARTIAL = "unfinished:"           # a check's answers so far, under this prefix and the model's key
+
+
+def _keep_check(key: str, result: Optional[Dict[str, Any]]) -> None:
     with _LOCK:
         d = checks()
-        d[key] = result
+        if result is None:
+            if key not in d:
+                return
+            d.pop(key)
+        else:
+            d[key] = result
         os.makedirs(os.path.dirname(CHECKS_PATH), exist_ok=True)
         tmp = CHECKS_PATH + f".{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -333,16 +341,24 @@ def check_model(key: Optional[str] = None, progress: Optional[Callable[[int, int
     judge_fn = judge_fn or judge
     got = {"ask": [0, 0], "go": [0, 0]}
     wrong: List[Dict[str, Any]] = []
+    # Steps already answered in a check that didn't finish (Inglen closed mid-way) count as they were.
+    prior = (checks().get(PARTIAL + key) or {}).get("right") or {}
     _RUNNING[key] = {"done": 0, "of": len(steps)}
     try:
         for i, s in enumerate(steps):
-            try:
-                v = judge_fn(s["said"], s["tool"], s["args"])
-            except Exception:
-                v = Verdict(False, "error")
-            want_go = s["expect"] == "go"
+            sid = str(s["id"])
+            if sid in prior:
+                right = bool(prior[sid])
+            else:
+                try:
+                    v = judge_fn(s["said"], s["tool"], s["args"])
+                except Exception:
+                    v = Verdict(False, "error")
+                right = v.go == (s["expect"] == "go")
+                prior[sid] = right
+                _keep_check(PARTIAL + key, {"at": int(time.time()), "right": prior})
             got[s["expect"]][1] += 1
-            if v.go == want_go:
+            if right:
                 got[s["expect"]][0] += 1
             elif len(wrong) < 12:
                 wrong.append({"id": s["id"], "expect": s["expect"]})
@@ -356,6 +372,7 @@ def check_model(key: Optional[str] = None, progress: Optional[Callable[[int, int
     result = {"at": int(time.time()), "n": len(steps), "caught": round(caught, 3), "let_through": round(let, 3),
               "on": caught >= CATCH and let >= GO_FLOOR, "missed": wrong}
     _keep_check(key, result)
+    _keep_check(PARTIAL + key, None)
     return result
 
 
@@ -365,8 +382,18 @@ def check_in_background(key: Optional[str] = None, again: bool = False) -> bool:
     key = key or brain_key()
     if key in _RUNNING or (key in checks() and not again):
         return False
+    if again:
+        _keep_check(PARTIAL + key, None)          # a fresh check, not the rest of an old one
     _RUNNING[key] = {"done": 0, "of": 0}
-    threading.Thread(target=lambda: check_model(key), daemon=True, name="reviewer-check").start()
+
+    def run() -> None:
+        try:
+            check_model(key)
+        except Exception:
+            pass
+        finally:
+            _RUNNING.pop(key, None)               # a check that failed to start may be tried again
+    threading.Thread(target=run, daemon=True, name="reviewer-check").start()
     return True
 
 
@@ -423,18 +450,24 @@ def review(name: str, args: Any) -> "Verdict":
         except Exception:
             pass
     sig = name + json.dumps(args if isinstance(args, dict) else {}, sort_keys=True, default=str)
-    if sig in turn.verdicts:
-        return turn.verdicts[sig]
+    hit = turn.verdicts.get(sig)
+    if hit is not None and hit.by == "reviewer":
+        return hit
     s = _settings()
-    if _switched_off(s) or turn.asked_in_a_row >= 3:
+    if _switched_off(s):
         return Verdict(False, "", "none")
+    if turn.asked_in_a_row >= 3:
+        return _unreviewed(turn, sig, "Auto's reviewer said ask three times in a row in this turn, so until "
+                                      "your next message Auto asks you directly.")
     key = brain_key()
     got = checks().get(key)
     if not got:
         check_in_background(key)
-        return Verdict(False, "", "none")
+        return _unreviewed(turn, sig, not_checked_words(key))
     if not got.get("on"):
-        return Verdict(False, "", "none")
+        return _unreviewed(turn, sig, (
+            f"Auto's reviewer is off for this brain: in its check it caught {round(got.get('caught', 0) * 100)}% "
+            f"of the steps that should ask, under the {round(CATCH * 100)}% needed, so Auto asks you instead."))
     try:
         v = judge(turn.asks, name, args)
     except Exception:
@@ -442,6 +475,22 @@ def review(name: str, args: Any) -> "Verdict":
     turn.asked_in_a_row = 0 if v.go else turn.asked_in_a_row + 1
     turn.verdicts[sig] = v
     return _said(turn, name, v)
+
+
+def not_checked_words(key: Optional[str] = None) -> str:
+    """Why Auto asks while the reviewer for this brain hasn't passed its check yet, in plain words."""
+    run = _RUNNING.get(key or brain_key()) or {}
+    done, of = run.get("done", 0), run.get("of") or 0
+    where = f" ({done} of {of} sample steps done)" if of else ""
+    return (f"Auto's reviewer hasn't been checked on this brain yet, so this asks you. The check is running in "
+            f"the background{where}; once it passes, Auto lets steps you clearly asked for go ahead.")
+
+
+def _unreviewed(turn: _Turn, sig: str, why: str) -> "Verdict":
+    """Auto asks without a review: the reason goes on the question, not decided for the turn."""
+    v = Verdict(False, why, "unreviewed")
+    turn.verdicts[sig] = v
+    return v
 
 
 def _said(turn: Optional[_Turn], name: str, v: "Verdict") -> "Verdict":
@@ -470,4 +519,16 @@ def why(name: str, args: Any) -> str:
         return ""
     sig = name + json.dumps(args if isinstance(args, dict) else {}, sort_keys=True, default=str)
     v = turn.verdicts.get(sig)
-    return words(v) if v is not None and not v.go and v.why else ""
+    if v is None or v.go or not v.why:
+        return ""
+    if v.by != "unreviewed":
+        return words(v)
+    hit = ""
+    try:
+        from .tools import _SHELL_TOOLS, _is_destructive, _is_outward
+        if name in _SHELL_TOOLS:
+            cmd = _cmd(args)
+            hit = _is_destructive(cmd) or _is_outward(cmd) or ""
+    except Exception:
+        hit = ""
+    return (f"The command has \"{hit}\" in it, which Auto asks about. " if hit else "") + v.why

@@ -32,6 +32,10 @@ _OUTSIDE = {
     "screenshot": "the screen", "capture_active_window": "the screen",
     "desktop_snapshot": "the screen", "computer_screen": "the screen",
 }
+# What the web shows anyone. An address made of words from these and the person's own
+# carries nothing of theirs.
+_PUBLIC = {"web_search", "web_fetch", "browse", "browse_click", "browse_scroll", "browse_type", "browse_key"}
+_WORD = re.compile(r"[^\W_]+")
 # Readers of a file: outside content when the file came from the internet.
 _FILE_READERS = {"read_file", "read_pdf_large", "summarize_file", "list_archive",
                  "extract_archive_file", "view_image"}
@@ -76,11 +80,15 @@ class Seen:
         self.outside: List[str] = []
         self.given: List[str] = []
         self.said: List[str] = []        # the person's own words only
+        self.public: List[str] = []      # the person's words and what the web showed
+        self.held: List[str] = []        # everything else the chat holds: files, the screen, mail, outputs
+        self._words: Optional[tuple] = None
 
     def person_said(self, text: Any) -> None:
         t = _flat(text)
         if t:
             self.said.append(t[-20000:])
+            self.public.append(t[-20000:])
         self.gave(t)
 
     def gave(self, text: Any) -> None:
@@ -88,10 +96,24 @@ class Seen:
         if t:
             self.given.append(t[-20000:])
 
-    def took_in(self, what: str, text: Any = "") -> None:
+    def took_in(self, what: str, text: Any = "", public: bool = False) -> None:
         if what and what not in self.outside:
             self.outside.append(what)
         self.gave(text)
+        t = _flat(text)
+        if t:
+            (self.public if public else self.held).append(t[-20000:])
+
+    def kept(self, text: Any) -> None:
+        """A tool's result from this PC (a file, a command's output): not outside, but the chat holds it."""
+        t = _flat(text)
+        if t:
+            self.held.append(t[-20000:])
+
+    def public_words(self) -> set:
+        if self._words is None or self._words[0] != len(self.public):
+            self._words = (len(self.public), set(_WORD.findall(_norm_text("\n".join(self.public)))))
+        return self._words[1]
 
     def is_given(self, url: str) -> bool:
         n = _norm(url)
@@ -159,18 +181,18 @@ def note_on(seen: Optional[Seen], name: str, args: Any, result: Any) -> None:
         url = str(a.get("url") or "")
         if url:
             where = f" ({_host(url)})"
-        seen.took_in(_OUTSIDE[name] + where, result)
+        seen.took_in(_OUTSIDE[name] + where, result, public=name in _PUBLIC)
     elif name.startswith(MCP_PREFIX):
         seen.took_in(f"a result from {name}", result)
-    elif name in _FILE_READERS:
+    elif name in _FILE_READERS and from_internet(str(a.get("path") or a.get("file") or a.get("archive") or "")):
         path = str(a.get("path") or a.get("file") or a.get("archive") or "")
-        if from_internet(path):
-            seen.took_in(f"a downloaded file ({os.path.basename(path)})", result)
-    elif name in _SHELL:
-        cmd = _flat(a.get("command") or a.get("cmd") or "")
-        far = [u for u in _URL.findall(cmd) if not _THIS_PC.match(u)]
-        if far:
-            seen.took_in(f"a download ({_host(far[0])})", result)
+        seen.took_in(f"a downloaded file ({os.path.basename(path)})", result)
+    elif name in _SHELL and [u for u in _URL.findall(_flat(a.get("command") or a.get("cmd") or ""))
+                             if not _THIS_PC.match(u)]:
+        far = [u for u in _URL.findall(_flat(a.get("command") or a.get("cmd") or "")) if not _THIS_PC.match(u)]
+        seen.took_in(f"a download ({_host(far[0])})", result)
+    else:
+        seen.kept(result)
 
 
 def from_history(history: Optional[Iterable[Dict[str, Any]]], prompt: str = "") -> Seen:
@@ -272,6 +294,99 @@ def _unc_given(path: str, seen: "Seen") -> bool:
     return bool(p) and any(p in html.unescape(t).replace("\\", "/").lower() for t in seen.given)
 
 
+def _address_words(url: str) -> List[str]:
+    """The words an address takes with it: the host's labels, the path and the query."""
+    u = url if "://" in url else "https://" + url
+    try:
+        p = urllib.parse.urlsplit(html.unescape(u).strip())
+        text = " ".join([re.sub(r"^www\.", "", p.hostname or "", flags=re.I),
+                         urllib.parse.unquote_plus(p.path), urllib.parse.unquote_plus(p.query)])
+    except ValueError:
+        text = url
+    return _WORD.findall(text.lower())
+
+
+_ABOUT: Dict[str, Any] = {"at": 0.0, "text": ""}
+
+
+def _about_you() -> str:
+    """What Inglen keeps about the person (profile, rules, memory, the persona an agent
+    brain is given): in the brain's context though no tool result shows it."""
+    import time
+    if time.time() - _ABOUT["at"] < 30:
+        return _ABOUT["text"]
+    parts: List[str] = []
+    try:
+        from . import tools
+        ws = tools.WORKSPACE
+        places = [os.path.join(ws, n) for n in ("profile.md", "rules.md", "soul.md")]
+        places.append(os.path.join(os.path.expanduser("~"), ".hearth", "claude_persona.md"))
+        mem = os.path.join(ws, "memory")
+        for root, _dirs, files in os.walk(mem):
+            places += [os.path.join(root, f) for f in files if f.endswith(".md")]
+            if len(places) > 600:
+                break
+        size = 0
+        for p in places[:600]:
+            try:
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    t = f.read(200000)
+            except OSError:
+                continue
+            parts.append(t)
+            size += len(t)
+            if size > 4000000:
+                break
+    except Exception:
+        pass
+    parts += [os.environ.get(k, "") for k in ("USERNAME", "USER", "COMPUTERNAME", "USERDOMAIN")]
+    _ABOUT.update(at=time.time(), text="\n".join(parts).lower())
+    return _ABOUT["text"]
+
+
+def _new_words(url: str, seen: Seen) -> List[str]:
+    known = seen.public_words()
+    out: List[str] = []
+    for w in _address_words(url):
+        if w not in known and w not in out:
+            out.append(w)
+    return out
+
+
+def _carries_nothing(url: str, seen: Seen) -> bool:
+    """Whether an address holds nothing of the person's: every word in it is from what
+    they said or what the web showed, besides a few letters and short numbers (a page's
+    id, a postcode) that appear nowhere in what this chat holds or what Inglen knows
+    about them. A model's own knowledge of a site gives those; private data doesn't."""
+    new = _new_words(url, seen)
+    # Letters one or two at a time spell anything, known or not: only a few may go.
+    short = [w for w in _address_words(url) if len(w) <= 2]
+    rest = [w for w in new if len(w) > 2]
+    if sum(len(w) for w in short) > 8 or sum(len(w) for w in rest) > 12:
+        return False
+    if any(not w.isdigit() or len(w) > 6 for w in rest):
+        return False
+    if not rest:
+        return True
+    held = "\n".join(seen.held).lower() + "\n" + _about_you()
+    return not any(w in held for w in rest)
+
+
+def _why_new(url: str, seen: Seen) -> str:
+    new = _new_words(url, seen)
+    held = "\n".join(seen.held).lower() + "\n" + _about_you()
+    words = set(_WORD.findall(held))
+    # A number may sit inside a longer one (a phone number sent in pieces); a word is matched whole.
+    mine = [w for w in new if len(w) > 2 and (w in held if w.isdigit() else w in words)]
+    if mine:
+        return (f"The address holds {', '.join(mine[:3])}, which is in what this chat read on this PC or what "
+                f"Inglen knows about you, so the page could be using it to carry your data out.")
+    if new:
+        return (f"Part of the address ({', '.join(new[:4])}) isn't in anything you said or anything the web "
+                f"showed, so the page could be using it to carry your data out.")
+    return "The page could be using it to carry your data out."
+
+
 def reason(name: str, args: Any = None) -> str:
     """Why this call asks first even in Auto: it would send something out after
     the chat took in content from outside. '' when it doesn't."""
@@ -284,10 +399,11 @@ def reason(name: str, args: Any = None) -> str:
         return (f"This chat has read {src}. {name} hands what it is given to another "
                 f"program, which can send it anywhere.")
     for url in _urls(name, args):
-        if _THIS_PC.match(url) or seen.is_given(url):
+        if _THIS_PC.match(url) or seen.is_given(url) or _carries_nothing(url, seen):
             continue
         return (f"This would send a request to {_host(url)}: {_short(url)}. Nobody gave that address, "
-                f"and this chat has read {src}, which could have asked for it.")
+                f"and this chat has read {src}, which could have asked for it. {_why_new(url, seen)} "
+                f"Always doesn't cover a request like this: it asks each time.")
     for host, path in _unc_paths(args):
         if _unc_given(path, seen):
             continue
