@@ -481,6 +481,9 @@ class Hub:
                 spoken_turn = True
                 primer = dict(primer, content=primer["content"] + " " + said)
         parts: List[str] = []
+        # The reply as the window keeps it: the words written before each step, then the last
+        # message. `parts` holds only the brain's messages, which the chat app is sent.
+        shown: Dict[str, Any] = {"text": "", "mark": 0}
         tools_used: List[Any] = []
         # Each step as the window keeps its own: what came back, how long, and where in
         # the reply it happened. Kept with only name and args, a phone turn's steps opened
@@ -532,14 +535,26 @@ class Hub:
                     self.a.think(chat, "".join(thought))
                 except Exception:
                     pass
-            if kind == "assistant_chunk" and live and kw.get("content"):
+            if kind == "assistant_chunk" and kw.get("content"):
                 written.append(kw["content"])
                 try:
-                    self.a.live(chat, "".join(parts) + "".join(written))
+                    if live:
+                        self.a.live(chat, shown["text"] + "".join(written))
                 except Exception:
                     pass
+            if kind == "tool_call" and written:
+                shown["text"] += "".join(written)
+                written.clear()
+                so_far["n"] = len(shown["text"])
             if kind == "assistant":
-                parts.append(kw.get("content") or "")
+                content = kw.get("content") or ""
+                parts.append(content)
+                # Agent brains end with the whole turn's words, those before the steps too.
+                before = shown["text"][shown["mark"]:]
+                if before.strip() and " ".join(content.split()).startswith(" ".join(before.split())):
+                    shown["text"] = shown["text"][:shown["mark"]]
+                shown["text"] += content
+                shown["mark"] = len(shown["text"])
                 written.clear()
             elif kind == "error":
                 err["cat"], err["msg"] = kw.get("category") or "error", str(kw.get("message", ""))
@@ -577,7 +592,7 @@ class Hub:
             if kind == "assistant_chunk" and kw.get("content"):
                 so_far["n"] += len(kw["content"])
             elif kind == "assistant":
-                so_far["n"] = len("".join(parts))          # parts already has this one
+                so_far["n"] = len(shown["text"])          # shown already has this one
             if kind == "auto_review" and kw.get("words"):
                 steps_kept.append({"kind": "auto_review", "tool": kw.get("tool") or "", "verdict": kw.get("verdict") or "",
                                    "words": kw["words"], "pos": so_far["n"], "_done": True})
@@ -643,13 +658,16 @@ class Hub:
             err["cat"], err["msg"] = info.category, info.hint
         # A turn that ended on a step after its words (a goodbye, then end_session) has them only as
         # written, never as a final message: those words are the reply, not "couldn't get a response".
-        said = "".join(parts).strip() or "".join(written).strip()
+        said = "".join(parts).strip() or (shown["text"] + "".join(written)).strip()
         reply = headless.bridge_reply_or_reason(said, err["cat"], err["msg"])
         if tools_used and not self.a.can_edit and not steps:
             foot = bridge_status.footer(tools_used)
             if foot:
                 reply = (reply + "\n\n" + foot).strip()
         final = redact_secrets_only(reply or "(no output)")[0]
+        # Kept with the words between its steps, so the chat reopened anywhere reads in order.
+        whole = (shown["text"] + "".join(written)).strip()
+        kept = redact_secrets_only(whole)[0] if said and len(whole) > len(said) else final
         stats = {k: v for k, v in stats.items() if v is not None}
         _TURN.ctx = dict(_TURN.ctx or {}, stats=stats, context=context)   # the finished reply carries them
         if err["cat"] and not said:
@@ -681,7 +699,7 @@ class Hub:
              **({"displayContent": run.get("shown") or "", "attachments": attachments(run["files"])}
                 if run.get("files") else {})},
             *steered,
-            {"role": "assistant", "content": "" if failed else final, "via": self.a.name, "at": now,
+            {"role": "assistant", "content": "" if failed else kept, "via": self.a.name, "at": now,
              **({"events": events} if events else {}),
              **({"stats": stats} if stats else {}), **({"context": context} if context else {})}])
         if not failed:
