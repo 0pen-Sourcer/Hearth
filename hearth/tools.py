@@ -9284,9 +9284,12 @@ def sends_out(name: str, args=None) -> str:
 # approval mode, standing yeses, MCP servers' commands, plugins and connectors
 # (code that is run), reminders' actions and the persona's standing rules. A
 # file edit that lands on one changes what the switch in the chat bar means.
+# Also the state Inglen trusts as its own record: the undo journal (an Undo puts
+# back or removes whatever path it names, anywhere), the pause set when the
+# person takes the mouse back, and where a terminal sends its turns.
 _CONTROL_FILES = {"settings.json", "permissions.json", "mcp.json", "brain_keys.json", "reminders.json",
-                  "rules.md", "soul.md", "profile.md"}
-_CONTROL_DIRS = {"plugins", "connectors"}
+                  "rules.md", "soul.md", "profile.md", "takeover.json", "window.json"}
+_CONTROL_DIRS = {"plugins", "connectors", ".undo"}
 _WRITE_TOOLS = {"write_file": ("path",), "edit_file": ("path",), "create_directory": ("path",),
                 "delete_path": ("path",), "move_path": ("source", "destination"),
                 "extract_archive_file": ("output_name",)}

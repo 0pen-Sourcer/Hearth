@@ -61,6 +61,26 @@ _LOCAL_HOSTS = {"localhost", "127.0.0.1", ".", "?", "wsl$", "wsl.localhost"}
 _TYPES_TEXT = {"desktop_type": "text", "computer_type": "text", "browse_type": "text"}
 # open_app takes a name, a path or an address.
 _NAME_ARGS = {"open_app": "name"}
+# A host named without a scheme. curl and PowerShell's web cmdlets take one as http, a
+# browser or the address bar does the same, and a name that is only looked up (nslookup,
+# ping) carries its labels to whoever answers for that domain.
+_BARE_HOST = re.compile(r"""(?<![\w@./\\:%$-])((?:[a-z0-9][a-z0-9-]{0,62}\.)+[a-z][a-z0-9-]{1,62}\.?"""
+                        r"""(?::\d{1,5})?(?:[/?#][^\s'"`<>()\[\]{}]*)?)""", re.I)
+_NET_WORDS = re.compile(r"""(?<![\w.-])(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|start-bitstransfer|"""
+                        r"""bitsadmin|certutil|nslookup|ping|resolve-dnsname|test-netconnection|tnc|tracert|"""
+                        r"""pathping|dig|ftp|tftp|telnet|ssh|scp|sftp|ncat|nc|start|start-process|msedge|chrome|"""
+                        r"""firefox|iexplore|brave|opera|explorer)(?:\.exe)?(?![\w-])""", re.I)
+
+
+def _bare_hosts(text: str, every: bool) -> List[str]:
+    """Hosts named without a scheme in text, as http addresses. With every unset, only those
+    that clearly are addresses (a path, a query or a port after the host, or www.)."""
+    out = []
+    for m in _BARE_HOST.finditer(text or ""):
+        tok = m.group(1)
+        if every or re.match(r"(?i)www\.", tok) or re.search(r"[/?#]|:\d", tok):
+            out.append("http://" + tok)
+    return out
 
 
 def tool_name(name: str) -> str:
@@ -247,13 +267,17 @@ def _urls(name: str, args: Any) -> List[str]:
     if name in URL_ARGS:
         return [str(a.get(k) or "").strip() for k in URL_ARGS[name] if str(a.get(k) or "").strip()]
     if name in _SHELL:
-        return _URL.findall(_flat(a.get("command") or a.get("cmd") or ""))
+        cmd = _flat(a.get("command") or a.get("cmd") or "")
+        bare = _bare_hosts(_URL.sub(" ", cmd), True) if _NET_WORDS.search(cmd) else []
+        return _URL.findall(cmd) + bare
     if name in _NAME_ARGS:
         # open_app hands an address to the default browser.
-        return _URL.findall(str(a.get(_NAME_ARGS[name]) or ""))
+        text = str(a.get(_NAME_ARGS[name]) or "")
+        return _URL.findall(text) + _bare_hosts(_URL.sub(" ", text), bool(_NET_WORDS.search(text)))
     if name in _TYPES_TEXT:
         # Typed into an address bar, an address is a request like any other.
-        return _URL.findall(str(a.get(_TYPES_TEXT[name]) or ""))
+        text = str(a.get(_TYPES_TEXT[name]) or "")
+        return _URL.findall(text) + _bare_hosts(_URL.sub(" ", text), False)
     return []
 
 

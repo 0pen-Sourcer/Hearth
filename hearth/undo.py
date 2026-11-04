@@ -193,6 +193,15 @@ def after(token: Optional[Dict[str, Any]], ok: bool, chat: str = "") -> None:
         _write(d)
 
 
+def _ours(backup: str) -> bool:
+    """A backup copy this module made: one folder down in .undo/files. A journal entry
+    naming any other place is not followed, for removing or for putting back."""
+    try:
+        return bool(backup) and _norm(os.path.dirname(os.path.dirname(backup))) == _norm(os.path.join(_root(), "files"))
+    except (OSError, ValueError):
+        return False
+
+
 def _prune(d: Dict[str, Any]) -> None:
     now = time.time()
     keep, total = [], 0
@@ -200,7 +209,7 @@ def _prune(d: Dict[str, Any]) -> None:
         size = sum(_size(it["backup"]) for it in ch["items"] if it.get("backup") and os.path.exists(it["backup"]))
         if now - ch.get("at", 0) > KEEP_S or total + size > UNDO_MAX:
             for it in ch["items"]:
-                if it.get("backup"):
+                if it.get("backup") and _ours(it["backup"]):
                     shutil.rmtree(os.path.dirname(it["backup"]), ignore_errors=True)
             continue
         total += size
@@ -263,6 +272,8 @@ def undo(change_id: str) -> Dict[str, Any]:
             return {"ok": False, "error": "that change isn't in the list any more"}
         if ch.get("undone"):
             return {"ok": False, "error": "that change was undone already"}
+        if any(it.get("backup") and not _ours(it["backup"]) for it in ch["items"]):
+            return {"ok": False, "error": "that change's saved copy isn't one Inglen kept, so it isn't put back"}
         try:
             for it in reversed(ch["items"]):
                 path = it["path"]
